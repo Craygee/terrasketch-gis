@@ -42,6 +42,28 @@ export interface SavedMap {
   updatedAt: string
 }
 
+export type MapVisibility = 'private' | 'link' | 'public'
+
+export interface MapSnapshot {
+  mapName: string
+  basemap: string
+  layers: GisLayer[]
+  center?: [number, number]
+  zoom?: number
+}
+
+export interface CloudMap {
+  id: string
+  owner_id: string
+  title: string
+  description: string
+  snapshot: MapSnapshot
+  visibility: MapVisibility
+  allow_link_edit: boolean
+  updated_at: string
+  created_at: string
+}
+
 export const DEFAULT_STYLE: LayerStyle = {
   color: '#f97316', opacity: 0.72, width: 2.5, radius: 5,
   pattern: 'solid', labelTemplate: '', labelSize: 12,

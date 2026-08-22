@@ -13,6 +13,7 @@
   "dependencies": {
     "@mapbox/mapbox-gl-draw": "^1.5.0",
     "@mapbox/shp-write": "^0.4.3",
+    "@supabase/supabase-js": "^2.57.4",
     "@turf/turf": "^7.2.0",
     "@types/geojson": "^7946.0.16",
     "fflate": "^0.8.2",

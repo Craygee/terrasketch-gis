@@ -7,6 +7,7 @@ interface GisState {
   setBasemap: (id: string) => void; setMapName: (name: string) => void; setActive: (id?: string) => void
   addLayer: (name: string, data: FeatureCollection, opts?: Partial<GisLayer>) => string
   updateLayer: (id: string, patch: Partial<GisLayer>) => void; removeLayer: (id: string) => void; reorder: (id: string, delta: number) => void
+  hydrate: (mapName: string, basemap: string, layers: GisLayer[]) => void; clear: () => void
 }
 
 export const useGisStore = create<GisState>((set) => ({
@@ -23,4 +24,6 @@ export const useGisStore = create<GisState>((set) => ({
     const layers = [...state.layers]; const from = layers.findIndex((l) => l.id === id); const to = Math.max(0, Math.min(layers.length - 1, from + delta))
     const [item] = layers.splice(from, 1); layers.splice(to, 0, item); return { layers }
   }),
+  hydrate: (mapName, basemap, layers) => set({ mapName, basemap, layers, activeLayerId: layers.at(-1)?.id }),
+  clear: () => set({ mapName: 'Untitled map', basemap: 'streets', layers: [], activeLayerId: undefined }),
 }))
