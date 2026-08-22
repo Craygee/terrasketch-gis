@@ -142,7 +142,7 @@ export function buildLayerSpecs(layer: GisLayer, map: MlMap): LayerSpecification
       id: highlightPointId(layer.id),
       type: "circle",
       source: src,
-      filter: ["all", ["==", "$type", "Point"], ["==", ["get", "__selected"], true]],
+      filter: ["all", ["==", ["geometry-type"], "Point"], ["==", ["get", "__selected"], true]],
       paint: {
         "circle-radius": s.pointSize + 5,
         "circle-color": "#f2b73d",
