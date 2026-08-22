@@ -1,0 +1,43 @@
+{
+  "name": "terra-sketch-gis",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "typecheck": "tsc -b",
+    "lint": "eslint .",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@mapbox/mapbox-gl-draw": "^1.5.0",
+    "@mapbox/shp-write": "^0.4.3",
+    "@turf/turf": "^7.2.0",
+    "@types/geojson": "^7946.0.16",
+    "fflate": "^0.8.2",
+    "lucide-react": "^0.468.0",
+    "maplibre-gl": "^5.0.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "shpjs": "^6.1.0",
+    "togeojson": "^0.16.0",
+    "tokml": "^0.4.0",
+    "zustand": "^5.0.2"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.17.0",
+    "@types/mapbox__mapbox-gl-draw": "^1.4.9",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^4.3.4",
+    "eslint": "^9.17.0",
+    "eslint-plugin-react-hooks": "^5.1.0",
+    "eslint-plugin-react-refresh": "^0.4.16",
+    "globals": "^15.14.0",
+    "typescript": "~5.7.2",
+    "typescript-eslint": "^8.18.2",
+    "vite": "^6.0.5",
+    "vitest": "^2.1.8"
+  }
+}
