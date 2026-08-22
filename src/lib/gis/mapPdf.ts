@@ -50,8 +50,11 @@ export async function exportMapPdf(
   for (const layer of layers.filter((item) => item.visible).slice(0, 22)) {
     ctx.fillStyle = layer.style.fillColor;
     ctx.strokeStyle = layer.style.strokeColor;
+    ctx.globalAlpha = layer.style.fillOpacity;
     ctx.fillRect(legendX, y - 10, 13, 13);
+    ctx.globalAlpha = layer.style.strokeOpacity;
     ctx.strokeRect(legendX, y - 10, 13, 13);
+    ctx.globalAlpha = 1;
     ctx.fillStyle = "#27332b";
     ctx.fillText(ellipsize(layer.name, 24), legendX + 21, y);
     y += 22;

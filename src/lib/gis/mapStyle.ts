@@ -93,7 +93,7 @@ export function buildLayerSpecs(layer: GisLayer, map: MlMap): LayerSpecification
     s.strokePattern === "dashed" ? [3, 2] : s.strokePattern === "dotted" ? [0.2, 1.6] : undefined;
 
   const fillPaint: Record<string, unknown> = patternId
-    ? { "fill-pattern": patternId, "fill-opacity": Math.min(1, s.fillOpacity + 0.35) }
+    ? { "fill-pattern": patternId, "fill-opacity": s.fillOpacity }
     : { "fill-color": s.fillColor, "fill-opacity": s.fillOpacity };
 
   const specs: LayerSpecification[] = [

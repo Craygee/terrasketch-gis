@@ -456,8 +456,10 @@ function LayerStyleSwatch({ layer }: { layer: GisLayer }) {
   const fillPattern = layer.style.fillPattern as FillPattern;
   const strokePattern = (layer.style.strokePattern ?? "solid") as StrokePattern;
   const fill = layer.style.fillColor;
-  const backgroundImage =
-    fillPattern === "diagonal"
+  const hasFill = layer.style.fillOpacity > 0;
+  const backgroundImage = !hasFill
+    ? undefined
+    : fillPattern === "diagonal"
       ? `repeating-linear-gradient(135deg, transparent 0 3px, ${fill} 3px 5px)`
       : fillPattern === "horizontal"
         ? `repeating-linear-gradient(0deg, transparent 0 3px, ${fill} 3px 5px)`
@@ -471,16 +473,16 @@ function LayerStyleSwatch({ layer }: { layer: GisLayer }) {
   return (
     <span
       className="size-5 shrink-0 rounded bg-card"
-      aria-label={`${fillPattern} fill with ${strokePattern} stroke`}
-      title={`${fillPattern} fill · ${strokePattern} stroke`}
+      aria-label={`${hasFill ? fillPattern : "transparent"} fill with ${strokePattern} stroke`}
+      title={`${hasFill ? fillPattern : "transparent"} fill · ${strokePattern} stroke`}
       style={{
-        backgroundColor: fillPattern === "solid" ? fill : `${fill}33`,
+        backgroundColor: !hasFill ? "transparent" : fillPattern === "solid" ? fill : `${fill}33`,
         backgroundImage,
         backgroundSize: fillPattern === "dotted" ? "6px 6px" : undefined,
         borderColor: layer.style.strokeColor,
         borderWidth: Math.max(1, Math.min(3, layer.style.strokeWidth)),
         borderStyle: strokePattern,
-        opacity: Math.max(0.45, layer.style.fillOpacity + 0.35),
+        opacity: hasFill ? Math.max(0.45, layer.style.fillOpacity + 0.35) : 1,
       }}
     />
   );

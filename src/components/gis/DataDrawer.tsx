@@ -19,6 +19,12 @@ import { useWorkbench } from "@/lib/gis/store";
 import { useMapRef } from "@/lib/gis/mapRef";
 import { cn } from "@/lib/utils";
 
+const catalogLayerStyle = (entry: CatalogEntry) => {
+  if (entry.id === "tx-parcels") return { fillOpacity: 0, strokeWidth: 1.5 };
+  if (entry.geometry === "line") return { fillOpacity: 0, strokeWidth: 2.5 };
+  return {};
+};
+
 export function DataDrawer() {
   const { drawerOpen, setDrawerOpen, map, pendingCatalogQuery } = useMapRef();
   const wb = useWorkbench();
@@ -83,7 +89,7 @@ export function DataDrawer() {
         data: { type: "FeatureCollection", features: [] },
         groupId: "public",
         source,
-        style: entry.geometry === "line" ? { fillOpacity: 0, strokeWidth: 2.5 } : {},
+        style: catalogLayerStyle(entry),
       });
       toast.success(`${entry.name} added`, {
         description: `It will load automatically when you reach zoom ${entry.minZoom} or closer.`,
@@ -105,7 +111,7 @@ export function DataDrawer() {
           data,
           groupId: "public",
           source,
-          style: entry.geometry === "line" ? { fillOpacity: 0, strokeWidth: 2.5 } : {},
+          style: catalogLayerStyle(entry),
         });
         toast.warning(`${entry.name} added with no records in this view`, {
           description: "Pan or zoom to an area with coverage and it will retry automatically.",
@@ -118,7 +124,7 @@ export function DataDrawer() {
         data,
         groupId: "public",
         source: { ...source, lastRefreshedAt: Date.now() },
-        style: entry.geometry === "line" ? { fillOpacity: 0, strokeWidth: 2.5 } : {},
+        style: catalogLayerStyle(entry),
       });
       toast.success(`${entry.name} added`, {
         description: `${data.features.length} features from ${entry.agency}`,
@@ -131,7 +137,7 @@ export function DataDrawer() {
           data: { type: "FeatureCollection", features: [] },
           groupId: "public",
           source,
-          style: entry.geometry === "line" ? { fillOpacity: 0, strokeWidth: 2.5 } : {},
+          style: catalogLayerStyle(entry),
         });
         toast.warning(`${entry.name} was added and will retry`, {
           description:

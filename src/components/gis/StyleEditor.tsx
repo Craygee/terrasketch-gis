@@ -73,15 +73,31 @@ export function StyleEditor({ layer }: { layer: GisLayer }) {
       </Field>
 
       <Field label={`Fill opacity ${Math.round(s.fillOpacity * 100)}%`}>
-        <input
-          type="range"
-          min={0}
-          max={1}
-          step={0.05}
-          value={s.fillOpacity}
-          onChange={(e) => wb.updateStyle(layer.id, { fillOpacity: Number(e.target.value) })}
-          className="w-full accent-primary"
-        />
+        <div className="flex items-center gap-2">
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.05}
+            value={s.fillOpacity}
+            onChange={(e) => wb.updateStyle(layer.id, { fillOpacity: Number(e.target.value) })}
+            className="min-w-0 flex-1 accent-primary"
+          />
+          <button
+            onClick={() =>
+              wb.updateStyle(layer.id, { fillOpacity: s.fillOpacity === 0 ? 0.35 : 0 })
+            }
+            aria-pressed={s.fillOpacity === 0}
+            className={cn(
+              "shrink-0 rounded-lg border px-2 py-1 text-[11px] font-medium transition-colors",
+              s.fillOpacity === 0
+                ? "border-primary bg-primary text-primary-foreground"
+                : "border-border bg-card hover:bg-accent",
+            )}
+          >
+            No fill
+          </button>
+        </div>
       </Field>
 
       <Field label="Fill pattern">
