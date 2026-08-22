@@ -48,7 +48,6 @@ export function MapCanvas() {
   const [draft, setDraft] = useState<Position[]>([]);
   const [ready, setReady] = useState(false);
   const [styleRevision, setStyleRevision] = useState(0);
-  const styleReadyRef = useRef(false);
   const styledBasemapRef = useRef(wb.basemapId);
 
   const drawModeRef = useRef(wb.drawMode);
@@ -75,12 +74,10 @@ export function MapCanvas() {
     mapObj.current = map;
     setMap(map);
     const onStyleLoad = () => {
-      styleReadyRef.current = true;
       setStyleRevision((version) => version + 1);
     };
     map.on("style.load", onStyleLoad);
     map.on("load", () => {
-      styleReadyRef.current = true;
       setReady(true);
       setStyleRevision((version) => version + 1);
       map.resize();
@@ -106,7 +103,6 @@ export function MapCanvas() {
     const map = mapObj.current;
     if (!map || !ready || styledBasemapRef.current === wb.basemapId) return;
     styledBasemapRef.current = wb.basemapId;
-    styleReadyRef.current = false;
     map.setStyle(getBasemap(wb.basemapId).style, { diff: false });
   }, [wb.basemapId, ready]);
 
@@ -134,37 +130,60 @@ export function MapCanvas() {
 
   useEffect(() => {
     const map = mapObj.current;
-    if (!map || !ready || !styleReadyRef.current) return;
+    if (!map || !ready) return;
 
-    const keep = new Set(prepared.map((p) => sourceId(p.layer.id)));
-    for (const spec of map.getStyle().layers ?? []) {
-      const sid = (spec as { source?: string }).source;
-      if (sid && sid.startsWith("src-") && !keep.has(sid)) map.removeLayer(spec.id);
-    }
-    for (const sid of Object.keys(map.getStyle().sources ?? {})) {
-      if (sid.startsWith("src-") && !keep.has(sid)) map.removeSource(sid);
-    }
+    let cancelled = false;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    let attempts = 0;
 
-    for (const { layer, fc } of prepared) {
-      const sid = sourceId(layer.id);
-      const existing = map.getSource(sid) as GeoJSONSource | undefined;
-      if (existing) existing.setData(fc);
-      else map.addSource(sid, { type: "geojson", data: fc });
+    const sync = () => {
+      if (cancelled) return;
+      try {
+        const keep = new Set(prepared.map((p) => sourceId(p.layer.id)));
+        for (const spec of map.getStyle().layers ?? []) {
+          const sid = (spec as { source?: string }).source;
+          if (sid && sid.startsWith("src-") && !keep.has(sid)) map.removeLayer(spec.id);
+        }
+        for (const sid of Object.keys(map.getStyle().sources ?? {})) {
+          if (sid.startsWith("src-") && !keep.has(sid)) map.removeSource(sid);
+        }
 
-      for (const id of allLayerIds(layer.id)) if (map.getLayer(id)) map.removeLayer(id);
-      for (const spec of buildLayerSpecs(layer, map)) {
-        map.addLayer(spec);
-        map.setLayoutProperty(spec.id, "visibility", layer.visible ? "visible" : "none");
+        for (const { layer, fc } of prepared) {
+          const sid = sourceId(layer.id);
+          const existing = map.getSource(sid) as GeoJSONSource | undefined;
+          if (existing) existing.setData(fc);
+          else map.addSource(sid, { type: "geojson", data: fc });
+
+          for (const id of allLayerIds(layer.id)) if (map.getLayer(id)) map.removeLayer(id);
+          for (const spec of buildLayerSpecs(layer, map)) {
+            map.addLayer(spec);
+            map.setLayoutProperty(spec.id, "visibility", layer.visible ? "visible" : "none");
+          }
+        }
+
+        // Reorder: first item in wb.layers is topmost.
+        for (const { layer } of [...prepared].reverse()) {
+          for (const id of [...allLayerIds(layer.id)].reverse()) {
+            if (map.getLayer(id)) map.moveLayer(id);
+          }
+        }
+        ensureDraftLayers(map);
+        map.triggerRepaint();
+      } catch (error) {
+        attempts += 1;
+        if (attempts < 20) {
+          retryTimer = setTimeout(sync, Math.min(500, attempts * 50));
+          return;
+        }
+        console.error("[map] could not synchronize overlay layers", error);
       }
-    }
+    };
 
-    // Reorder: first item in wb.layers is topmost.
-    for (const { layer } of [...prepared].reverse()) {
-      for (const id of [...allLayerIds(layer.id)].reverse()) {
-        if (map.getLayer(id)) map.moveLayer(id);
-      }
-    }
-    ensureDraftLayers(map);
+    sync();
+    return () => {
+      cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
+    };
   }, [prepared, ready, styleRevision]);
 
   /* ---------------- draft (sketch in progress) ---------------- */
@@ -192,9 +211,14 @@ export function MapCanvas() {
 
   useEffect(() => {
     const map = mapObj.current;
-    if (!map || !ready || !styleReadyRef.current) return;
-    ensureDraftLayers(map);
-    (map.getSource("draft") as GeoJSONSource | undefined)?.setData(draftFc);
+    if (!map || !ready) return;
+    try {
+      ensureDraftLayers(map);
+      (map.getSource("draft") as GeoJSONSource | undefined)?.setData(draftFc);
+      map.triggerRepaint();
+    } catch {
+      // The layer synchronization pass retries while a replacement style initializes.
+    }
   }, [draftFc, ready, styleRevision]);
 
   /* ---------------- interactions ---------------- */

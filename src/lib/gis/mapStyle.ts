@@ -79,20 +79,14 @@ export function buildLayerSpecs(layer: GisLayer, map: MlMap): LayerSpecification
       id: fillId(layer.id),
       type: "fill",
       source: src,
-      filter: ["match", ["geometry-type"], ["Polygon", "MultiPolygon"], true, false],
+      filter: ["==", "$type", "Polygon"],
       paint: fillPaint as never,
     },
     {
       id: lineId(layer.id),
       type: "line",
       source: src,
-      filter: [
-        "match",
-        ["geometry-type"],
-        ["LineString", "MultiLineString", "Polygon", "MultiPolygon"],
-        true,
-        false,
-      ],
+      filter: ["in", "$type", "LineString", "Polygon"],
       layout: { "line-cap": "round", "line-join": "round" },
       paint: {
         "line-color": s.strokeColor,
@@ -104,7 +98,7 @@ export function buildLayerSpecs(layer: GisLayer, map: MlMap): LayerSpecification
       id: pointId(layer.id),
       type: "circle",
       source: src,
-      filter: ["match", ["geometry-type"], ["Point", "MultiPoint"], true, false],
+      filter: ["==", "$type", "Point"],
       paint: {
         "circle-radius": s.pointSize,
         "circle-color": s.fillColor,
