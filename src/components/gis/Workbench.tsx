@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Toaster } from "@/components/ui/sonner";
-import { WorkbenchProvider } from "@/lib/gis/store";
+import { WorkbenchProvider, useWorkbench } from "@/lib/gis/store";
 import { MapRefProvider } from "@/lib/gis/mapRef";
 import { MapCanvas } from "./MapCanvas";
 import { LayerPanel } from "./LayerPanel";
@@ -13,25 +13,36 @@ import { DataDrawer } from "./DataDrawer";
 import { cn } from "@/lib/utils";
 import { RemoteLayerManager } from "./RemoteLayerManager";
 import { SelectionToolbar } from "./SelectionToolbar";
+import { AuthGate } from "@/lib/auth";
 
 export default function Workbench() {
   return (
-    <WorkbenchProvider>
-      <MapRefProvider>
-        <WorkbenchShell />
-        <RemoteLayerManager />
-        <Toaster />
-      </MapRefProvider>
-    </WorkbenchProvider>
+    <AuthGate>
+      <WorkbenchProvider>
+        <MapRefProvider>
+          <WorkbenchShell />
+          <RemoteLayerManager />
+          <Toaster />
+        </MapRefProvider>
+      </WorkbenchProvider>
+    </AuthGate>
   );
 }
 
 function WorkbenchShell() {
   const [panelOpen, setPanelOpen] = useState(true);
+  const wb = useWorkbench();
 
   useEffect(() => {
     if (window.innerWidth < 768) setPanelOpen(false);
   }, []);
+
+  if (!wb.projectReady)
+    return (
+      <div className="flex h-screen items-center justify-center bg-background text-sm text-muted-foreground">
+        Opening your latest project…
+      </div>
+    );
 
   return (
     <div className="flex h-screen w-full flex-col overflow-hidden bg-background">

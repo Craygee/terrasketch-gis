@@ -10,7 +10,7 @@ export const Route = createFileRoute("/mobile")({
       {
         name: "description",
         content:
-          "A clean field map for viewing public data, collecting GPS features, editing layers and exporting PDF maps.",
+          "A clean field map for signed-in projects, public data, GPS feature collection, layer editing and map or GIS data exports.",
       },
     ],
   }),

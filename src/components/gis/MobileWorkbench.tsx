@@ -1,10 +1,8 @@
 import { useState } from "react";
-import { Database, FileDown, Layers3, Mountain, PencilRuler, X } from "lucide-react";
-import { toast } from "sonner";
+import { Database, FileDown, FolderOpen, Layers3, Mountain, PencilRuler, X } from "lucide-react";
 import { Toaster } from "@/components/ui/sonner";
 import { WorkbenchProvider, useWorkbench } from "@/lib/gis/store";
 import { MapRefProvider, useMapRef } from "@/lib/gis/mapRef";
-import { exportMapPdf, type MapPaper } from "@/lib/gis/mapPdf";
 import { MapCanvas } from "./MapCanvas";
 import { LayerPanel } from "./LayerPanel";
 import { DrawToolbar } from "./DrawToolbar";
@@ -14,37 +12,38 @@ import { SearchBox } from "./SearchBox";
 import { BasemapControl } from "./BasemapControl";
 import { RemoteLayerManager } from "./RemoteLayerManager";
 import { SelectionToolbar } from "./SelectionToolbar";
+import { ExportPanel } from "./ExportMenu";
+import { ProjectMenu } from "./ProjectMenu";
+import { AuthGate } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 
 export default function MobileWorkbench() {
   return (
-    <WorkbenchProvider>
-      <MapRefProvider>
-        <MobileShell />
-        <RemoteLayerManager />
-        <Toaster />
-      </MapRefProvider>
-    </WorkbenchProvider>
+    <AuthGate>
+      <WorkbenchProvider>
+        <MapRefProvider>
+          <MobileShell />
+          <RemoteLayerManager />
+          <Toaster />
+        </MapRefProvider>
+      </WorkbenchProvider>
+    </AuthGate>
   );
 }
 
-type Sheet = "layers" | "draw" | "pdf" | null;
+type Sheet = "layers" | "draw" | "export" | "projects" | null;
 
 function MobileShell() {
   const [sheet, setSheet] = useState<Sheet>(null);
   const wb = useWorkbench();
-  const { map, setDrawerOpen, tableOpen } = useMapRef();
-  const exportPdf = (paper: MapPaper) => {
-    if (!map) {
-      toast.error("The map is still loading");
-      return;
-    }
-    void exportMapPdf(map, wb.projectName, wb.layers, paper)
-      .then(() => toast.success(`${paper === "a4" ? "A4" : "Letter"} PDF map exported`))
-      .catch((error: unknown) =>
-        toast.error(error instanceof Error ? error.message : "PDF export failed"),
-      );
-  };
+  const { setDrawerOpen, tableOpen } = useMapRef();
+
+  if (!wb.projectReady)
+    return (
+      <div className="flex h-[100dvh] items-center justify-center bg-background text-sm text-muted-foreground">
+        Opening your latest project…
+      </div>
+    );
 
   return (
     <div className="relative h-[100dvh] w-full overflow-hidden bg-background">
@@ -66,6 +65,13 @@ function MobileShell() {
         <div className="pointer-events-auto ml-auto">
           <SearchBox />
         </div>
+        <button
+          onClick={() => setSheet(sheet === "projects" ? null : "projects")}
+          aria-label="Projects and account"
+          className="float-surface pointer-events-auto rounded-2xl p-3"
+        >
+          <FolderOpen className="size-4" />
+        </button>
       </header>
 
       <div className="pointer-events-auto absolute bottom-20 right-3 z-20">
@@ -80,7 +86,9 @@ function MobileShell() {
                 ? "Layers"
                 : sheet === "draw"
                   ? "Draw and measure"
-                  : "Export PDF map"}
+                  : sheet === "projects"
+                    ? "Projects and account"
+                    : "Export"}
             </h2>
             <button
               onClick={() => setSheet(null)}
@@ -98,25 +106,10 @@ function MobileShell() {
             <div className="overflow-x-auto p-3">
               <DrawToolbar />
             </div>
+          ) : sheet === "projects" ? (
+            <ProjectMenu onClose={() => setSheet(null)} />
           ) : (
-            <div className="grid grid-cols-2 gap-2 p-4">
-              <button
-                onClick={() => exportPdf("letter")}
-                className="rounded-2xl bg-primary px-3 py-4 text-sm font-semibold text-primary-foreground"
-              >
-                Letter · landscape
-              </button>
-              <button
-                onClick={() => exportPdf("a4")}
-                className="rounded-2xl bg-secondary px-3 py-4 text-sm font-semibold"
-              >
-                A4 · landscape
-              </button>
-              <p className="col-span-2 text-center text-[10px] text-muted-foreground">
-                Includes the current map, title, visible-layer legend, timestamp and planning
-                disclaimer.
-              </p>
-            </div>
+            <ExportPanel onDone={() => setSheet(null)} />
           )}
         </section>
       )}
@@ -150,10 +143,10 @@ function MobileShell() {
           onClick={() => setSheet(sheet === "draw" ? null : "draw")}
         />
         <NavButton
-          active={sheet === "pdf"}
+          active={sheet === "export"}
           icon={<FileDown className="size-5" />}
-          label="PDF"
-          onClick={() => setSheet(sheet === "pdf" ? null : "pdf")}
+          label="Export"
+          onClick={() => setSheet(sheet === "export" ? null : "export")}
         />
       </nav>
     </div>

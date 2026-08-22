@@ -1,4 +1,13 @@
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import type { FeatureCollection } from "geojson";
 import {
   defaultStyle,
@@ -9,7 +18,14 @@ import {
   type ProjectState,
   type AreaUnitsPref,
 } from "./types";
-import { localProjectStore } from "./project";
+import {
+  workspaceProjectStore,
+  type ProjectSummary,
+  type ProjectVersion,
+  type SaveReason,
+  type StoredProject,
+} from "./project";
+import { useAuth } from "@/lib/auth";
 
 export type DrawMode =
   "none" | "select-box" | "polygon" | "line" | "point" | "measure-area" | "measure-line";
@@ -20,7 +36,13 @@ export interface SelectedFeature {
 }
 
 interface WorkbenchState {
+  projectId: string;
+  projectReady: boolean;
   projectName: string;
+  projects: ProjectSummary[];
+  saveHistory: ProjectVersion[];
+  autosave: boolean;
+  lastSavedAt: number | null;
   groups: LayerGroup[];
   layers: GisLayer[];
   basemapId: string;
@@ -37,7 +59,13 @@ interface WorkbenchState {
 const uid = () => Math.random().toString(36).slice(2, 10);
 
 const initialState = (): WorkbenchState => ({
+  projectId: "",
+  projectReady: false,
   projectName: "Untitled project",
+  projects: [],
+  saveHistory: [],
+  autosave: true,
+  lastSavedAt: null,
   groups: [
     { id: "working", name: "Working layers", collapsed: false },
     { id: "sketch", name: "My sketches", collapsed: false },
@@ -54,6 +82,60 @@ const initialState = (): WorkbenchState => ({
   drawMode: "none",
   snapEnabled: true,
   selectedStates: ["TX"],
+});
+
+const blankProjectState = (name: string): ProjectState => ({
+  version: 1,
+  name,
+  groups: [
+    { id: "working", name: "Working layers", collapsed: false },
+    { id: "sketch", name: "My sketches", collapsed: false },
+    { id: "imports", name: "Imported files", collapsed: false },
+    { id: "public", name: "Public data", collapsed: false },
+  ],
+  layers: [],
+  basemapId: "street",
+  units: { area: "acres", length: "miles" },
+  selectedStates: ["TX"],
+});
+
+const normalizedProject = (project: StoredProject, projects: ProjectSummary[]) => {
+  const stored = project.state;
+  const groups = stored.groups.some((group) => group.id === "working")
+    ? stored.groups
+    : [{ id: "working", name: "Working layers", collapsed: false }, ...stored.groups];
+  return {
+    projectId: project.id,
+    projectReady: true,
+    projectName: stored.name,
+    projects,
+    saveHistory: project.versions ?? [],
+    autosave: project.autosave,
+    lastSavedAt: project.updatedAt,
+    groups,
+    layers: stored.layers.map((layer, index) => ({
+      ...layer,
+      style: { ...defaultStyle(index), ...layer.style },
+    })),
+    basemapId: stored.basemapId,
+    units: stored.units,
+    activeLayerId: null,
+    selectedLayerIds: [],
+    selectedFeature: null,
+    selectedFeatures: [],
+    drawMode: "none" as DrawMode,
+    selectedStates: stored.selectedStates?.length ? stored.selectedStates : ["TX"],
+  };
+};
+
+const stateToProject = (state: WorkbenchState): ProjectState => ({
+  version: 1,
+  name: state.projectName,
+  groups: state.groups,
+  layers: state.layers,
+  basemapId: state.basemapId,
+  units: state.units,
+  selectedStates: state.selectedStates,
 });
 
 export interface WorkbenchApi extends WorkbenchState {
@@ -90,8 +172,12 @@ export interface WorkbenchApi extends WorkbenchState {
     index: number,
     properties: Record<string, unknown>,
   ) => void;
-  saveProject: () => Promise<void>;
-  loadProject: () => Promise<boolean>;
+  saveProject: (reason?: SaveReason) => Promise<void>;
+  createProject: (name: string) => Promise<void>;
+  openProject: (id: string) => Promise<void>;
+  deleteProject: (id: string) => Promise<void>;
+  restoreVersion: (versionId: string) => Promise<void>;
+  setAutosave: (enabled: boolean) => Promise<void>;
   toProjectState: () => ProjectState;
   layersInGroup: (groupId: string) => GisLayer[];
   activeLayer: GisLayer | null;
@@ -100,7 +186,13 @@ export interface WorkbenchApi extends WorkbenchState {
 const WorkbenchContext = createContext<WorkbenchApi | null>(null);
 
 export function WorkbenchProvider({ children }: { children: ReactNode }) {
+  const auth = useAuth();
   const [state, setState] = useState<WorkbenchState>(initialState);
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const autosaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const skipNextAutosave = useRef(true);
+  const bootStarted = useRef(false);
 
   const patch = useCallback((p: Partial<WorkbenchState>) => setState((s) => ({ ...s, ...p })), []);
 
@@ -276,46 +368,164 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
   );
 
   const toProjectState = useCallback<WorkbenchApi["toProjectState"]>(
-    () => ({
-      version: 1,
-      name: state.projectName,
-      groups: state.groups,
-      layers: state.layers,
-      basemapId: state.basemapId,
-      units: state.units,
-      selectedStates: state.selectedStates,
-    }),
+    () => stateToProject(state),
     [state],
   );
 
-  const saveProject = useCallback(async () => {
-    await localProjectStore.save(toProjectState());
-  }, [toProjectState]);
+  const saveProject = useCallback<WorkbenchApi["saveProject"]>(
+    async (reason = "manual") => {
+      const userId = auth.user?.id;
+      const current = stateRef.current;
+      if (!userId || !current.projectId || !current.projectReady) return;
+      const project = await workspaceProjectStore.save(
+        userId,
+        current.projectId,
+        stateToProject(current),
+        reason,
+      );
+      const projects = await workspaceProjectStore.list(userId);
+      setState((value) => ({
+        ...value,
+        projects,
+        saveHistory: project.versions,
+        lastSavedAt: project.updatedAt,
+      }));
+    },
+    [auth.user?.id],
+  );
 
-  const loadProject = useCallback(async () => {
-    const loaded = await localProjectStore.load();
-    if (!loaded) return false;
-    const groups = loaded.groups.some((group) => group.id === "working")
-      ? loaded.groups
-      : [{ id: "working", name: "Working layers", collapsed: false }, ...loaded.groups];
-    setState((s) => ({
-      ...s,
-      projectName: loaded.name,
-      groups,
-      layers: loaded.layers.map((layer, index) => ({
-        ...layer,
-        style: { ...defaultStyle(index), ...layer.style },
-      })),
-      basemapId: loaded.basemapId,
-      units: loaded.units,
-      activeLayerId: null,
-      selectedLayerIds: [],
-      selectedFeature: null,
-      selectedFeatures: [],
-      selectedStates: loaded.selectedStates?.length ? loaded.selectedStates : ["TX"],
-    }));
-    return true;
-  }, []);
+  const createProject = useCallback<WorkbenchApi["createProject"]>(
+    async (rawName) => {
+      const userId = auth.user?.id;
+      if (!userId) return;
+      const name = rawName.trim() || "Untitled project";
+      const project = await workspaceProjectStore.create(userId, name, blankProjectState(name));
+      const projects = await workspaceProjectStore.list(userId);
+      skipNextAutosave.current = true;
+      setState((current) => ({ ...current, ...normalizedProject(project, projects) }));
+    },
+    [auth.user?.id],
+  );
+
+  const openProject = useCallback<WorkbenchApi["openProject"]>(
+    async (id) => {
+      const userId = auth.user?.id;
+      if (!userId || id === stateRef.current.projectId) return;
+      const project = await workspaceProjectStore.load(userId, id);
+      if (!project) throw new Error("Project was not found");
+      const projects = await workspaceProjectStore.list(userId);
+      skipNextAutosave.current = true;
+      setState((current) => ({ ...current, ...normalizedProject(project, projects) }));
+    },
+    [auth.user?.id],
+  );
+
+  const deleteProject = useCallback<WorkbenchApi["deleteProject"]>(
+    async (id) => {
+      const userId = auth.user?.id;
+      if (!userId) return;
+      await workspaceProjectStore.remove(userId, id);
+      let projects = await workspaceProjectStore.list(userId);
+      if (id !== stateRef.current.projectId) {
+        setState((current) => ({ ...current, projects }));
+        return;
+      }
+      const next = projects[0];
+      if (next) {
+        const project = await workspaceProjectStore.load(userId, next.id);
+        if (project)
+          setState((current) => ({ ...current, ...normalizedProject(project, projects) }));
+      } else {
+        const project = await workspaceProjectStore.create(
+          userId,
+          "Untitled project",
+          blankProjectState("Untitled project"),
+        );
+        projects = await workspaceProjectStore.list(userId);
+        setState((current) => ({ ...current, ...normalizedProject(project, projects) }));
+      }
+      skipNextAutosave.current = true;
+    },
+    [auth.user?.id],
+  );
+
+  const restoreVersion = useCallback<WorkbenchApi["restoreVersion"]>(
+    async (versionId) => {
+      const userId = auth.user?.id;
+      const current = stateRef.current;
+      const version = current.saveHistory.find((item) => item.id === versionId);
+      if (!userId || !version) return;
+      const project = await workspaceProjectStore.save(
+        userId,
+        current.projectId,
+        version.state,
+        "restored",
+      );
+      const projects = await workspaceProjectStore.list(userId);
+      skipNextAutosave.current = true;
+      setState((value) => ({ ...value, ...normalizedProject(project, projects) }));
+    },
+    [auth.user?.id],
+  );
+
+  const setAutosave = useCallback<WorkbenchApi["setAutosave"]>(
+    async (enabled) => {
+      const userId = auth.user?.id;
+      const projectId = stateRef.current.projectId;
+      if (!userId || !projectId) return;
+      await workspaceProjectStore.setAutosave(userId, projectId, enabled);
+      setState((current) => ({
+        ...current,
+        autosave: enabled,
+        projects: current.projects.map((project) =>
+          project.id === projectId ? { ...project, autosave: enabled } : project,
+        ),
+      }));
+    },
+    [auth.user?.id],
+  );
+
+  useEffect(() => {
+    const userId = auth.user?.id;
+    if (!userId || bootStarted.current) return;
+    bootStarted.current = true;
+    void (async () => {
+      let project = await workspaceProjectStore.loadLast(userId);
+      if (!project) {
+        const legacy = await workspaceProjectStore.readLegacy();
+        const initial = legacy ?? blankProjectState("Untitled project");
+        project = await workspaceProjectStore.create(userId, initial.name, initial);
+      }
+      const projects = await workspaceProjectStore.list(userId);
+      skipNextAutosave.current = true;
+      setState((current) => ({ ...current, ...normalizedProject(project, projects) }));
+    })();
+  }, [auth.user?.id]);
+
+  useEffect(() => {
+    if (!state.projectReady || !state.autosave || !auth.user) return;
+    if (skipNextAutosave.current) {
+      skipNextAutosave.current = false;
+      return;
+    }
+    if (autosaveTimer.current) clearTimeout(autosaveTimer.current);
+    autosaveTimer.current = setTimeout(() => void saveProject("autosave"), 1_500);
+    return () => {
+      if (autosaveTimer.current) clearTimeout(autosaveTimer.current);
+    };
+  }, [
+    auth.user,
+    saveProject,
+    state.autosave,
+    state.basemapId,
+    state.groups,
+    state.layers,
+    state.projectId,
+    state.projectName,
+    state.projectReady,
+    state.selectedStates,
+    state.units,
+  ]);
 
   const value = useMemo<WorkbenchApi>(
     () => ({
@@ -346,7 +556,11 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       appendFeature,
       updateFeatureProperties,
       saveProject,
-      loadProject,
+      createProject,
+      openProject,
+      deleteProject,
+      restoreVersion,
+      setAutosave,
       toProjectState,
       layersInGroup: (groupId) => state.layers.filter((l) => l.groupId === groupId),
       activeLayer: state.layers.find((l) => l.id === state.activeLayerId) ?? null,
@@ -368,7 +582,11 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       appendFeature,
       updateFeatureProperties,
       saveProject,
-      loadProject,
+      createProject,
+      openProject,
+      deleteProject,
+      restoreVersion,
+      setAutosave,
       toProjectState,
       patch,
     ],

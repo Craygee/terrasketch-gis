@@ -6,7 +6,7 @@ const Workbench = lazy(() => import("@/components/gis/Workbench"));
 
 const title = "TerraSketch GIS — Friendly Maps, Real GIS Power";
 const description =
-  "Draw, measure and map in your browser: import GeoJSON, KML, KMZ, Shapefile, GPX and CSV, stream official public data, style layers and export — no login or API keys.";
+  "Create signed-in GIS projects with autosave and save history: draw, measure, import GIS files, stream public data, style layers and export maps or data.";
 
 export const Route = createFileRoute("/")({
   head: () => ({

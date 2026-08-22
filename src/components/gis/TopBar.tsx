@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   Mountain,
   Save,
@@ -13,9 +13,9 @@ import { toast } from "sonner";
 
 import { useWorkbench } from "@/lib/gis/store";
 import { useMapRef } from "@/lib/gis/mapRef";
-import { downloadProjectFile } from "@/lib/gis/project";
 import { cn } from "@/lib/utils";
-import { exportMapPdf } from "@/lib/gis/mapPdf";
+import { ExportPanel } from "./ExportMenu";
+import { ProjectMenu } from "./ProjectMenu";
 
 export function TopBar({
   onTogglePanel,
@@ -25,21 +25,14 @@ export function TopBar({
   panelOpen: boolean;
 }) {
   const wb = useWorkbench();
-  const { setDrawerOpen, setTableOpen, tableOpen, map } = useMapRef();
-  const [savedAt, setSavedAt] = useState<string | null>(null);
+  const { setDrawerOpen, setTableOpen, tableOpen } = useMapRef();
   const [showAbout, setShowAbout] = useState(false);
-
-  useEffect(() => {
-    void wb.loadProject().then((ok) => {
-      if (ok) toast.success("Your last project was restored");
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const [showProjects, setShowProjects] = useState(false);
+  const [showExport, setShowExport] = useState(false);
 
   const save = async () => {
     await wb.saveProject();
-    setSavedAt(new Date().toLocaleTimeString());
-    toast.success("Project saved on this device");
+    toast.success("Project saved", { description: "A new restore point was added to history." });
   };
 
   return (
@@ -88,24 +81,20 @@ export function TopBar({
         />
         <BarBtn icon={<Save className="size-4" />} label="Save" onClick={() => void save()} />
         <BarBtn
-          icon={<FileDown className="size-4" />}
-          label="PDF"
+          icon={<FolderOpen className="size-4" />}
+          label="Projects"
           onClick={() => {
-            if (!map) {
-              toast.error("The map is still loading");
-              return;
-            }
-            void exportMapPdf(map, wb.projectName, wb.layers, "letter")
-              .then(() => toast.success("PDF map exported"))
-              .catch((error: unknown) =>
-                toast.error(error instanceof Error ? error.message : "PDF export failed"),
-              );
+            setShowProjects((value) => !value);
+            setShowExport(false);
           }}
         />
         <BarBtn
-          icon={<FolderOpen className="size-4" />}
-          label="Backup"
-          onClick={() => downloadProjectFile(wb.toProjectState())}
+          icon={<FileDown className="size-4" />}
+          label="Export"
+          onClick={() => {
+            setShowExport((value) => !value);
+            setShowProjects(false);
+          }}
         />
         <button
           onClick={() => setShowAbout((s) => !s)}
@@ -116,10 +105,22 @@ export function TopBar({
         </button>
       </div>
 
-      {savedAt && (
+      {wb.lastSavedAt && (
         <span className="num absolute -bottom-6 right-4 rounded-full bg-card px-2 py-0.5 text-[10px] text-muted-foreground shadow-panel">
-          saved {savedAt}
+          {wb.autosave ? "autosaved" : "saved"} {new Date(wb.lastSavedAt).toLocaleTimeString()}
         </span>
+      )}
+
+      {showProjects && (
+        <div className="float-surface absolute right-2 top-14 rounded-2xl">
+          <ProjectMenu onClose={() => setShowProjects(false)} />
+        </div>
+      )}
+
+      {showExport && (
+        <div className="float-surface absolute right-2 top-14 w-80 rounded-2xl">
+          <ExportPanel onDone={() => setShowExport(false)} />
+        </div>
       )}
 
       {showAbout && (
@@ -127,7 +128,7 @@ export function TopBar({
           <h2 className="mb-1 text-sm font-semibold">About TerraSketch</h2>
           <p className="text-muted-foreground">
             A friendly browser workbench for maps: bring your own files, stream official public
-            datasets, draw, measure and label — no account, no API keys.
+            datasets, draw, measure, label and organize multiple projects.
           </p>
           <p className="mt-2 font-medium">Legal boundary disclaimer</p>
           <p className="text-muted-foreground">
@@ -136,8 +137,8 @@ export function TopBar({
             Always verify with county records and a licensed surveyor.
           </p>
           <p className="mt-2 text-muted-foreground">
-            Projects save locally in your browser. Cloud sync and shared PostGIS projects are
-            planned.
+            Signed-in projects, autosave and up to 25 restore points are stored on this browser and
+            device. Export a project backup before clearing browser data.
           </p>
         </div>
       )}
