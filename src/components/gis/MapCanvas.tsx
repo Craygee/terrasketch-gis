@@ -697,7 +697,7 @@ export function MapCanvas() {
           <span className="hidden text-muted-foreground sm:inline">
             {cursor ? `${toDms(cursor.lat, true)} ${toDms(cursor.lng, false)}` : ""}
           </span>
-          <span className="text-muted-foreground">z{zoom.toFixed(1)}</span>
+          <span className="text-muted-foreground">Zoom {zoom.toFixed(1)}×</span>
         </div>
       </div>
 

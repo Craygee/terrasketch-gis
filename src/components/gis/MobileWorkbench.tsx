@@ -81,7 +81,7 @@ function MobileShell() {
         </button>
       </header>
 
-      <div className="pointer-events-auto absolute bottom-20 right-3 z-20">
+      <div className="pointer-events-auto absolute bottom-20 right-14 z-20">
         <BasemapControl />
       </div>
 

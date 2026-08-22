@@ -75,7 +75,7 @@ function WorkbenchShell() {
             <DrawToolbar />
           </div>
 
-          <div className="pointer-events-auto absolute bottom-16 right-3 z-20 md:bottom-24">
+          <div className="pointer-events-auto absolute bottom-16 right-14 z-20 md:bottom-24">
             <BasemapControl />
           </div>
 
