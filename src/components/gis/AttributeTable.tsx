@@ -179,7 +179,20 @@ export function AttributeTable() {
                 return (
                   <tr
                     key={index}
-                    onClick={() => wb.setSelectedFeature({ layerId: layer.id, index })}
+                    onClick={(event) => {
+                      const selection = { layerId: layer.id, index };
+                      if (event.shiftKey || event.ctrlKey || event.metaKey) {
+                        wb.setSelectedFeatures(
+                          selected
+                            ? wb.selectedFeatures.filter(
+                                (item) => item.layerId !== layer.id || item.index !== index,
+                              )
+                            : [...wb.selectedFeatures, selection],
+                        );
+                      } else {
+                        wb.setSelectedFeature(selection);
+                      }
+                    }}
                     className={cn(
                       "cursor-pointer border-b border-border/60",
                       selected ? "bg-accent" : "hover:bg-secondary/60",

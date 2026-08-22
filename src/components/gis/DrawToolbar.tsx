@@ -7,6 +7,7 @@ import {
   Move3d,
   Magnet,
   LocateFixed,
+  ScanSearch,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useWorkbench, type DrawMode } from "@/lib/gis/store";
@@ -16,6 +17,11 @@ import { AREA_UNITS, LENGTH_UNITS, type AreaUnit, type LengthUnit } from "@/lib/
 
 const tools: Array<{ mode: DrawMode; label: string; icon: React.ReactNode }> = [
   { mode: "none", label: "Select", icon: <MousePointer2 className="size-4" /> },
+  {
+    mode: "select-box",
+    label: "Select by dragging a box",
+    icon: <ScanSearch className="size-4" />,
+  },
   { mode: "polygon", label: "Draw area", icon: <Hexagon className="size-4" /> },
   { mode: "line", label: "Draw line", icon: <Minus className="size-4" /> },
   { mode: "point", label: "Drop point", icon: <MapPin className="size-4" /> },

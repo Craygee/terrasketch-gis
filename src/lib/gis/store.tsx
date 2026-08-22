@@ -11,7 +11,8 @@ import {
 } from "./types";
 import { localProjectStore } from "./project";
 
-export type DrawMode = "none" | "polygon" | "line" | "point" | "measure-area" | "measure-line";
+export type DrawMode =
+  "none" | "select-box" | "polygon" | "line" | "point" | "measure-area" | "measure-line";
 
 export interface SelectedFeature {
   layerId: string;
@@ -82,6 +83,11 @@ export interface WorkbenchApi extends WorkbenchState {
   setUnits: (units: Partial<AreaUnitsPref>) => void;
   setProjectName: (name: string) => void;
   appendFeature: (layerId: string, feature: FeatureCollection["features"][number]) => void;
+  updateFeatureProperties: (
+    layerId: string,
+    index: number,
+    properties: Record<string, unknown>,
+  ) => void;
   saveProject: () => Promise<void>;
   loadProject: () => Promise<boolean>;
   toProjectState: () => ProjectState;
@@ -220,6 +226,29 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
+  const updateFeatureProperties = useCallback<WorkbenchApi["updateFeatureProperties"]>(
+    (layerId, index, properties) => {
+      setState((s) => ({
+        ...s,
+        layers: s.layers.map((layer) => {
+          if (layer.id !== layerId) return layer;
+          return {
+            ...layer,
+            data: {
+              type: "FeatureCollection",
+              features: layer.data.features.map((feature, featureIndex) =>
+                featureIndex === index
+                  ? { ...feature, properties: { ...(feature.properties ?? {}), ...properties } }
+                  : feature,
+              ),
+            },
+          };
+        }),
+      }));
+    },
+    [],
+  );
+
   const toProjectState = useCallback<WorkbenchApi["toProjectState"]>(
     () => ({
       version: 1,
@@ -282,6 +311,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       setUnits: (units) => setState((s) => ({ ...s, units: { ...s.units, ...units } })),
       setProjectName: (name) => patch({ projectName: name }),
       appendFeature,
+      updateFeatureProperties,
       saveProject,
       loadProject,
       toProjectState,
@@ -302,6 +332,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       toggleGroup,
       toggleLayerSelection,
       appendFeature,
+      updateFeatureProperties,
       saveProject,
       loadProject,
       toProjectState,

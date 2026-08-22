@@ -12,6 +12,20 @@ export function RemoteLayerManager() {
   const activeRequests = useRef(new Map<string, AbortController>());
   layersRef.current = wb.layers;
   updateRef.current = wb.updateLayer;
+  const remoteSignature = wb.layers
+    .filter((layer) => layer.source.kind === "remote")
+    .map((layer) =>
+      layer.source.kind === "remote"
+        ? [
+            layer.id,
+            layer.visible,
+            layer.source.url,
+            layer.source.where ?? "",
+            layer.source.minZoom ?? 0,
+          ].join(":")
+        : "",
+    )
+    .join("|");
 
   useEffect(() => {
     if (!map) return;
@@ -60,6 +74,7 @@ export function RemoteLayerManager() {
       }
     };
 
+    void refresh(false);
     const onMoveEnd = () => {
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => void refresh(false), 450);
@@ -73,7 +88,7 @@ export function RemoteLayerManager() {
       for (const controller of requests.values()) controller.abort();
       requests.clear();
     };
-  }, [map]);
+  }, [map, remoteSignature]);
 
   return null;
 }

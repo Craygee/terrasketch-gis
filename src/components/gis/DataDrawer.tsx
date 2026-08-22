@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Search,
   X,
@@ -34,6 +34,10 @@ export function DataDrawer() {
     [query, category, wb.selectedStates],
   );
 
+  useEffect(() => {
+    if (drawerOpen) setQuery(pendingCatalogQuery);
+  }, [drawerOpen, pendingCatalogQuery]);
+
   const viewportBbox = (): [number, number, number, number] | undefined => {
     if (!map) return undefined;
     const b = map.getBounds();
@@ -45,10 +49,46 @@ export function DataDrawer() {
       if (entry.sourcePage) window.open(entry.sourcePage, "_blank", "noopener,noreferrer");
       return;
     }
-    if (entry.minZoom && map && map.getZoom() < entry.minZoom) {
-      toast.warning(`Zoom in to level ${entry.minZoom} before adding ${entry.name}`, {
-        description: "This keeps dense records fast and limits the request to what is on screen.",
+    const existing = wb.layers.find(
+      (layer) => layer.source.kind === "remote" && layer.source.catalogId === entry.id,
+    );
+    if (existing) {
+      wb.updateLayer(existing.id, { visible: true });
+      wb.setActiveLayer(existing.id);
+      toast.success(`${entry.name} is ready`, {
+        description:
+          entry.minZoom && map && map.getZoom() < entry.minZoom
+            ? `It will appear automatically at zoom ${entry.minZoom} or closer.`
+            : "The existing layer was made visible.",
       });
+      setDrawerOpen(false);
+      return;
+    }
+    const where =
+      entry.countyField && county.trim()
+        ? `${entry.countyField}='${county.trim().replaceAll("'", "''")}'`
+        : undefined;
+    const source = {
+      kind: "remote" as const,
+      url: entry.url,
+      catalogId: entry.id,
+      attribution: entry.agency,
+      ...(where ? { where } : {}),
+      ...(entry.requiresViewport ? { requiresViewport: true } : {}),
+      ...(entry.minZoom !== undefined ? { minZoom: entry.minZoom } : {}),
+    };
+    if (entry.requiresViewport && entry.minZoom && map && map.getZoom() < entry.minZoom) {
+      wb.addLayer({
+        name: entry.name,
+        data: { type: "FeatureCollection", features: [] },
+        groupId: "public",
+        source,
+        style: entry.geometry === "line" ? { fillOpacity: 0, strokeWidth: 2.5 } : {},
+      });
+      toast.success(`${entry.name} added`, {
+        description: `It will load automatically when you reach zoom ${entry.minZoom} or closer.`,
+      });
+      setDrawerOpen(false);
       return;
     }
     setLoadingId(entry.id);
@@ -56,33 +96,28 @@ export function DataDrawer() {
       const bboxValue = entry.requiresViewport ? viewportBbox() : undefined;
       const data = await fetchRemoteGeoJSON(entry.url, {
         ...(bboxValue ? { bbox: bboxValue } : {}),
-        ...(entry.countyField && county.trim()
-          ? { where: `${entry.countyField}='${county.trim().replaceAll("'", "''")}'` }
-          : {}),
+        ...(where ? { where } : {}),
         maxFeatures: 3000,
       });
       if (data.features.length === 0) {
-        toast.warning(`No ${entry.name} features in this view`, {
-          description: "Pan or zoom to an area that has coverage, then try again.",
+        wb.addLayer({
+          name: entry.name,
+          data,
+          groupId: "public",
+          source,
+          style: entry.geometry === "line" ? { fillOpacity: 0, strokeWidth: 2.5 } : {},
         });
+        toast.warning(`${entry.name} added with no records in this view`, {
+          description: "Pan or zoom to an area with coverage and it will retry automatically.",
+        });
+        setDrawerOpen(false);
         return;
       }
       wb.addLayer({
         name: entry.name,
         data,
         groupId: "public",
-        source: {
-          kind: "remote",
-          url: entry.url,
-          catalogId: entry.id,
-          attribution: entry.agency,
-          ...(entry.countyField && county.trim()
-            ? { where: `${entry.countyField}='${county.trim().replaceAll("'", "''")}'` }
-            : {}),
-          ...(entry.requiresViewport ? { requiresViewport: true } : {}),
-          ...(entry.minZoom !== undefined ? { minZoom: entry.minZoom } : {}),
-          lastRefreshedAt: Date.now(),
-        },
+        source: { ...source, lastRefreshedAt: Date.now() },
         style: entry.geometry === "line" ? { fillOpacity: 0, strokeWidth: 2.5 } : {},
       });
       toast.success(`${entry.name} added`, {
@@ -90,9 +125,26 @@ export function DataDrawer() {
       });
       setDrawerOpen(false);
     } catch (err) {
-      toast.error(`Couldn't load ${entry.name}`, {
-        description: err instanceof Error ? err.message : "The service did not respond",
-      });
+      if (entry.requiresViewport) {
+        wb.addLayer({
+          name: entry.name,
+          data: { type: "FeatureCollection", features: [] },
+          groupId: "public",
+          source,
+          style: entry.geometry === "line" ? { fillOpacity: 0, strokeWidth: 2.5 } : {},
+        });
+        toast.warning(`${entry.name} was added and will retry`, {
+          description:
+            err instanceof Error
+              ? `${err.message}. Pan or zoom the map to retry the visible area.`
+              : "Pan or zoom the map to retry the visible area.",
+        });
+        setDrawerOpen(false);
+      } else {
+        toast.error(`Couldn't load ${entry.name}`, {
+          description: err instanceof Error ? err.message : "The service did not respond",
+        });
+      }
     } finally {
       setLoadingId(null);
     }

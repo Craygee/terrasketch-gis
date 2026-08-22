@@ -43,8 +43,8 @@ export const catalog: CatalogEntry[] = [
     ...live,
     description:
       "County appraisal parcel boundaries with owner, situs, legal area, land/improvement/market value and tax-year fields where supplied.",
-    url: "https://feature.geographic.texas.gov/arcgis/rest/services/Parcels/stratmap_land_parcels_48_most_recent/MapServer/0",
-    sourcePage: "https://geographic.texas.gov/stratmap/land-parcels/",
+    url: "https://services1.arcgis.com/1mtXwieMId59thmg/ArcGIS/rest/services/2019_Texas_Parcels_StratMap/FeatureServer/0",
+    sourcePage: "https://gio.texas.gov/stratmap/land-parcels.html",
     keywords: ["parcel", "property", "tax", "owner", "appraisal", "cad"],
     requiresViewport: true,
     minZoom: 12,

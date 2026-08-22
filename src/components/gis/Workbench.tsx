@@ -12,6 +12,7 @@ import { AttributeTable } from "./AttributeTable";
 import { DataDrawer } from "./DataDrawer";
 import { cn } from "@/lib/utils";
 import { RemoteLayerManager } from "./RemoteLayerManager";
+import { SelectionToolbar } from "./SelectionToolbar";
 
 export default function Workbench() {
   return (
@@ -48,6 +49,7 @@ function WorkbenchShell() {
 
         <main className="relative min-w-0 flex-1">
           <MapCanvas />
+          <SelectionToolbar />
 
           <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex flex-col gap-2 p-3">
             <div className="pointer-events-auto flex flex-wrap items-start justify-between gap-2">

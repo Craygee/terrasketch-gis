@@ -13,6 +13,7 @@ import { AttributeTable } from "./AttributeTable";
 import { SearchBox } from "./SearchBox";
 import { BasemapControl } from "./BasemapControl";
 import { RemoteLayerManager } from "./RemoteLayerManager";
+import { SelectionToolbar } from "./SelectionToolbar";
 import { cn } from "@/lib/utils";
 
 export default function MobileWorkbench() {
@@ -48,6 +49,7 @@ function MobileShell() {
   return (
     <div className="relative h-[100dvh] w-full overflow-hidden bg-background">
       <MapCanvas />
+      <SelectionToolbar mobile />
 
       <header className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-center gap-2 p-3 pt-[max(.75rem,env(safe-area-inset-top))]">
         <div className="float-surface pointer-events-auto flex min-w-0 items-center gap-2 rounded-2xl px-3 py-2">

@@ -43,6 +43,17 @@ interface MenuState {
   lat: number;
 }
 
+interface SelectionBoxState {
+  startX: number;
+  startY: number;
+  currentX: number;
+  currentY: number;
+}
+
+function renderedLayerId(styleLayerId: string): string {
+  return styleLayerId.replace(/^(hl-point|fill|line|point|label|hl)-/, "");
+}
+
 export function MapCanvas() {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapObj = useRef<MlMap | null>(null);
@@ -55,6 +66,9 @@ export function MapCanvas() {
   const [draft, setDraft] = useState<Position[]>([]);
   const [ready, setReady] = useState(false);
   const [styleRevision, setStyleRevision] = useState(0);
+  const [selectionBox, setSelectionBox] = useState<SelectionBoxState | null>(null);
+  const selectionBoxRef = useRef<SelectionBoxState | null>(null);
+  const boxDidSelectRef = useRef(false);
   const styledBasemapRef = useRef(wb.basemapId);
 
   const drawModeRef = useRef(wb.drawMode);
@@ -249,7 +263,7 @@ export function MapCanvas() {
   const finishDraft = useCallback(() => {
     const coords = draftRef.current;
     const mode = drawModeRef.current;
-    if (mode === "none") return;
+    if (mode === "none" || mode === "select-box") return;
     const isMeasure = mode === "measure-area" || mode === "measure-line";
     const wantsPolygon = mode === "polygon" || mode === "measure-area";
     if (!isMeasure) {
@@ -300,24 +314,45 @@ export function MapCanvas() {
       setMenu(null);
       const mode = drawModeRef.current;
       if (mode === "none") {
+        if (boxDidSelectRef.current) {
+          boxDidSelectRef.current = false;
+          return;
+        }
         const ids = wb.layers
           .filter((l) => l.visible)
           .flatMap((l) => allLayerIds(l.id))
           .filter((id) => map.getLayer(id));
         const hits = ids.length > 0 ? map.queryRenderedFeatures(e.point, { layers: ids }) : [];
         const hit = hits[0];
+        const additive =
+          e.originalEvent.shiftKey || e.originalEvent.ctrlKey || e.originalEvent.metaKey;
         if (!hit) {
-          wb.setSelectedFeature(null);
+          if (!additive) wb.setSelectedFeature(null);
           return;
         }
-        const layerId = String(hit.layer.id).replace(/^(fill|line|point|label|hl)-/, "");
+        const layerId = renderedLayerId(String(hit.layer.id));
         const index = Number((hit.properties as Record<string, unknown>)?.["__idx"] ?? -1);
         if (index >= 0) {
-          wb.setSelectedFeature({ layerId, index });
+          const selection = { layerId, index };
+          if (additive) {
+            const exists = wb.selectedFeatures.some(
+              (item) => item.layerId === layerId && item.index === index,
+            );
+            wb.setSelectedFeatures(
+              exists
+                ? wb.selectedFeatures.filter(
+                    (item) => item.layerId !== layerId || item.index !== index,
+                  )
+                : [...wb.selectedFeatures, selection],
+            );
+          } else {
+            wb.setSelectedFeature(selection);
+          }
           wb.setActiveLayer(layerId);
         }
         return;
       }
+      if (mode === "select-box") return;
       const coord: Position = wb.snapEnabled
         ? (nearestVisibleVertex(map, e.point.x, e.point.y) ?? [e.lngLat.lng, e.lngLat.lat])
         : [e.lngLat.lng, e.lngLat.lat];
@@ -349,13 +384,78 @@ export function MapCanvas() {
       setMenu({ x: e.point.x, y: e.point.y, lng: e.lngLat.lng, lat: e.lngLat.lat });
     };
 
+    const onMouseDown = (e: MapMouseEvent) => {
+      if (drawModeRef.current !== "select-box") return;
+      e.preventDefault();
+      const box = {
+        startX: e.point.x,
+        startY: e.point.y,
+        currentX: e.point.x,
+        currentY: e.point.y,
+      };
+      selectionBoxRef.current = box;
+      setSelectionBox(box);
+    };
+
+    const onMouseMove = (e: MapMouseEvent) => {
+      const box = selectionBoxRef.current;
+      if (!box || drawModeRef.current !== "select-box") return;
+      const next = { ...box, currentX: e.point.x, currentY: e.point.y };
+      selectionBoxRef.current = next;
+      setSelectionBox(next);
+    };
+
+    const onMouseUp = (e: MapMouseEvent) => {
+      const box = selectionBoxRef.current;
+      if (!box || drawModeRef.current !== "select-box") return;
+      selectionBoxRef.current = null;
+      setSelectionBox(null);
+      const width = Math.abs(e.point.x - box.startX);
+      const height = Math.abs(e.point.y - box.startY);
+      if (width < 4 && height < 4) return;
+      const ids = wb.layers
+        .filter((layer) => layer.visible)
+        .flatMap((layer) => allLayerIds(layer.id))
+        .filter((id) => map.getLayer(id));
+      const hits = ids.length
+        ? map.queryRenderedFeatures(
+            [
+              [Math.min(box.startX, e.point.x), Math.min(box.startY, e.point.y)],
+              [Math.max(box.startX, e.point.x), Math.max(box.startY, e.point.y)],
+            ],
+            { layers: ids },
+          )
+        : [];
+      const unique = new Map<string, { layerId: string; index: number }>();
+      for (const hit of hits) {
+        const layerId = renderedLayerId(String(hit.layer.id));
+        const index = Number((hit.properties as Record<string, unknown>)?.["__idx"] ?? -1);
+        if (index >= 0) unique.set(`${layerId}:${index}`, { layerId, index });
+      }
+      const selections = [...unique.values()];
+      wb.setSelectedFeatures(selections);
+      if (selections[0]) wb.setActiveLayer(selections[0].layerId);
+      boxDidSelectRef.current = true;
+      toast.success(
+        selections.length
+          ? `${selections.length} feature${selections.length === 1 ? "" : "s"} selected`
+          : "No features in that box",
+      );
+    };
+
     map.on("click", onClick);
     map.on("dblclick", onDblClick);
     map.on("contextmenu", onContext);
+    map.on("mousedown", onMouseDown);
+    map.on("mousemove", onMouseMove);
+    map.on("mouseup", onMouseUp);
     return () => {
       map.off("click", onClick);
       map.off("dblclick", onDblClick);
       map.off("contextmenu", onContext);
+      map.off("mousedown", onMouseDown);
+      map.off("mousemove", onMouseMove);
+      map.off("mouseup", onMouseUp);
     };
   }, [ready, wb, finishDraft, addToSketchLayer]);
 
@@ -363,6 +463,9 @@ export function MapCanvas() {
     const map = mapObj.current;
     if (!map) return;
     map.getCanvas().style.cursor = wb.drawMode === "none" ? "" : "crosshair";
+    if (wb.drawMode === "select-box") map.dragPan.disable();
+    else map.dragPan.enable();
+    return () => map.dragPan.enable();
   }, [wb.drawMode]);
 
   useEffect(() => {
@@ -434,6 +537,18 @@ export function MapCanvas() {
     <div className="relative h-full w-full">
       <div ref={containerRef} className="h-full w-full" />
 
+      {selectionBox && (
+        <div
+          className="pointer-events-none absolute z-30 border-2 border-primary bg-primary/15"
+          style={{
+            left: Math.min(selectionBox.startX, selectionBox.currentX),
+            top: Math.min(selectionBox.startY, selectionBox.currentY),
+            width: Math.abs(selectionBox.currentX - selectionBox.startX),
+            height: Math.abs(selectionBox.currentY - selectionBox.startY),
+          }}
+        />
+      )}
+
       {/* drawing helper bar */}
       {(wb.drawMode !== "none" || draft.length > 0) && (
         <div className="pointer-events-auto absolute left-1/2 top-16 z-20 -translate-x-1/2 md:top-16">
@@ -442,9 +557,11 @@ export function MapCanvas() {
             <span className="font-medium">
               {wb.drawMode === "none"
                 ? "Measurement"
-                : wb.drawMode === "point"
-                  ? "Click the map to drop points"
-                  : "Click to add points, double-click or Enter to finish"}
+                : wb.drawMode === "select-box"
+                  ? "Drag a box across features to select them"
+                  : wb.drawMode === "point"
+                    ? "Click the map to drop points"
+                    : "Click to add points, double-click or Enter to finish"}
             </span>
             {readout && (
               <span className="num rounded-full bg-accent px-2 py-0.5 text-accent-foreground">
@@ -460,7 +577,7 @@ export function MapCanvas() {
                 <Undo2 className="size-3.5" />
               </button>
             )}
-            {wb.drawMode !== "none" && wb.drawMode !== "point" && (
+            {wb.drawMode !== "none" && wb.drawMode !== "point" && wb.drawMode !== "select-box" && (
               <button
                 onClick={finishDraft}
                 className="flex items-center gap-1 rounded-full bg-primary px-2 py-1 text-primary-foreground"

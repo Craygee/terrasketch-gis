@@ -7,6 +7,7 @@ export const lineId = (layerId: string) => `line-${layerId}`;
 export const pointId = (layerId: string) => `point-${layerId}`;
 export const labelId = (layerId: string) => `label-${layerId}`;
 export const highlightId = (layerId: string) => `hl-${layerId}`;
+export const highlightPointId = (layerId: string) => `hl-point-${layerId}`;
 
 export const patternImageId = (pattern: FillPattern, color: string) =>
   `pat-${pattern}-${color.replace("#", "")}`;
@@ -84,6 +85,10 @@ export function buildLayerSpecs(layer: GisLayer, map: MlMap): LayerSpecification
   const labelMinZoom = s.labelMinZoom ?? 4;
   const labelMaxZoom = s.labelMaxZoom ?? 24;
   const patternId = ensurePatternImage(map, s.fillPattern, s.fillColor);
+  const zoomRange =
+    layer.source.kind === "remote" && layer.source.minZoom !== undefined
+      ? { minzoom: layer.source.minZoom }
+      : {};
 
   const fillPaint: Record<string, unknown> = patternId
     ? { "fill-pattern": patternId, "fill-opacity": Math.min(1, s.fillOpacity + 0.35) }
@@ -96,6 +101,7 @@ export function buildLayerSpecs(layer: GisLayer, map: MlMap): LayerSpecification
       source: src,
       filter: ["==", "$type", "Polygon"],
       paint: fillPaint as never,
+      ...zoomRange,
     },
     {
       id: lineId(layer.id),
@@ -108,6 +114,7 @@ export function buildLayerSpecs(layer: GisLayer, map: MlMap): LayerSpecification
         "line-width": s.strokeWidth,
         "line-opacity": s.strokeOpacity,
       },
+      ...zoomRange,
     },
     {
       id: pointId(layer.id),
@@ -121,6 +128,7 @@ export function buildLayerSpecs(layer: GisLayer, map: MlMap): LayerSpecification
         "circle-stroke-color": s.strokeColor,
         "circle-stroke-width": Math.min(3, s.strokeWidth),
       },
+      ...zoomRange,
     },
     {
       id: highlightId(layer.id),
@@ -128,6 +136,21 @@ export function buildLayerSpecs(layer: GisLayer, map: MlMap): LayerSpecification
       source: src,
       filter: ["==", ["get", "__selected"], true],
       paint: { "line-color": "#f2b73d", "line-width": s.strokeWidth + 3, "line-opacity": 0.95 },
+      ...zoomRange,
+    },
+    {
+      id: highlightPointId(layer.id),
+      type: "circle",
+      source: src,
+      filter: ["all", ["==", "$type", "Point"], ["==", ["get", "__selected"], true]],
+      paint: {
+        "circle-radius": s.pointSize + 5,
+        "circle-color": "#f2b73d",
+        "circle-opacity": 0.3,
+        "circle-stroke-color": "#f2b73d",
+        "circle-stroke-width": 3,
+      },
+      ...zoomRange,
     },
   ];
 
@@ -161,6 +184,7 @@ export function buildLayerSpecs(layer: GisLayer, map: MlMap): LayerSpecification
         "text-halo-color": "#fdfbf3",
         "text-halo-width": 1.6,
       },
+      ...zoomRange,
     });
   }
   return specs;
@@ -168,6 +192,7 @@ export function buildLayerSpecs(layer: GisLayer, map: MlMap): LayerSpecification
 
 export const allLayerIds = (layerId: string) => [
   labelId(layerId),
+  highlightPointId(layerId),
   highlightId(layerId),
   pointId(layerId),
   lineId(layerId),
