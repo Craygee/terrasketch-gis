@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { Toaster } from "@/components/ui/sonner";
 import { WorkbenchProvider, useWorkbench } from "@/lib/gis/store";
 import { MapRefProvider, useMapRef } from "@/lib/gis/mapRef";
-import { exportMapPdf } from "@/lib/gis/mapPdf";
+import { exportMapPdf, type MapPaper } from "@/lib/gis/mapPdf";
 import { MapCanvas } from "./MapCanvas";
 import { LayerPanel } from "./LayerPanel";
 import { DrawToolbar } from "./DrawToolbar";
@@ -27,12 +27,23 @@ export default function MobileWorkbench() {
   );
 }
 
-type Sheet = "layers" | "draw" | null;
+type Sheet = "layers" | "draw" | "pdf" | null;
 
 function MobileShell() {
   const [sheet, setSheet] = useState<Sheet>(null);
   const wb = useWorkbench();
   const { map, setDrawerOpen, tableOpen } = useMapRef();
+  const exportPdf = (paper: MapPaper) => {
+    if (!map) {
+      toast.error("The map is still loading");
+      return;
+    }
+    void exportMapPdf(map, wb.projectName, wb.layers, paper)
+      .then(() => toast.success(`${paper === "a4" ? "A4" : "Letter"} PDF map exported`))
+      .catch((error: unknown) =>
+        toast.error(error instanceof Error ? error.message : "PDF export failed"),
+      );
+  };
 
   return (
     <div className="relative h-[100dvh] w-full overflow-hidden bg-background">
@@ -63,7 +74,11 @@ function MobileShell() {
         <section className="panel-surface absolute inset-x-2 bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-40 max-h-[62dvh] overflow-hidden rounded-3xl">
           <div className="flex items-center border-b border-border px-4 py-2">
             <h2 className="text-sm font-semibold">
-              {sheet === "layers" ? "Layers" : "Draw and measure"}
+              {sheet === "layers"
+                ? "Layers"
+                : sheet === "draw"
+                  ? "Draw and measure"
+                  : "Export PDF map"}
             </h2>
             <button
               onClick={() => setSheet(null)}
@@ -77,9 +92,28 @@ function MobileShell() {
             <div className="h-[54dvh]">
               <LayerPanel />
             </div>
-          ) : (
+          ) : sheet === "draw" ? (
             <div className="overflow-x-auto p-3">
               <DrawToolbar />
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-2 p-4">
+              <button
+                onClick={() => exportPdf("letter")}
+                className="rounded-2xl bg-primary px-3 py-4 text-sm font-semibold text-primary-foreground"
+              >
+                Letter · landscape
+              </button>
+              <button
+                onClick={() => exportPdf("a4")}
+                className="rounded-2xl bg-secondary px-3 py-4 text-sm font-semibold"
+              >
+                A4 · landscape
+              </button>
+              <p className="col-span-2 text-center text-[10px] text-muted-foreground">
+                Includes the current map, title, visible-layer legend, timestamp and planning
+                disclaimer.
+              </p>
             </div>
           )}
         </section>
@@ -114,19 +148,10 @@ function MobileShell() {
           onClick={() => setSheet(sheet === "draw" ? null : "draw")}
         />
         <NavButton
+          active={sheet === "pdf"}
           icon={<FileDown className="size-5" />}
           label="PDF"
-          onClick={() => {
-            if (!map) {
-              toast.error("The map is still loading");
-              return;
-            }
-            void exportMapPdf(map, wb.projectName, wb.layers, "letter")
-              .then(() => toast.success("PDF map exported"))
-              .catch((error: unknown) =>
-                toast.error(error instanceof Error ? error.message : "PDF export failed"),
-              );
-          }}
+          onClick={() => setSheet(sheet === "pdf" ? null : "pdf")}
         />
       </nav>
     </div>
