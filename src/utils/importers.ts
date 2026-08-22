@@ -41,7 +41,7 @@ export async function importGeoFile(file: File): Promise<FeatureCollection> {
   throw new Error('Supported formats: GeoJSON, KML, KMZ, zipped Shapefile, GPX, and CSV.')
 }
 
-export function normalizeArcGisUrl(url: string, layerId = 0, bbox?: BBox) {
+export function normalizeFeatureServiceUrl(url: string, layerId = 0, bbox?: BBox) {
   const trimmed = url.replace(/\/$/, '')
   const withLayer = /\/(FeatureServer|MapServer)\/\d+$/i.test(trimmed) ? trimmed : `${trimmed}/${layerId}`
   const params = new URLSearchParams({ where: '1=1', outFields: '*', returnGeometry: 'true', outSR: '4326', f: 'geojson', resultRecordCount: '2000', geometryPrecision: '5' })
@@ -52,12 +52,12 @@ export function normalizeArcGisUrl(url: string, layerId = 0, bbox?: BBox) {
   return `${withLayer}/query?${params}`
 }
 
-export function isArcGisService(url: string) {
+export function isFeatureService(url: string) {
   return /\/(FeatureServer|MapServer)(\/\d+)?\/?$/i.test(url)
 }
 
 export async function fetchGeoData(url: string, layerId = 0, bbox?: BBox, signal?: AbortSignal): Promise<FeatureCollection> {
-  const requestUrl = isArcGisService(url) ? normalizeArcGisUrl(url, layerId, bbox) : url
+  const requestUrl = isFeatureService(url) ? normalizeFeatureServiceUrl(url, layerId, bbox) : url
   const response = await fetch(requestUrl, { signal })
   if (!response.ok) throw new Error(`Data service returned ${response.status}.`)
   const payload = await response.json() as { error?: { message?: string; details?: string[] } }

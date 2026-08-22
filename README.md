@@ -1,13 +1,13 @@
 # TerraSketch GIS
 
-TerraSketch is a friendly, browser-first GIS workbench for public records, field files, drawing, measurement, styling, inspection, and export. It combines a Felt-like interface with familiar desktop GIS concepts while staying understandable to a first-time mapmaker.
+TerraSketch is a friendly, browser-first GIS workbench for public records, field files, drawing, measurement, styling, inspection, and export. It provides powerful spatial tools while staying understandable to a first-time mapmaker.
 
 ## Included in this release
 
 - Five switchable basemaps: streets, satellite, USGS topo, dark, and OpenStreetMap.
 - Drag-and-drop GeoJSON, KML, KMZ, zipped Shapefile, GPX, and latitude/longitude CSV files.
-- ArcGIS FeatureServer/MapServer and direct GeoJSON URL connections.
-- Viewport-streamed ArcGIS agency layers that refresh after navigation instead of retaining offscreen national datasets.
+- Standards-based feature/map service and direct GeoJSON URL connections.
+- Viewport-streamed agency layers that refresh after navigation instead of retaining offscreen national datasets.
 - Curated public-data catalog seeded with TxDOT, Texas GLO, HIFLD, Census, USGS/EPA, and public parcel sources.
 - Grouped layers, visibility, reorder, selection, duplicated selections, and attribute tables.
 - Solid, diagonal, crosshatch, and dotted polygon fills; color, opacity, size, and stroke controls.
