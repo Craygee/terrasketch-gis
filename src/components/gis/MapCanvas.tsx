@@ -4,10 +4,12 @@ import {
   NavigationControl,
   ScaleControl,
   GeolocateControl,
+  setWorkerUrl,
   type MapMouseEvent,
   type GeoJSONSource,
 } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
+import mapLibreWorkerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?url";
 import type { Feature, FeatureCollection, Position } from "geojson";
 import { toast } from "sonner";
 import { Copy, MapPin, Database, Crosshair, Trash2, Check, Undo2, X } from "lucide-react";
@@ -28,6 +30,11 @@ import {
 import { cn } from "@/lib/utils";
 
 const TEXAS_CENTER: [number, number] = [-98.5, 31.3];
+
+// Vite can relocate the MapLibre module independently from its worker in
+// production builds. Pin the worker to an emitted asset so GeoJSON sources are
+// parsed reliably in hosted previews and deployments.
+setWorkerUrl(mapLibreWorkerUrl);
 
 interface MenuState {
   x: number;
