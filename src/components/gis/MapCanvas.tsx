@@ -9,7 +9,7 @@ import {
   type GeoJSONSource,
 } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import mapLibreWorkerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?url";
+import mapLibreWorkerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
 import type { Feature, FeatureCollection, Position } from "geojson";
 import { toast } from "sonner";
 import { Copy, MapPin, Database, Crosshair, Trash2, Check, Undo2, X } from "lucide-react";
