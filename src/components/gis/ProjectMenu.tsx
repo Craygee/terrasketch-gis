@@ -1,5 +1,6 @@
 import {
   ChevronRight,
+  Cloud,
   Clock3,
   FolderOpen,
   LogOut,
@@ -43,7 +44,7 @@ export function ProjectMenu({ onClose }: { onClose: () => void }) {
           <div className="truncate text-[10px] text-muted-foreground">{auth.user?.email}</div>
         </div>
         <button
-          onClick={auth.signOut}
+          onClick={() => void auth.signOut()}
           className="rounded-lg p-2 text-muted-foreground hover:bg-accent hover:text-foreground"
           title="Sign out"
           aria-label="Sign out"
@@ -226,8 +227,13 @@ export function ProjectMenu({ onClose }: { onClose: () => void }) {
       )}
 
       <p className="mt-3 text-center text-[9px] leading-relaxed text-muted-foreground">
-        Account and project data are stored on this browser/device. Save a project backup before
-        clearing browser data.
+        {auth.cloudEnabled ? (
+          <span className="inline-flex items-center gap-1">
+            <Cloud className="size-3" /> Secure cloud workspace · available on all your devices
+          </span>
+        ) : (
+          "Cloud connection pending; projects currently remain on this device."
+        )}
       </p>
     </div>
   );

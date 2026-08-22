@@ -10,7 +10,8 @@ LandDraft is a browser-based GIS workbench for public data, field files, sketchi
 - Grouped layers with visibility, ordering, duplication, deletion, styling, labels, and attribute tables.
 - Polygon, line, and point drawing with area, distance, and coordinate measurements.
 - GeoJSON, KML, KMZ, and zipped Shapefile export.
-- Local project save and backup workflows.
+- Secure cloud accounts, cross-device projects, autosave, and 25 restore points.
+- Project backup workflows for portable offline copies.
 
 ## Development
 
@@ -26,6 +27,10 @@ Build the production application:
 ```sh
 bun run build
 ```
+
+Cloud account and project storage setup is documented in
+[`docs/CLOUD_SETUP.md`](docs/CLOUD_SETUP.md). The app keeps its existing local workspace only when
+cloud environment variables are absent, so repository previews remain usable during initial setup.
 
 The source repository is authoritative. Application changes must be made in code, reviewed, and committed before the connected preview/deployment service receives them through repository sync.
 

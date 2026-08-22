@@ -38,6 +38,7 @@ export interface SelectedFeature {
 interface WorkbenchState {
   projectId: string;
   projectReady: boolean;
+  projectError: string | null;
   projectName: string;
   projects: ProjectSummary[];
   saveHistory: ProjectVersion[];
@@ -62,6 +63,7 @@ const uid = () => Math.random().toString(36).slice(2, 10);
 const initialState = (): WorkbenchState => ({
   projectId: "",
   projectReady: false,
+  projectError: null,
   projectName: "Untitled project",
   projects: [],
   saveHistory: [],
@@ -139,6 +141,7 @@ const normalizedProject = (project: StoredProject, projects: ProjectSummary[]) =
   return {
     projectId: project.id,
     projectReady: true,
+    projectError: null,
     projectName: stored.name,
     projects,
     saveHistory: project.versions ?? [],
@@ -226,7 +229,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
   stateRef.current = state;
   const autosaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const skipNextAutosave = useRef(true);
-  const bootStarted = useRef(false);
+  const bootUserId = useRef<string | null>(null);
 
   const patch = useCallback((p: Partial<WorkbenchState>) => setState((s) => ({ ...s, ...p })), []);
 
@@ -489,10 +492,11 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       const current = stateRef.current;
       const version = current.saveHistory.find((item) => item.id === versionId);
       if (!userId || !version) return;
+      const versionState = await workspaceProjectStore.loadVersion(version);
       const project = await workspaceProjectStore.save(
         userId,
         current.projectId,
-        version.state,
+        versionState,
         "restored",
       );
       const projects = await workspaceProjectStore.list(userId);
@@ -521,20 +525,29 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const userId = auth.user?.id;
-    if (!userId || bootStarted.current) return;
-    bootStarted.current = true;
+    if (!userId || bootUserId.current === userId) return;
+    bootUserId.current = userId;
     void (async () => {
-      let project = await workspaceProjectStore.loadLast(userId);
-      if (!project) {
-        const legacy = await workspaceProjectStore.readLegacy();
-        const initial = legacy ?? blankProjectState("Untitled project");
-        project = await workspaceProjectStore.create(userId, initial.name, initial);
+      try {
+        await workspaceProjectStore.migrateLocalAccount(userId, auth.user?.email ?? "");
+        let project = await workspaceProjectStore.loadLast(userId);
+        if (!project) {
+          const legacy = await workspaceProjectStore.readLegacy();
+          const initial = legacy ?? blankProjectState("Untitled project");
+          project = await workspaceProjectStore.create(userId, initial.name, initial);
+        }
+        const projects = await workspaceProjectStore.list(userId);
+        skipNextAutosave.current = true;
+        setState((current) => ({ ...current, ...normalizedProject(project, projects) }));
+      } catch (error) {
+        setState((current) => ({
+          ...current,
+          projectError:
+            error instanceof Error ? error.message : "The cloud workspace could not be opened",
+        }));
       }
-      const projects = await workspaceProjectStore.list(userId);
-      skipNextAutosave.current = true;
-      setState((current) => ({ ...current, ...normalizedProject(project, projects) }));
     })();
-  }, [auth.user?.id]);
+  }, [auth.user?.email, auth.user?.id]);
 
   useEffect(() => {
     if (!state.projectReady || !state.autosave || !auth.user) return;

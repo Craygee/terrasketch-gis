@@ -39,8 +39,21 @@ function WorkbenchShell() {
 
   if (!wb.projectReady)
     return (
-      <div className="flex h-screen items-center justify-center bg-background text-sm text-muted-foreground">
-        Opening your latest project…
+      <div className="flex h-screen items-center justify-center bg-background px-4 text-sm text-muted-foreground">
+        {wb.projectError ? (
+          <div className="max-w-md rounded-2xl border border-border bg-card p-5 text-center shadow-panel">
+            <p className="font-semibold text-foreground">Cloud workspace could not open</p>
+            <p className="mt-1 text-xs">{wb.projectError}</p>
+            <button
+              onClick={() => window.location.reload()}
+              className="mt-4 rounded-xl bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground"
+            >
+              Try again
+            </button>
+          </div>
+        ) : (
+          "Opening your latest project…"
+        )}
       </div>
     );
 

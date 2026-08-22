@@ -3,6 +3,7 @@ import { Save, FolderOpen, Database, Table2, PanelLeft, Info, FileDown } from "l
 import { toast } from "sonner";
 
 import { useWorkbench } from "@/lib/gis/store";
+import { useAuth } from "@/lib/auth";
 import { useMapRef } from "@/lib/gis/mapRef";
 import { cn } from "@/lib/utils";
 import { ExportPanel } from "./ExportMenu";
@@ -17,6 +18,7 @@ export function TopBar({
   panelOpen: boolean;
 }) {
   const wb = useWorkbench();
+  const auth = useAuth();
   const { setDrawerOpen, setTableOpen, tableOpen } = useMapRef();
   const [showAbout, setShowAbout] = useState(false);
   const [showProjects, setShowProjects] = useState(false);
@@ -138,8 +140,9 @@ export function TopBar({
             Always verify with county records and a licensed surveyor.
           </p>
           <p className="mt-2 text-muted-foreground">
-            Signed-in projects, autosave and up to 25 restore points are stored on this browser and
-            device. Export a project backup before clearing browser data.
+            {auth.cloudEnabled
+              ? "Signed-in projects, autosave, and up to 25 restore points are stored in your private cloud workspace and follow you across devices."
+              : "Cloud connection is pending; this deployment is temporarily using its existing device workspace."}
           </p>
         </div>
       )}
