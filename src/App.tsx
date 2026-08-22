@@ -5,7 +5,7 @@ import * as turf from '@turf/turf'
 import type { User } from '@supabase/supabase-js'
 import {
   ChevronDown, ChevronRight, CircleHelp, Cloud, Copy, Database, Download, Eye, EyeOff,
-  FileUp, Folder, GripVertical, Layers3, Map as MapIcon, MapPin, Menu, MoveDown,
+  FileUp, Focus, Folder, GripVertical, Layers3, Map as MapIcon, MapPin, Menu, MoveDown,
   MoveUp, Paintbrush, Plus, Redo2, Ruler, Save, Search, Share2, Sparkles, Table2,
   Trash2, Undo2, X, Zap,
 } from 'lucide-react'
@@ -21,6 +21,20 @@ import { cloudConfigured, loadCloudMap, saveCloudMap, subscribeToMap, supabase }
 
 const COLORS = ['#f97316', '#2563eb', '#16a34a', '#dc2626', '#7c3aed', '#0891b2', '#ca8a04', '#ec4899']
 const boundsKey = (bounds: BBox) => bounds.map((value) => value.toFixed(3)).join(':')
+const drawControlClasses = MapboxDraw.constants.classes as unknown as Record<string, string>
+Object.assign(drawControlClasses, { CONTROL_BASE: 'maplibregl-ctrl', CONTROL_PREFIX: 'maplibregl-ctrl-', CONTROL_GROUP: 'maplibregl-ctrl-group', ATTRIBUTION: 'maplibregl-ctrl-attrib' })
+
+function featureBounds(data: FeatureCollection): BBox | undefined {
+  if (!data.features.length) return undefined
+  const bounds = turf.bbox(data) as BBox; if (!bounds.every(Number.isFinite)) return undefined
+  if (bounds[0] === bounds[2]) { bounds[0] -= .002; bounds[2] += .002 }
+  if (bounds[1] === bounds[3]) { bounds[1] -= .002; bounds[3] += .002 }
+  return bounds
+}
+
+function zoomToData(data: FeatureCollection) {
+  const bounds = featureBounds(data); if (bounds) window.dispatchEvent(new CustomEvent<BBox>('terrasketch:fit-bounds', { detail: bounds }))
+}
 const DRAW_STYLES: object[] = [
   { id: 'gl-draw-polygon-fill', type: 'fill', filter: ['all', ['==', '$type', 'Polygon']], paint: { 'fill-color': ['case', ['==', ['get', 'active'], 'true'], '#f97316', '#0f766e'], 'fill-opacity': .16 } },
   { id: 'gl-draw-lines', type: 'line', filter: ['any', ['==', '$type', 'LineString'], ['==', '$type', 'Polygon']], layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': ['case', ['==', ['get', 'active'], 'true'], '#f97316', '#0f766e'], 'line-width': 3 } },
@@ -65,7 +79,7 @@ function MapCanvas({ onCoordinates, onSelection, onContext, onViewportChange }: 
   onContext: (x: number, y: number, lng: number, lat: number) => void
   onViewportChange: (bounds: BBox) => void
 }) {
-  const container = useRef<HTMLDivElement>(null); const mapRef = useRef<MapLibreMap>(); const drawRef = useRef<MapboxDraw>(); const layersRef = useRef<GisLayer[]>([]); const sourceDataRef = useRef(new Map<string, FeatureCollection>()); const renderSignatureRef = useRef(new Map<string, string>())
+  const container = useRef<HTMLDivElement>(null); const mapRef = useRef<MapLibreMap>(); const drawRef = useRef<MapboxDraw>(); const layersRef = useRef<GisLayer[]>([]); const styleReadyRef = useRef(false); const sourceDataRef = useRef(new Map<string, FeatureCollection>()); const renderSignatureRef = useRef(new Map<string, string>())
   const { layers, basemap, addLayer } = useGisStore(); const styledBasemap = useRef(basemap)
   const base = BASEMAPS.find((b) => b.id === basemap) ?? BASEMAPS[0]
   useEffect(() => { layersRef.current = layers }, [layers])
@@ -101,16 +115,20 @@ function MapCanvas({ onCoordinates, onSelection, onContext, onViewportChange }: 
     const live = new Set(layers.flatMap((l) => ['fill', 'line', 'circle', 'label'].map((p) => `${p}-${l.id}`)))
     map.getStyle().layers?.filter((l) => /^(fill|line|circle|label)-/.test(l.id) && !live.has(l.id)).forEach((l) => map.removeLayer(l.id))
     Object.keys(map.getStyle().sources).filter((id) => id.startsWith('source-') && !layers.some((l) => `source-${l.id}` === id)).forEach((id) => map.removeSource(id))
+    for (const layer of [...layers].reverse()) for (const prefix of ['fill', 'line', 'circle', 'label']) { const id = `${prefix}-${layer.id}`; if (map.getLayer(id)) map.moveLayer(id) }
+    map.getStyle().layers?.filter((layer) => layer.id.startsWith('gl-draw')).forEach((layer) => map.moveLayer(layer.id))
     const liveIds = new Set(layers.map((layer) => layer.id)); for (const id of sourceDataRef.current.keys()) if (!liveIds.has(id)) { sourceDataRef.current.delete(id); renderSignatureRef.current.delete(id) }
   }, [layers])
 
   useEffect(() => {
     if (!container.current || mapRef.current) return
     const map = new maplibregl.Map({ container: container.current, style: rasterStyle(base.tile, base.attribution), center: [-98.7, 31.1], zoom: 5.3, attributionControl: false })
+    map.on('style.load', () => { styleReadyRef.current = true })
     map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'bottom-right'); map.addControl(new maplibregl.ScaleControl({ unit: 'imperial' }), 'bottom-right'); map.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-right')
     const draw = new MapboxDraw({ displayControlsDefault: false, controls: { polygon: true, line_string: true, point: true, trash: true }, defaultMode: 'simple_select', styles: DRAW_STYLES })
     map.addControl(draw as unknown as maplibregl.IControl, 'top-right'); drawRef.current = draw
     const reportViewport = () => { const bounds = map.getBounds(); onViewportChange([bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()]) }
+    const fitBounds = (event: Event) => { const bounds = (event as CustomEvent<BBox>).detail; map.fitBounds([[bounds[0], bounds[1]], [bounds[2], bounds[3]]], { padding: 84, maxZoom: 15, duration: 650 }) }
     map.on('load', reportViewport); map.on('moveend', reportViewport)
     map.on('mousemove', (e) => onCoordinates(`${e.lngLat.lat.toFixed(6)}°, ${e.lngLat.lng.toFixed(6)}°`))
     map.on('contextmenu', (e) => { e.preventDefault(); onContext(e.point.x, e.point.y, e.lngLat.lng, e.lngLat.lat) })
@@ -132,19 +150,19 @@ function MapCanvas({ onCoordinates, onSelection, onContext, onViewportChange }: 
       positionMarker?.remove(); positionMarker = new maplibregl.Marker({ color: '#2563eb' }).setLngLat(point).setPopup(new maplibregl.Popup().setText(`Your location · ±${Math.round(position.coords.accuracy)} m`)).addTo(map)
       onCoordinates(`${point[1].toFixed(6)}°, ${point[0].toFixed(6)}°`)
     })
-    window.addEventListener('terrasketch:locate', locate)
+    window.addEventListener('terrasketch:locate', locate); window.addEventListener('terrasketch:fit-bounds', fitBounds)
     mapRef.current = map
-    return () => { window.removeEventListener('terrasketch:locate', locate); map.off('moveend', reportViewport); positionMarker?.remove(); map.remove(); mapRef.current = undefined }
+    return () => { window.removeEventListener('terrasketch:locate', locate); window.removeEventListener('terrasketch:fit-bounds', fitBounds); map.off('moveend', reportViewport); positionMarker?.remove(); map.remove(); mapRef.current = undefined }
   // Map is intentionally initialized once; store updates are synced below.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  useEffect(() => { const map = mapRef.current; if (!map || styledBasemap.current === basemap) return; styledBasemap.current = basemap; sourceDataRef.current.clear(); renderSignatureRef.current.clear(); map.setStyle(rasterStyle(base.tile, base.attribution)); map.once('styledata', () => syncLayers(map)) }, [basemap, base.tile, base.attribution, syncLayers])
-  useEffect(() => { const map = mapRef.current; if (!map) return; if (map.isStyleLoaded()) syncLayers(map); else map.once('load', () => syncLayers(map)) }, [syncLayers])
+  useEffect(() => { const map = mapRef.current; if (!map || styledBasemap.current === basemap) return; styledBasemap.current = basemap; styleReadyRef.current = false; sourceDataRef.current.clear(); renderSignatureRef.current.clear(); map.once('style.load', () => { styleReadyRef.current = true; syncLayers(map) }); map.setStyle(rasterStyle(base.tile, base.attribution)) }, [basemap, base.tile, base.attribution, syncLayers])
+  useEffect(() => { const map = mapRef.current; if (!map) return; if (styleReadyRef.current || map.isStyleLoaded()) { styleReadyRef.current = true; syncLayers(map) } else map.once('style.load', () => { styleReadyRef.current = true; syncLayers(map) }) }, [syncLayers])
   return <div ref={container} className="map-canvas" aria-label="Interactive map" />
 }
 
-function LayerTree({ onStyle, onTable }: { onStyle: (l: GisLayer) => void; onTable: (l: GisLayer) => void }) {
+function LayerTree({ onStyle, onTable, onZoom }: { onStyle: (l: GisLayer) => void; onTable: (l: GisLayer) => void; onZoom: (l: GisLayer) => void }) {
   const { layers, activeLayerId, setActive, updateLayer, removeLayer, reorder } = useGisStore(); const [closed, setClosed] = useState<Record<string, boolean>>({})
   const groups = useMemo(() => layers.reduce<Record<string, GisLayer[]>>((all, layer) => {
     const group = layer.group || 'My layers'; (all[group] ??= []).push(layer); return all
@@ -155,7 +173,7 @@ function LayerTree({ onStyle, onTable }: { onStyle: (l: GisLayer) => void; onTab
     {!closed[group] && items?.map((layer) => <div className={`layer-row ${activeLayerId === layer.id ? 'active' : ''}`} key={layer.id} onClick={() => setActive(layer.id)}>
       <GripVertical className="grip"/><button className="icon-btn" title={layer.visible ? 'Hide layer' : 'Show layer'} onClick={(e) => { e.stopPropagation(); updateLayer(layer.id, { visible: !layer.visible }) }}>{layer.visible ? <Eye/> : <EyeOff/>}</button>
       <span className="swatch" style={{ background: layer.style.color, opacity: layer.style.opacity }} /><div className="layer-copy"><strong>{layer.name}</strong><span className={layer.loadError ? 'load-error' : ''}>{layer.loading ? 'Loading visible area…' : layer.loadError ? `Service error · ${layer.loadError}` : `${layer.data.features.length.toLocaleString()} ${layer.viewportManaged ? 'visible ' : ''}features`}</span></div>
-      <div className="row-actions"><button title="Style" onClick={(e) => { e.stopPropagation(); onStyle(layer) }}><Paintbrush/></button><button title="Attribute table" onClick={(e) => { e.stopPropagation(); onTable(layer) }}><Table2/></button><button title="Move up" onClick={(e) => { e.stopPropagation(); reorder(layer.id, 1) }}><MoveUp/></button><button title="Move down" onClick={(e) => { e.stopPropagation(); reorder(layer.id, -1) }}><MoveDown/></button><button title="Delete" onClick={(e) => { e.stopPropagation(); removeLayer(layer.id) }}><Trash2/></button></div>
+      <div className="row-actions"><button title="Zoom to layer" onClick={(e) => { e.stopPropagation(); updateLayer(layer.id, { visible: true }); onZoom(layer) }}><Focus/></button><button title="Style" onClick={(e) => { e.stopPropagation(); onStyle(layer) }}><Paintbrush/></button><button title="Attribute table" onClick={(e) => { e.stopPropagation(); onTable(layer) }}><Table2/></button><button title="Move up" onClick={(e) => { e.stopPropagation(); reorder(layer.id, 1) }}><MoveUp/></button><button title="Move down" onClick={(e) => { e.stopPropagation(); reorder(layer.id, -1) }}><MoveDown/></button><button title="Delete" onClick={(e) => { e.stopPropagation(); removeLayer(layer.id) }}><Trash2/></button></div>
     </div>)}
   </div>)}</div>
 }
@@ -214,10 +232,10 @@ export default function App() {
   }
   const showStyle = (layer: GisLayer) => { showDrawer(); setStyleLayer(layer) }
   const showTable = (layer: GisLayer) => { showDrawer(); setTableLayer(layer) }
-  const handleFiles = async (files: FileList | File[]) => { for (const file of Array.from(files)) { try { const data = await importGeoFile(file); addLayer(file.name.replace(/\.[^.]+$/, ''), data); notify(`Added ${data.features.length.toLocaleString()} features from ${file.name}`) } catch (error) { notify(error instanceof Error ? error.message : 'Could not import file') } } }
+  const handleFiles = async (files: FileList | File[]) => { for (const file of Array.from(files)) { try { const data = await importGeoFile(file); addLayer(file.name.replace(/\.[^.]+$/, ''), data); window.setTimeout(() => zoomToData(data)); notify(`Added ${data.features.length.toLocaleString()} features from ${file.name}`) } catch (error) { notify(error instanceof Error ? error.message : 'Could not import file') } } }
   const addRemote = async (name: string, url: string, layerId = 0, color = COLORS[layers.length % COLORS.length], group = 'Web layers') => { try { const viewportManaged = isArcGisService(url); const data = await fetchGeoData(url, layerId, viewportManaged ? viewport : undefined); const id = addLayer(name, data, { group, source: url, sourceLayerId: layerId, viewportManaged, loadedBounds: viewportManaged ? viewport : undefined, style: { color, opacity: .75, width: 2.5, radius: 5, pattern: 'solid', labelTemplate: '', labelSize: 12 } }); if (viewportManaged && viewport) viewportRequests.current.set(id, `${url}:${layerId}:${boundsKey(viewport)}`); notify(`Added ${data.features.length.toLocaleString()} ${name} features${viewportManaged ? ' in the visible area' : ''}`) } catch (e) { notify(`${name}: ${e instanceof Error ? e.message : 'service unavailable'}`) } }
-  const duplicate = (features: Feature[]) => { if (!liveTable) return; addLayer(`${liveTable.name} — selection`, { type: 'FeatureCollection', features }, { group: 'Selections', style: { ...liveTable.style, color: COLORS[layers.length % COLORS.length] } }); notify('Selection duplicated into a new layer') }
-  const searchMap = async (e: React.FormEvent) => { e.preventDefault(); if (!query.trim()) return; setSearching(true); try { const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(query)}`); const result = (await res.json())[0]; if (!result) notify('No matching place found'); else { const marker: Feature = { type: 'Feature', geometry: { type: 'Point', coordinates: [+result.lon, +result.lat] }, properties: { name: result.display_name } }; addLayer(`Search: ${query}`, { type: 'FeatureCollection', features: [marker] }, { group: 'Search results' }); notify(result.display_name) } } catch { notify('Search is temporarily unavailable') } finally { setSearching(false) } }
+  const duplicate = (features: Feature[]) => { if (!liveTable) return; const data: FeatureCollection = { type: 'FeatureCollection', features }; addLayer(`${liveTable.name} — selection`, data, { group: 'Selections', style: { ...liveTable.style, color: COLORS[layers.length % COLORS.length] } }); window.setTimeout(() => zoomToData(data)); notify('Selection duplicated into a new layer') }
+  const searchMap = async (e: React.FormEvent) => { e.preventDefault(); if (!query.trim()) return; setSearching(true); try { const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(query)}`); const result = (await res.json())[0]; if (!result) notify('No matching place found'); else { const marker: Feature = { type: 'Feature', geometry: { type: 'Point', coordinates: [+result.lon, +result.lat] }, properties: { name: result.display_name } }; const data: FeatureCollection = { type: 'FeatureCollection', features: [marker] }; addLayer(`Search: ${query}`, data, { group: 'Search results' }); window.setTimeout(() => zoomToData(data)); notify(result.display_name) } } catch { notify('Search is temporarily unavailable') } finally { setSearching(false) } }
   const snapshot = (): MapSnapshot => ({ mapName, basemap, layers: layers.map((layer) => ({ ...layer, loading: false, loadError: undefined })) })
   const saveLocal = (quiet = false) => { localStorage.setItem('terrasketch-project', JSON.stringify(snapshot())); if (!quiet) notify('Map saved in this browser') }
   const saveCurrent = async (forceCloud = false) => {
@@ -228,7 +246,7 @@ export default function App() {
   }
   const openCloudMap = (map: CloudMap) => { hydrate(map.snapshot.mapName || map.title, map.snapshot.basemap, map.snapshot.layers ?? []); setCloudMap(map); window.history.replaceState({}, '', `/map/${map.id}`); setLibrary(false); notify(`Opened ${map.title}`) }
   const newMap = () => { clear(); setCloudMap(undefined); window.history.replaceState({}, '', '/'); setLibrary(false); notify('New blank map created') }
-  const loadSample = () => { const poly = turf.polygon([[[-97.78,30.19],[-97.51,30.19],[-97.51,30.39],[-97.78,30.39],[-97.78,30.19]]], { NAME: 'Austin study area', ACRES: 10291 }); addLayer('Austin study area', { type: 'FeatureCollection', features: [poly] }, { group: 'Example', style: { color: '#f97316', opacity: .72, width: 3, radius: 5, pattern: 'diagonal', labelTemplate: '{NAME}', labelSize: 13 } }) }
+  const loadSample = () => { const poly = turf.polygon([[[-97.78,30.19],[-97.51,30.19],[-97.51,30.39],[-97.78,30.39],[-97.78,30.19]]], { NAME: 'Austin study area', ACRES: 10291 }); const data: FeatureCollection = { type: 'FeatureCollection', features: [poly] }; addLayer('Austin study area', data, { group: 'Example', style: { color: '#f97316', opacity: .72, width: 3, radius: 5, pattern: 'diagonal', labelTemplate: '{NAME}', labelSize: 13 } }); window.setTimeout(() => zoomToData(data)) }
 
   useEffect(() => { if (!supabase) return; supabase.auth.getSession().then(({ data }) => setUser(data.session?.user ?? null)); const { data } = supabase.auth.onAuthStateChange((_event, session) => setUser(session?.user ?? null)); return () => data.subscription.unsubscribe() }, [])
   useEffect(() => {
@@ -261,13 +279,13 @@ export default function App() {
   return <main className="app-shell" onDragEnter={(e) => { e.preventDefault(); setDragging(true) }} onDragOver={(e) => e.preventDefault()} onDragLeave={(e) => { if (e.currentTarget === e.target) setDragging(false) }} onDrop={(e) => { e.preventDefault(); setDragging(false); handleFiles(e.dataTransfer.files) }}>
     <header className="topbar"><div className="brand"><button className="icon-btn mobile-menu" onClick={() => setLeftOpen(!leftOpen)}><Menu/></button><div className="brand-mark"><MapIcon/></div><span>TerraSketch</span><em>GIS</em></div><div className="crumb"><button className="crumb-link" onClick={() => showDrawer(user ? 'library' : 'account')}>My maps</button><ChevronRight/><input value={mapName} onChange={(e) => setMapName(e.target.value)}/><span className={`saved ${cloudMap ? 'cloud' : ''}`}><span/>{syncing ? 'Syncing…' : cloudMap ? 'Live cloud map' : 'Local draft'}</span></div><div className="top-actions"><button className="ghost-btn"><Undo2/></button><button className="ghost-btn"><Redo2/></button><button className="soft-btn" onClick={() => void saveCurrent()}>{syncing ? <span className="spinner"/> : cloudMap ? <Cloud/> : <Save/>} Save</button><button className="soft-btn share-button" onClick={() => showDrawer('share')}><Share2/> Share</button><div className="export-menu"><button className="primary-btn" disabled={!layers.length} onClick={() => setExportOpen(!exportOpen)}><Download/> Export <ChevronDown/></button>{exportOpen && layers[0] && <div className="export-popover"><small>Export top layer</small><strong>{layers[0].name}</strong><button onClick={() => exportGeoJSON(layers[0].data, layers[0].name)}>GeoJSON <span>.geojson</span></button><button onClick={() => void exportKml(layers[0].data, layers[0].name)}>Google Earth <span>.kml</span></button><button onClick={() => void exportKml(layers[0].data, layers[0].name, true)}>Google Earth archive <span>.kmz</span></button><button onClick={() => void exportShapefile(layers[0].data, layers[0].name)}>ESRI Shapefile <span>.zip</span></button></div>}</div><button className="avatar" title={user?.email ?? 'Sign in'} onClick={() => showDrawer('account')}>{user?.email?.slice(0,2).toUpperCase() ?? 'JG'}</button></div></header>
     <div className="workspace">
-      {leftOpen && <aside className="left-panel"><div className="panel-tabs"><button className="active"><Layers3/>Layers</button><button onClick={() => showDrawer('catalog')}><Database/>Data</button><button onClick={() => showDrawer('analysis')}><Zap/>Tools</button></div><div className="panel-head"><div><span className="eyebrow">Map content</span><h2>Layers</h2></div><button className="icon-btn" onClick={() => showDrawer('catalog')}><Plus/></button></div><LayerTree onStyle={showStyle} onTable={showTable}/><div className="panel-bottom"><button className="primary-btn wide" onClick={() => fileInput.current?.click()}><FileUp/> Import data</button><button className="soft-btn wide" onClick={() => showDrawer('catalog')}><Database/> Browse public data</button><button className="soft-btn wide" disabled={!layers.length} onClick={() => showDrawer('analysis')}><Zap/> Spatial analysis</button><input ref={fileInput} hidden type="file" multiple accept=".geojson,.json,.kml,.kmz,.zip,.shp,.gpx,.csv" onChange={(e) => e.target.files && handleFiles(e.target.files)}/>{!layers.length && <button className="sample-link" onClick={loadSample}><Sparkles/> Try an example layer</button>}</div></aside>}
+      {leftOpen && <aside className="left-panel"><div className="panel-tabs"><button className="active"><Layers3/>Layers</button><button onClick={() => showDrawer('catalog')}><Database/>Data</button><button onClick={() => showDrawer('analysis')}><Zap/>Tools</button></div><div className="panel-head"><div><span className="eyebrow">Map content</span><h2>Layers</h2></div><button className="icon-btn" onClick={() => showDrawer('catalog')}><Plus/></button></div><LayerTree onStyle={showStyle} onTable={showTable} onZoom={(layer) => zoomToData(layer.data)}/><div className="panel-bottom"><button className="primary-btn wide" onClick={() => fileInput.current?.click()}><FileUp/> Import data</button><button className="soft-btn wide" onClick={() => showDrawer('catalog')}><Database/> Browse public data</button><button className="soft-btn wide" disabled={!layers.length} onClick={() => showDrawer('analysis')}><Zap/> Spatial analysis</button><input ref={fileInput} hidden type="file" multiple accept=".geojson,.json,.kml,.kmz,.zip,.shp,.gpx,.csv" onChange={(e) => e.target.files && handleFiles(e.target.files)}/>{!layers.length && <button className="sample-link" onClick={loadSample}><Sparkles/> Try an example layer</button>}</div></aside>}
       <section className="map-stage"><div className="map-search"><form onSubmit={searchMap}><Search/><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search places or coordinates"/><kbd>↵</kbd>{searching && <span className="spinner"/>}</form></div><div className="floating-left"><button onClick={() => setLeftOpen(!leftOpen)}><Layers3/><span>{layers.length}</span></button><button onClick={() => fileInput.current?.click()}><Plus/></button><button title="Find my location" onClick={() => window.dispatchEvent(new Event('terrasketch:locate'))}><MapPin/></button></div><div className="floating-base"><button onClick={() => setBaseOpen(!baseOpen)}><span className={`base-thumb ${basemap}`}/><div><small>Basemap</small><strong>{BASEMAPS.find((b) => b.id === basemap)?.name}</strong></div><ChevronDown/></button>{baseOpen && <div className="base-menu">{BASEMAPS.map((b) => <button className={b.id === basemap ? 'active' : ''} key={b.id} onClick={() => { setBasemap(b.id); setBaseOpen(false) }}><span className={`base-thumb ${b.id}`}/>{b.name}</button>)}</div>}</div><MapCanvas onCoordinates={setCoords} onViewportChange={setViewport} onSelection={(layerId, feature) => { useGisStore.getState().setActive(layerId); setSelected(feature) }} onContext={(x,y,lng,lat) => setContext({x,y,lng,lat})}/><div className="coordinate-bar"><MapPin/>{coords}<span>WGS 84</span></div><div className="map-status"><span><span className="status-dot"/> {cloudMap ? 'Live sync' : 'Online data'}</span><span>{layers.reduce((n,l) => n + l.data.features.length, 0).toLocaleString()} visible features</span></div>
         {selected && <MeasureCard feature={selected} onClose={() => setSelected(undefined)}/>} {context && <div className="context-menu" style={{ left: context.x, top: context.y }}><div className="context-coord">{context.lat.toFixed(5)}, {context.lng.toFixed(5)}</div><button onClick={() => { navigator.clipboard.writeText(`${context.lat}, ${context.lng}`); setContext(undefined); notify('Coordinates copied') }}><Copy/> Copy coordinates</button><button onClick={() => { const point = turf.point([context.lng, context.lat], { name: 'Dropped pin' }); addLayer('Dropped pin', { type:'FeatureCollection', features:[point] }, { group:'Drawings' }); setContext(undefined) }}><MapPin/> Drop a pin</button><button onClick={() => { showDrawer('catalog'); setContext(undefined) }}><Database/> Find data here</button></div>}
       </section>
       {liveStyle && <StylePanel layer={liveStyle} onClose={() => setStyleLayer(undefined)}/>}
       {catalog && <DataCatalog onClose={() => setCatalog(false)} onAdd={addRemote}/>}
-      {analysis && <AnalysisPanel onClose={() => setAnalysis(false)} onDone={notify}/>}
+      {analysis && <AnalysisPanel onClose={() => setAnalysis(false)} onDone={notify} onResult={zoomToData}/>}
       {liveTable && <AttributeTable layer={liveTable} onClose={() => setTableLayer(undefined)} onDuplicate={duplicate}/>}
       {account && <AccountPanel user={user} onClose={() => setAccount(false)} onSignedIn={setUser} onOpenLibrary={() => showDrawer('library')}/>}
       {share && <SharePanel map={cloudMap} user={user} onClose={() => setShare(false)} onNeedSave={() => saveCurrent(true)}/>}
