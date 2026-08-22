@@ -50,6 +50,13 @@ interface SelectionBoxState {
   currentY: number;
 }
 
+interface PreparedCacheEntry {
+  data: FeatureCollection;
+  labelKey: string;
+  selectionKey: string;
+  fc: FeatureCollection;
+}
+
 function renderedLayerId(styleLayerId: string): string {
   return styleLayerId.replace(/^(hl-point|fill|line|point|label|hl)-/, "");
 }
@@ -70,6 +77,10 @@ export function MapCanvas() {
   const selectionBoxRef = useRef<SelectionBoxState | null>(null);
   const boxDidSelectRef = useRef(false);
   const styledBasemapRef = useRef(wb.basemapId);
+  const preparedCacheRef = useRef(new Map<string, PreparedCacheEntry>());
+  const sourcePayloadRef = useRef(new Map<string, FeatureCollection>());
+  const styleSignatureRef = useRef(new Map<string, string>());
+  const orderSignatureRef = useRef("");
 
   const drawModeRef = useRef(wb.drawMode);
   drawModeRef.current = wb.drawMode;
@@ -134,23 +145,46 @@ export function MapCanvas() {
       ...wb.groups.flatMap((group) => wb.layers.filter((layer) => layer.groupId === group.id)),
       ...wb.layers.filter((layer) => !wb.groups.some((group) => group.id === layer.groupId)),
     ];
-    return ordered.map((layer) => {
+    const selectedByLayer = new Map<string, number[]>();
+    for (const selection of wb.selectedFeatures) {
+      const indexes = selectedByLayer.get(selection.layerId) ?? [];
+      indexes.push(selection.index);
+      selectedByLayer.set(selection.layerId, indexes);
+    }
+    const nextCache = new Map<string, PreparedCacheEntry>();
+    const result = ordered.map((layer) => {
+      const selectedIndexes = selectedByLayer.get(layer.id) ?? [];
+      const selectionKey = [...selectedIndexes].sort((a, b) => a - b).join(",");
+      const selected = new Set(selectedIndexes);
+      const labelKey = `${layer.style.labelEnabled}:${layer.style.labelTemplate}`;
+      const cached = preparedCacheRef.current.get(layer.id);
+      if (
+        cached &&
+        cached.data === layer.data &&
+        cached.labelKey === labelKey &&
+        cached.selectionKey === selectionKey
+      ) {
+        nextCache.set(layer.id, cached);
+        return { layer, fc: cached.fc };
+      }
       const features: Feature[] = layer.data.features.map((f, index) => ({
         ...f,
         properties: {
           ...(f.properties ?? {}),
           __idx: index,
-          __selected: wb.selectedFeatures.some(
-            (selection) => selection.layerId === layer.id && selection.index === index,
-          ),
+          __selected: selected.has(index),
           __label:
             layer.style.labelEnabled && layer.style.labelTemplate
               ? composeLabel(f as never, layer.style.labelTemplate)
               : "",
         },
       }));
-      return { layer, fc: { type: "FeatureCollection", features } as FeatureCollection };
+      const fc = { type: "FeatureCollection", features } as FeatureCollection;
+      nextCache.set(layer.id, { data: layer.data, labelKey, selectionKey, fc });
+      return { layer, fc };
     });
+    preparedCacheRef.current = nextCache;
+    return result;
   }, [wb.groups, wb.layers, wb.selectedFeatures]);
 
   useEffect(() => {
@@ -165,32 +199,61 @@ export function MapCanvas() {
       if (cancelled) return;
       try {
         const keep = new Set(prepared.map((p) => sourceId(p.layer.id)));
+        let rebuiltLayers = false;
         for (const spec of map.getStyle().layers ?? []) {
           const sid = (spec as { source?: string }).source;
           if (sid && sid.startsWith("src-") && !keep.has(sid)) map.removeLayer(spec.id);
         }
         for (const sid of Object.keys(map.getStyle().sources ?? {})) {
-          if (sid.startsWith("src-") && !keep.has(sid)) map.removeSource(sid);
+          if (sid.startsWith("src-") && !keep.has(sid)) {
+            map.removeSource(sid);
+            sourcePayloadRef.current.delete(sid);
+            styleSignatureRef.current.delete(sid.replace(/^src-/, ""));
+          }
         }
 
         for (const { layer, fc } of prepared) {
           const sid = sourceId(layer.id);
           const existing = map.getSource(sid) as GeoJSONSource | undefined;
-          if (existing) existing.setData(fc);
-          else map.addSource(sid, { type: "geojson", data: fc });
-
-          for (const id of allLayerIds(layer.id)) if (map.getLayer(id)) map.removeLayer(id);
-          for (const spec of buildLayerSpecs(layer, map)) {
-            map.addLayer(spec);
-            map.setLayoutProperty(spec.id, "visibility", layer.visible ? "visible" : "none");
+          if (existing) {
+            if (sourcePayloadRef.current.get(sid) !== fc) existing.setData(fc);
+          } else {
+            const viewportOptions =
+              layer.source.kind === "remote" && layer.source.requiresViewport
+                ? { tolerance: 0.6, maxzoom: 18 }
+                : {};
+            map.addSource(sid, { type: "geojson", data: fc, ...viewportOptions });
           }
+          sourcePayloadRef.current.set(sid, fc);
+
+          const styleSignature = JSON.stringify([
+            layer.style,
+            layer.source.kind === "remote" ? layer.source.minZoom : null,
+          ]);
+          const fillLayerId = allLayerIds(layer.id).at(-1) as string;
+          if (
+            styleSignatureRef.current.get(layer.id) !== styleSignature ||
+            !map.getLayer(fillLayerId)
+          ) {
+            for (const id of allLayerIds(layer.id)) if (map.getLayer(id)) map.removeLayer(id);
+            for (const spec of buildLayerSpecs(layer, map)) map.addLayer(spec);
+            styleSignatureRef.current.set(layer.id, styleSignature);
+            rebuiltLayers = true;
+          }
+          for (const id of allLayerIds(layer.id))
+            if (map.getLayer(id))
+              map.setLayoutProperty(id, "visibility", layer.visible ? "visible" : "none");
         }
 
         // Reorder: first item in wb.layers is topmost.
-        for (const { layer } of [...prepared].reverse()) {
-          for (const id of [...allLayerIds(layer.id)].reverse()) {
-            if (map.getLayer(id)) map.moveLayer(id);
+        const orderSignature = prepared.map(({ layer }) => layer.id).join("|");
+        if (rebuiltLayers || orderSignatureRef.current !== orderSignature) {
+          for (const { layer } of [...prepared].reverse()) {
+            for (const id of [...allLayerIds(layer.id)].reverse()) {
+              if (map.getLayer(id)) map.moveLayer(id);
+            }
           }
+          orderSignatureRef.current = orderSignature;
         }
         ensureDraftLayers(map);
         map.triggerRepaint();

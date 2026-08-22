@@ -304,11 +304,13 @@ export function LayerPanel() {
                         {expanded && (
                           <div className="mt-2 space-y-2">
                             <div className="num px-1 text-[10px] text-muted-foreground">
-                              {layer.source.kind === "remote" &&
-                              layer.source.minZoom !== undefined &&
-                              layer.data.features.length === 0
-                                ? `Ready · appears at zoom ${layer.source.minZoom}+`
-                                : `${layer.data.features.length} features`}
+                              {layer.source.kind === "remote" && layer.source.loading
+                                ? "Loading visible area…"
+                                : layer.source.kind === "remote" &&
+                                    layer.source.minZoom !== undefined &&
+                                    layer.data.features.length === 0
+                                  ? `Ready · appears at zoom ${layer.source.minZoom}+`
+                                  : `${layer.data.features.length} features`}
                               {sqm > 0 ? ` · ${formatArea(sqm, wb.units.area)}` : ""}
                             </div>
                             <div className="flex flex-wrap gap-1">

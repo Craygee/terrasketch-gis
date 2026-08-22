@@ -99,6 +99,18 @@ const blankProjectState = (name: string): ProjectState => ({
   selectedStates: ["TX"],
 });
 
+const durableLayer = (layer: GisLayer): GisLayer => {
+  if (layer.source.kind !== "remote" || !layer.source.requiresViewport) return layer;
+  const source = { ...layer.source };
+  delete source.lastRefreshedAt;
+  delete source.loading;
+  return {
+    ...layer,
+    data: { type: "FeatureCollection", features: [] },
+    source,
+  };
+};
+
 const normalizedProject = (project: StoredProject, projects: ProjectSummary[]) => {
   const stored = project.state;
   const groups = stored.groups.some((group) => group.id === "working")
@@ -113,10 +125,10 @@ const normalizedProject = (project: StoredProject, projects: ProjectSummary[]) =
     autosave: project.autosave,
     lastSavedAt: project.updatedAt,
     groups,
-    layers: stored.layers.map((layer, index) => ({
-      ...layer,
-      style: { ...defaultStyle(index), ...layer.style },
-    })),
+    layers: stored.layers.map((layer, index) => {
+      const durable = durableLayer(layer);
+      return { ...durable, style: { ...defaultStyle(index), ...durable.style } };
+    }),
     basemapId: stored.basemapId,
     units: stored.units,
     activeLayerId: null,
@@ -132,7 +144,7 @@ const stateToProject = (state: WorkbenchState): ProjectState => ({
   version: 1,
   name: state.projectName,
   groups: state.groups,
-  layers: state.layers,
+  layers: state.layers.map(durableLayer),
   basemapId: state.basemapId,
   units: state.units,
   selectedStates: state.selectedStates,

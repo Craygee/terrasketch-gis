@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { bbox as turfBbox } from "@turf/turf";
 import { Search, X, Table2, Crosshair, CopyPlus, CheckSquare } from "lucide-react";
 import { useWorkbench } from "@/lib/gis/store";
@@ -7,6 +7,8 @@ import { propertyKeys } from "@/lib/gis/labels";
 import { formatArea, squareMeters } from "@/lib/gis/measure";
 import { cn } from "@/lib/utils";
 
+const PAGE_SIZE = 100;
+
 export function AttributeTable() {
   const wb = useWorkbench();
   const { tableOpen, setTableOpen, map } = useMapRef();
@@ -14,6 +16,7 @@ export function AttributeTable() {
   const [field, setField] = useState("");
   const [operator, setOperator] = useState("contains");
   const [value, setValue] = useState("");
+  const [page, setPage] = useState(0);
   const layer = wb.activeLayer;
 
   const keys = useMemo(
@@ -51,6 +54,24 @@ export function AttributeTable() {
       });
   }, [layer, query, field, operator, value]);
 
+  const pageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  const safePage = Math.min(page, pageCount - 1);
+  const visibleRows = useMemo(
+    () => rows.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE),
+    [rows, safePage],
+  );
+  const selectedIndexes = useMemo(
+    () =>
+      new Set(
+        wb.selectedFeatures
+          .filter((selection) => selection.layerId === layer?.id)
+          .map((selection) => selection.index),
+      ),
+    [layer?.id, wb.selectedFeatures],
+  );
+
+  useEffect(() => setPage(0), [layer?.id, query, field, operator, value]);
+
   const selectResults = () => {
     if (!layer) return;
     wb.setSelectedFeatures(rows.map(({ index }) => ({ layerId: layer.id, index })));
@@ -81,6 +102,29 @@ export function AttributeTable() {
         <span className="num rounded-full bg-secondary px-2 text-[10px] text-muted-foreground">
           {rows.length} rows
         </span>
+        {rows.length > PAGE_SIZE && (
+          <div className="flex items-center gap-1 text-[10px]">
+            <button
+              onClick={() => setPage((current) => Math.max(0, current - 1))}
+              disabled={safePage === 0}
+              className="rounded-md bg-secondary px-2 py-1 disabled:opacity-40"
+              aria-label="Previous table page"
+            >
+              Previous
+            </button>
+            <span className="num text-muted-foreground">
+              {safePage + 1}/{pageCount}
+            </span>
+            <button
+              onClick={() => setPage((current) => Math.min(pageCount - 1, current + 1))}
+              disabled={safePage >= pageCount - 1}
+              className="rounded-md bg-secondary px-2 py-1 disabled:opacity-40"
+              aria-label="Next table page"
+            >
+              Next
+            </button>
+          </div>
+        )}
         <div className="ml-auto flex items-center gap-2">
           <div className="flex items-center gap-1 rounded-lg border border-border bg-card px-2 py-1">
             <Search className="size-3.5 text-muted-foreground" />
@@ -172,10 +216,9 @@ export function AttributeTable() {
               </tr>
             </thead>
             <tbody>
-              {rows.map(({ f, index }) => {
-                const selected = wb.selectedFeatures.some(
-                  (selection) => selection.layerId === layer.id && selection.index === index,
-                );
+              {visibleRows.map(({ f, index }) => {
+                const selected = selectedIndexes.has(index);
+                const area = squareMeters(f);
                 return (
                   <tr
                     key={index}
@@ -200,7 +243,7 @@ export function AttributeTable() {
                   >
                     <td className="num px-2 py-1 text-muted-foreground">{index + 1}</td>
                     <td className="num whitespace-nowrap px-2 py-1">
-                      {squareMeters(f) > 0 ? formatArea(squareMeters(f), wb.units.area) : "—"}
+                      {area > 0 ? formatArea(area, wb.units.area) : "—"}
                     </td>
                     {keys.map((k) => {
                       const v = (f.properties ?? {})[k];

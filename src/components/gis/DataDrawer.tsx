@@ -83,7 +83,7 @@ export function DataDrawer() {
       ...(entry.requiresViewport ? { requiresViewport: true } : {}),
       ...(entry.minZoom !== undefined ? { minZoom: entry.minZoom } : {}),
     };
-    if (entry.requiresViewport && entry.minZoom && map && map.getZoom() < entry.minZoom) {
+    if (entry.requiresViewport) {
       wb.addLayer({
         name: entry.name,
         data: { type: "FeatureCollection", features: [] },
@@ -92,7 +92,10 @@ export function DataDrawer() {
         style: catalogLayerStyle(entry),
       });
       toast.success(`${entry.name} added`, {
-        description: `It will load automatically when you reach zoom ${entry.minZoom} or closer.`,
+        description:
+          entry.minZoom && map && map.getZoom() < entry.minZoom
+            ? `It will load automatically when you reach zoom ${entry.minZoom} or closer.`
+            : "Loading the visible map area now.",
       });
       setDrawerOpen(false);
       return;
@@ -103,7 +106,7 @@ export function DataDrawer() {
       const data = await fetchRemoteGeoJSON(entry.url, {
         ...(bboxValue ? { bbox: bboxValue } : {}),
         ...(where ? { where } : {}),
-        maxFeatures: 3000,
+        maxFeatures: 2000,
       });
       if (data.features.length === 0) {
         wb.addLayer({
@@ -131,26 +134,9 @@ export function DataDrawer() {
       });
       setDrawerOpen(false);
     } catch (err) {
-      if (entry.requiresViewport) {
-        wb.addLayer({
-          name: entry.name,
-          data: { type: "FeatureCollection", features: [] },
-          groupId: "public",
-          source,
-          style: catalogLayerStyle(entry),
-        });
-        toast.warning(`${entry.name} was added and will retry`, {
-          description:
-            err instanceof Error
-              ? `${err.message}. Pan or zoom the map to retry the visible area.`
-              : "Pan or zoom the map to retry the visible area.",
-        });
-        setDrawerOpen(false);
-      } else {
-        toast.error(`Couldn't load ${entry.name}`, {
-          description: err instanceof Error ? err.message : "The service did not respond",
-        });
-      }
+      toast.error(`Couldn't load ${entry.name}`, {
+        description: err instanceof Error ? err.message : "The service did not respond",
+      });
     } finally {
       setLoadingId(null);
     }
@@ -164,7 +150,7 @@ export function DataDrawer() {
       const bboxValue = viewportBbox();
       const data = await fetchRemoteGeoJSON(url, {
         ...(bboxValue ? { bbox: bboxValue } : {}),
-        maxFeatures: 3000,
+        maxFeatures: 2000,
       });
       wb.addLayer({
         name: url.split("/").filter(Boolean).slice(-3).join("/"),

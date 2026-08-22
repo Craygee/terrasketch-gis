@@ -34,6 +34,26 @@ const lastProjectKey = (userId: string) => `terrasketch.last-project.${userId}`;
 
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 
+const compactState = (state: ProjectState): ProjectState => {
+  const compact = clone(state);
+  compact.layers = compact.layers.map((layer) => {
+    if (layer.source.kind !== "remote" || !layer.source.requiresViewport) return layer;
+    delete layer.source.lastRefreshedAt;
+    delete layer.source.loading;
+    return { ...layer, data: { type: "FeatureCollection", features: [] } };
+  });
+  return compact;
+};
+
+const compactProject = (project: StoredProject): StoredProject => ({
+  ...project,
+  state: compactState(project.state),
+  versions: (project.versions ?? []).map((version) => ({
+    ...version,
+    state: compactState(version.state),
+  })),
+});
+
 const readProjects = (): StoredProject[] => {
   try {
     return JSON.parse(window.localStorage.getItem(WORKSPACE_KEY) ?? "[]") as StoredProject[];
@@ -63,7 +83,7 @@ export const workspaceProjectStore = {
 
   async create(userId: string, name: string, state: ProjectState): Promise<StoredProject> {
     const now = Date.now();
-    const cleanState = { ...clone(state), name };
+    const cleanState = { ...compactState(state), name };
     const project: StoredProject = {
       id: window.crypto.randomUUID(),
       userId,
@@ -82,18 +102,34 @@ export const workspaceProjectStore = {
   },
 
   async load(userId: string, projectId: string): Promise<StoredProject | null> {
-    const project = readProjects().find((item) => item.userId === userId && item.id === projectId);
-    if (project) window.localStorage.setItem(lastProjectKey(userId), project.id);
-    return project ? clone(project) : null;
+    const projects = readProjects();
+    const index = projects.findIndex((item) => item.userId === userId && item.id === projectId);
+    if (index < 0) return null;
+    const stored = projects[index] as StoredProject;
+    const project = compactProject(stored);
+    if (JSON.stringify(stored) !== JSON.stringify(project)) {
+      projects[index] = project;
+      writeProjects(projects);
+    }
+    window.localStorage.setItem(lastProjectKey(userId), project.id);
+    return clone(project);
   },
 
   async loadLast(userId: string): Promise<StoredProject | null> {
-    const projects = readProjects().filter((item) => item.userId === userId);
+    const projects = readProjects();
+    const userProjects = projects.filter((item) => item.userId === userId);
     const lastId = window.localStorage.getItem(lastProjectKey(userId));
-    const project =
-      projects.find((item) => item.id === lastId) ??
-      projects.sort((a, b) => b.updatedAt - a.updatedAt)[0];
-    return project ? clone(project) : null;
+    const stored =
+      userProjects.find((item) => item.id === lastId) ??
+      userProjects.sort((a, b) => b.updatedAt - a.updatedAt)[0];
+    if (!stored) return null;
+    const project = compactProject(stored);
+    if (JSON.stringify(stored) !== JSON.stringify(project)) {
+      const index = projects.findIndex((item) => item.id === stored.id);
+      if (index >= 0) projects[index] = project;
+      writeProjects(projects);
+    }
+    return clone(project);
   },
 
   async save(
@@ -105,13 +141,22 @@ export const workspaceProjectStore = {
     const projects = readProjects();
     const index = projects.findIndex((item) => item.userId === userId && item.id === projectId);
     if (index < 0) throw new Error("Project was not found");
-    const current = projects[index] as StoredProject;
+    const storedCurrent = projects[index] as StoredProject;
+    const current = compactProject(storedCurrent);
+    const cleanState = compactState(state);
+    if (reason === "autosave" && JSON.stringify(current.state) === JSON.stringify(cleanState)) {
+      if (JSON.stringify(storedCurrent) !== JSON.stringify(current)) {
+        projects[index] = current;
+        writeProjects(projects);
+      }
+      return clone(current);
+    }
     const now = Date.now();
     const snapshot: ProjectVersion = {
       id: window.crypto.randomUUID(),
       savedAt: now,
       reason,
-      state: clone(state),
+      state: cleanState,
     };
     let versions = current.versions ?? [];
     if (
@@ -123,8 +168,8 @@ export const workspaceProjectStore = {
     else versions = [snapshot, ...versions];
     const project: StoredProject = {
       ...current,
-      name: state.name,
-      state: clone(state),
+      name: cleanState.name,
+      state: cleanState,
       updatedAt: now,
       versions: versions.slice(0, 25),
     };

@@ -30,6 +30,9 @@ export interface RemoteQueryOptions {
   /** [west, south, east, north] in WGS84 */
   bbox?: [number, number, number, number] | undefined;
   maxFeatures?: number | undefined;
+  maxAllowableOffset?: number | undefined;
+  geometryPrecision?: number | undefined;
+  cacheHint?: boolean | undefined;
   where?: string | undefined;
   signal?: AbortSignal | undefined;
 }
@@ -42,9 +45,12 @@ export function buildArcgisQueryUrl(layerUrl: string, opts: RemoteQueryOptions =
     outSR: "4326",
     f: "geojson",
     returnGeometry: "true",
-    geometryPrecision: "6",
+    geometryPrecision: String(opts.geometryPrecision ?? 6),
     resultRecordCount: String(opts.maxFeatures ?? 2000),
   });
+  if (opts.maxAllowableOffset !== undefined)
+    params.set("maxAllowableOffset", String(opts.maxAllowableOffset));
+  if (opts.cacheHint) params.set("cacheHint", "true");
   if (opts.bbox) {
     params.set("geometry", opts.bbox.join(","));
     params.set("geometryType", "esriGeometryEnvelope");

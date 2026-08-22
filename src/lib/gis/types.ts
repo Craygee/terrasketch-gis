@@ -38,6 +38,7 @@ export type LayerSource =
       minZoom?: number;
       refreshMinutes?: number;
       lastRefreshedAt?: number;
+      loading?: boolean;
     };
 
 export interface GisLayer {
