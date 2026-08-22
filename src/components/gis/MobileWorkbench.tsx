@@ -55,12 +55,18 @@ function MobileShell() {
           <span className="flex size-8 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground">
             <Mountain className="size-4" />
           </span>
-          <input
-            value={wb.projectName}
-            onChange={(event) => wb.setProjectName(event.target.value)}
-            aria-label="Project name"
+          <select
+            value={wb.projectId}
+            onChange={(event) => void wb.openProject(event.target.value)}
+            aria-label="Switch project"
             className="min-w-0 w-36 bg-transparent text-sm font-bold outline-none"
-          />
+          >
+            {wb.projects.map((project) => (
+              <option key={project.id} value={project.id}>
+                {project.name}
+              </option>
+            ))}
+          </select>
         </div>
         <div className="pointer-events-auto ml-auto">
           <SearchBox />
@@ -87,7 +93,7 @@ function MobileShell() {
                 : sheet === "draw"
                   ? "Draw and measure"
                   : sheet === "projects"
-                    ? "Projects and account"
+                    ? "Projects and settings"
                     : "Export"}
             </h2>
             <button

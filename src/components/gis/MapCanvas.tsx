@@ -19,6 +19,7 @@ import { useMapRef } from "@/lib/gis/mapRef";
 import { getBasemap } from "@/lib/gis/basemaps";
 import { buildLayerSpecs, sourceId, allLayerIds } from "@/lib/gis/mapStyle";
 import { composeLabel } from "@/lib/gis/labels";
+import type { GisLayer } from "@/lib/gis/types";
 import {
   formatArea,
   formatLength,
@@ -53,9 +54,16 @@ interface SelectionBoxState {
 interface PreparedCacheEntry {
   data: FeatureCollection;
   labelKey: string;
-  selectionKey: string;
   fc: FeatureCollection;
 }
+
+const sourcePerformanceOptions = (layer: GisLayer, featureCount: number) => {
+  if (layer.source.kind === "remote" && layer.source.requiresViewport)
+    return { tolerance: 0.8, maxzoom: 17, buffer: 64, generateId: true };
+  if (featureCount >= 10_000) return { tolerance: 1.2, maxzoom: 16, buffer: 64, generateId: true };
+  if (featureCount >= 2_000) return { tolerance: 0.75, maxzoom: 17, buffer: 96, generateId: true };
+  return { tolerance: 0.375, maxzoom: 18, buffer: 128, generateId: true };
+};
 
 function renderedLayerId(styleLayerId: string): string {
   return styleLayerId.replace(/^(hl-point|fill|line|point|label|hl)-/, "");
@@ -81,6 +89,7 @@ export function MapCanvas() {
   const sourcePayloadRef = useRef(new Map<string, FeatureCollection>());
   const styleSignatureRef = useRef(new Map<string, string>());
   const orderSignatureRef = useRef("");
+  const selectedStateRef = useRef(new Map<string, Set<number>>());
 
   const drawModeRef = useRef(wb.drawMode);
   drawModeRef.current = wb.drawMode;
@@ -145,25 +154,11 @@ export function MapCanvas() {
       ...wb.groups.flatMap((group) => wb.layers.filter((layer) => layer.groupId === group.id)),
       ...wb.layers.filter((layer) => !wb.groups.some((group) => group.id === layer.groupId)),
     ];
-    const selectedByLayer = new Map<string, number[]>();
-    for (const selection of wb.selectedFeatures) {
-      const indexes = selectedByLayer.get(selection.layerId) ?? [];
-      indexes.push(selection.index);
-      selectedByLayer.set(selection.layerId, indexes);
-    }
     const nextCache = new Map<string, PreparedCacheEntry>();
     const result = ordered.map((layer) => {
-      const selectedIndexes = selectedByLayer.get(layer.id) ?? [];
-      const selectionKey = [...selectedIndexes].sort((a, b) => a - b).join(",");
-      const selected = new Set(selectedIndexes);
-      const labelKey = `${layer.style.labelEnabled}:${layer.style.labelTemplate}`;
+      const labelKey = layer.style.labelTemplate;
       const cached = preparedCacheRef.current.get(layer.id);
-      if (
-        cached &&
-        cached.data === layer.data &&
-        cached.labelKey === labelKey &&
-        cached.selectionKey === selectionKey
-      ) {
+      if (cached && cached.data === layer.data && cached.labelKey === labelKey) {
         nextCache.set(layer.id, cached);
         return { layer, fc: cached.fc };
       }
@@ -172,20 +167,18 @@ export function MapCanvas() {
         properties: {
           ...(f.properties ?? {}),
           __idx: index,
-          __selected: selected.has(index),
-          __label:
-            layer.style.labelEnabled && layer.style.labelTemplate
-              ? composeLabel(f as never, layer.style.labelTemplate)
-              : "",
+          __label: layer.style.labelTemplate
+            ? composeLabel(f as never, layer.style.labelTemplate)
+            : "",
         },
       }));
       const fc = { type: "FeatureCollection", features } as FeatureCollection;
-      nextCache.set(layer.id, { data: layer.data, labelKey, selectionKey, fc });
+      nextCache.set(layer.id, { data: layer.data, labelKey, fc });
       return { layer, fc };
     });
     preparedCacheRef.current = nextCache;
     return result;
-  }, [wb.groups, wb.layers, wb.selectedFeatures]);
+  }, [wb.groups, wb.layers]);
 
   useEffect(() => {
     const map = mapObj.current;
@@ -218,11 +211,11 @@ export function MapCanvas() {
           if (existing) {
             if (sourcePayloadRef.current.get(sid) !== fc) existing.setData(fc);
           } else {
-            const viewportOptions =
-              layer.source.kind === "remote" && layer.source.requiresViewport
-                ? { tolerance: 0.6, maxzoom: 18 }
-                : {};
-            map.addSource(sid, { type: "geojson", data: fc, ...viewportOptions });
+            map.addSource(sid, {
+              type: "geojson",
+              data: fc,
+              ...sourcePerformanceOptions(layer, fc.features.length),
+            });
           }
           sourcePayloadRef.current.set(sid, fc);
 
@@ -273,6 +266,33 @@ export function MapCanvas() {
       if (retryTimer) clearTimeout(retryTimer);
     };
   }, [prepared, ready, styleRevision]);
+
+  useEffect(() => {
+    const map = mapObj.current;
+    if (!map || !ready) return;
+    const next = new Map<string, Set<number>>();
+    for (const selection of wb.selectedFeatures) {
+      const sid = sourceId(selection.layerId);
+      const indexes = next.get(sid) ?? new Set<number>();
+      indexes.add(selection.index);
+      next.set(sid, indexes);
+    }
+    for (const [sid, indexes] of selectedStateRef.current) {
+      if (!map.getSource(sid)) continue;
+      const nextIndexes = next.get(sid) ?? new Set<number>();
+      for (const index of indexes)
+        if (!nextIndexes.has(index))
+          map.setFeatureState({ source: sid, id: index }, { selected: false });
+    }
+    for (const [sid, indexes] of next) {
+      if (!map.getSource(sid)) continue;
+      const previous = selectedStateRef.current.get(sid) ?? new Set<number>();
+      for (const index of indexes)
+        if (!previous.has(index))
+          map.setFeatureState({ source: sid, id: index }, { selected: true });
+    }
+    selectedStateRef.current = next;
+  }, [prepared, ready, wb.selectedFeatures]);
 
   /* ---------------- draft (sketch in progress) ---------------- */
   const draftFc = useMemo<FeatureCollection>(() => {

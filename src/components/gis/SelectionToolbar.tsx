@@ -54,7 +54,7 @@ export function SelectionToolbar({ mobile = false }: { mobile?: boolean }) {
   const createCombinedLayer = () => {
     const layer = wb.addLayer({
       name: `${first.layer.name} · ${selected.length} selected`,
-      groupId: first.layer.groupId,
+      groupId: wb.derivedLayerGroupId,
       source: {
         kind: "derived",
         sourceLayerId: first.layer.id,
@@ -79,7 +79,7 @@ export function SelectionToolbar({ mobile = false }: { mobile?: boolean }) {
       const properties = (feature.properties ?? {}) as Record<string, unknown>;
       wb.addLayer({
         name: featureName(properties, `${layer.name} · feature ${index + 1}`),
-        groupId: layer.groupId,
+        groupId: wb.derivedLayerGroupId,
         source: { kind: "derived", sourceLayerId: layer.id, query: "Selected feature" },
         data: { ...EMPTY_FC, features: [structuredClone(feature)] },
         style: layer.style,

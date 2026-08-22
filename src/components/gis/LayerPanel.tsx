@@ -16,6 +16,7 @@ import {
   FolderPlus,
   Layers,
   Loader2,
+  Tag,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -28,6 +29,7 @@ import type { FillPattern, GisLayer, StrokePattern } from "@/lib/gis/types";
 import { StyleEditor } from "./StyleEditor";
 import { cn } from "@/lib/utils";
 import type { LayerSource } from "@/lib/gis/types";
+import { labelFieldsFromTemplate } from "@/lib/gis/labels";
 
 const exportFormats: Array<{ id: ExportFormat; label: string }> = [
   { id: "geojson", label: "GeoJSON" },
@@ -213,7 +215,11 @@ export function LayerPanel() {
                   {layers.map((layer) => {
                     const selected = wb.selectedLayerIds.includes(layer.id);
                     const expanded = expandedLayers.has(layer.id);
-                    const sqm = squareMeters(layer.data);
+                    const sqm = expanded ? squareMeters(layer.data) : 0;
+                    const labelFields =
+                      layer.style.labelFields?.length > 0
+                        ? layer.style.labelFields
+                        : labelFieldsFromTemplate(layer.style.labelTemplate);
                     return (
                       <div
                         key={layer.id}
@@ -294,6 +300,45 @@ export function LayerPanel() {
                             className="min-w-0 flex-1 text-left"
                           >
                             <div className="truncate text-xs font-medium">{layer.name}</div>
+                            {labelFields.length > 0 && (
+                              <div className="num flex items-center gap-1 truncate text-[9px] text-muted-foreground">
+                                <Tag className="size-2.5 shrink-0" />
+                                {layer.style.labelEnabled ? "Labels" : "Labels off"} ·{" "}
+                                {labelFields.join(" + ")}
+                              </div>
+                            )}
+                          </button>
+                          <button
+                            onClick={() => {
+                              if (layer.style.labelTemplate.trim())
+                                wb.updateStyle(layer.id, {
+                                  labelEnabled: !layer.style.labelEnabled,
+                                });
+                              else {
+                                setStyleFor(layer.id);
+                                setExpandedLayers((current) => new Set(current).add(layer.id));
+                              }
+                            }}
+                            aria-label={
+                              layer.style.labelTemplate.trim()
+                                ? layer.style.labelEnabled
+                                  ? "Turn labels off"
+                                  : "Turn labels on"
+                                : "Set up labels"
+                            }
+                            title={
+                              layer.style.labelTemplate.trim()
+                                ? layer.style.labelEnabled
+                                  ? "Turn labels off"
+                                  : "Turn labels on"
+                                : "Set up labels"
+                            }
+                            className={cn(
+                              "rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground",
+                              layer.style.labelEnabled && "bg-primary text-primary-foreground",
+                            )}
+                          >
+                            <Tag className="size-3.5" />
                           </button>
                           <GripVertical
                             className="size-4 shrink-0 cursor-grab text-muted-foreground active:cursor-grabbing"
@@ -354,50 +399,6 @@ export function LayerPanel() {
                               />
                             </div>
 
-                            <div className="grid grid-cols-2 gap-1">
-                              <label className="text-[10px] text-muted-foreground">
-                                Move to
-                                <select
-                                  value={layer.groupId}
-                                  onChange={(e) => wb.setLayerGroup(layer.id, e.target.value)}
-                                  aria-label="Move layer to category"
-                                  className="mt-0.5 w-full rounded-lg border border-border bg-card px-2 py-1 text-[11px] text-foreground"
-                                >
-                                  {wb.groups.map((g) => (
-                                    <option key={g.id} value={g.id}>
-                                      {g.name}
-                                    </option>
-                                  ))}
-                                </select>
-                              </label>
-                              <label className="text-[10px] text-muted-foreground">
-                                Duplicate into
-                                <select
-                                  value={duplicateTargets[layer.id] ?? layer.groupId}
-                                  onChange={(event) => {
-                                    const groupId = event.target.value;
-                                    wb.duplicateLayer(layer.id, groupId);
-                                    setDuplicateTargets((current) => ({
-                                      ...current,
-                                      [layer.id]: layer.groupId,
-                                    }));
-                                    const target = wb.groups.find((group) => group.id === groupId);
-                                    toast.success(
-                                      `Layer duplicated into ${target?.name ?? "category"}`,
-                                    );
-                                  }}
-                                  aria-label="Duplicate layer into category"
-                                  className="mt-0.5 w-full rounded-lg border border-border bg-card px-2 py-1 text-[11px] text-foreground"
-                                >
-                                  {wb.groups.map((g) => (
-                                    <option key={g.id} value={g.id}>
-                                      {g.name}
-                                    </option>
-                                  ))}
-                                </select>
-                              </label>
-                            </div>
-
                             {exportFor === layer.id && (
                               <div className="grid grid-cols-2 gap-1">
                                 {exportFormats.map((f) => (
@@ -422,9 +423,64 @@ export function LayerPanel() {
 
                             {styleFor === layer.id && <StyleEditor layer={layer} />}
 
-                            {layer.source.kind === "remote" && (
-                              <RemoteLayerSettings layerId={layer.id} source={layer.source} />
-                            )}
+                            <details className="group rounded-lg border border-border bg-card/50">
+                              <summary className="flex cursor-pointer list-none items-center gap-1 px-2 py-1.5 text-[10px] font-semibold">
+                                <ChevronRight className="size-3.5 transition-transform group-open:rotate-90" />
+                                Advanced layer options
+                              </summary>
+                              <div className="space-y-2 border-t border-border p-2">
+                                <div className="grid grid-cols-2 gap-1">
+                                  <label className="text-[10px] text-muted-foreground">
+                                    Move to
+                                    <select
+                                      value={layer.groupId}
+                                      onChange={(event) =>
+                                        wb.setLayerGroup(layer.id, event.target.value)
+                                      }
+                                      aria-label="Move layer to category"
+                                      className="mt-0.5 w-full rounded-lg border border-border bg-card px-2 py-1 text-[11px] text-foreground"
+                                    >
+                                      {wb.groups.map((group) => (
+                                        <option key={group.id} value={group.id}>
+                                          {group.name}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </label>
+                                  <label className="text-[10px] text-muted-foreground">
+                                    Duplicate into
+                                    <select
+                                      value={duplicateTargets[layer.id] ?? layer.groupId}
+                                      onChange={(event) => {
+                                        const groupId = event.target.value;
+                                        wb.duplicateLayer(layer.id, groupId);
+                                        setDuplicateTargets((current) => ({
+                                          ...current,
+                                          [layer.id]: layer.groupId,
+                                        }));
+                                        const target = wb.groups.find(
+                                          (group) => group.id === groupId,
+                                        );
+                                        toast.success(
+                                          `Layer duplicated into ${target?.name ?? "category"}`,
+                                        );
+                                      }}
+                                      aria-label="Duplicate layer into category"
+                                      className="mt-0.5 w-full rounded-lg border border-border bg-card px-2 py-1 text-[11px] text-foreground"
+                                    >
+                                      {wb.groups.map((group) => (
+                                        <option key={group.id} value={group.id}>
+                                          {group.name}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </label>
+                                </div>
+                                {layer.source.kind === "remote" && (
+                                  <RemoteLayerSettings layerId={layer.id} source={layer.source} />
+                                )}
+                              </div>
+                            </details>
                           </div>
                         )}
                       </div>

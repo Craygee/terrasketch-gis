@@ -73,6 +73,7 @@ export function RemoteLayerManager() {
       const latitude = (visibleBbox[1] + visibleBbox[3]) / 2;
       const tuning = queryTuning(mapZoom, latitude);
       const now = Date.now();
+      const pending: Promise<void>[] = [];
       for (const layer of layersRef.current) {
         if (!layer.visible || layer.source.kind !== "remote") continue;
         const source = layer.source;
@@ -100,30 +101,35 @@ export function RemoteLayerManager() {
         const controller = new AbortController();
         requests.set(layer.id, controller);
         updateRef.current(layer.id, { source: { ...source, loading: true } });
-        try {
-          const data = await fetchRemoteGeoJSON(source.url, {
-            bbox: queryBbox,
-            where: source.where,
-            maxFeatures: 2000,
-            maxAllowableOffset: tuning.maxAllowableOffset,
-            geometryPrecision: tuning.geometryPrecision,
-            cacheHint: true,
-            signal: controller.signal,
-          });
-          coverage.current.set(layer.id, { bbox: queryBbox, zoomBucket, queryKey });
-          updateRef.current(layer.id, {
-            data,
-            source: { ...source, loading: false, lastRefreshedAt: Date.now() },
-          });
-        } catch (error) {
-          if (!(error instanceof DOMException && error.name === "AbortError")) {
-            updateRef.current(layer.id, { source: { ...source, loading: false } });
-            console.warn(`[data] refresh failed for ${layer.name}`, error);
-          }
-        } finally {
-          if (requests.get(layer.id) === controller) requests.delete(layer.id);
-        }
+        pending.push(
+          (async () => {
+            try {
+              const data = await fetchRemoteGeoJSON(source.url, {
+                bbox: queryBbox,
+                where: source.where,
+                maxFeatures: 2000,
+                maxAllowableOffset: tuning.maxAllowableOffset,
+                geometryPrecision: tuning.geometryPrecision,
+                cacheHint: true,
+                signal: controller.signal,
+              });
+              coverage.current.set(layer.id, { bbox: queryBbox, zoomBucket, queryKey });
+              updateRef.current(layer.id, {
+                data,
+                source: { ...source, loading: false, lastRefreshedAt: Date.now() },
+              });
+            } catch (error) {
+              if (!(error instanceof DOMException && error.name === "AbortError")) {
+                updateRef.current(layer.id, { source: { ...source, loading: false } });
+                console.warn(`[data] refresh failed for ${layer.name}`, error);
+              }
+            } finally {
+              if (requests.get(layer.id) === controller) requests.delete(layer.id);
+            }
+          })(),
+        );
       }
+      await Promise.all(pending);
     };
 
     void refresh(false);

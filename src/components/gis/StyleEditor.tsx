@@ -1,7 +1,12 @@
-import { Tag } from "lucide-react";
+import { ChevronRight, Tag, X } from "lucide-react";
 import { useWorkbench } from "@/lib/gis/store";
 import type { FillPattern, GisLayer, StrokePattern } from "@/lib/gis/types";
-import { LABEL_TOKENS, propertyKeys } from "@/lib/gis/labels";
+import {
+  buildLabelTemplate,
+  labelFieldsFromTemplate,
+  LABEL_TOKENS,
+  propertyKeys,
+} from "@/lib/gis/labels";
 import { cn } from "@/lib/utils";
 
 const patterns: FillPattern[] = [
@@ -21,16 +26,30 @@ const strokePatterns: Array<{ value: StrokePattern; label: string }> = [
 export function StyleEditor({ layer }: { layer: GisLayer }) {
   const wb = useWorkbench();
   const s = layer.style;
-  const keys = propertyKeys(layer.data.features as never).slice(0, 24);
+  const keys = propertyKeys(layer.data.features as never).filter((key) => !key.startsWith("__"));
+  const availableFields = Array.from(new Set([...keys, ...LABEL_TOKENS]));
+  const selectedFields =
+    s.labelFields?.length > 0 ? s.labelFields : labelFieldsFromTemplate(s.labelTemplate);
+  const separator = s.labelSeparator || " · ";
+
+  const applyLabelFields = (fields: string[], nextSeparator = separator) => {
+    const unique = Array.from(new Set(fields.filter(Boolean))).slice(0, 4);
+    wb.updateStyle(layer.id, {
+      labelFields: unique,
+      labelSeparator: nextSeparator,
+      labelTemplate: buildLabelTemplate(unique, nextSeparator),
+      labelEnabled: unique.length > 0,
+    });
+  };
 
   return (
-    <div className="space-y-4 rounded-xl border border-border bg-secondary/40 p-3">
+    <div className="space-y-3 rounded-xl border border-border bg-secondary/40 p-3">
       <div className="grid grid-cols-2 gap-3">
         <Field label="Fill color">
           <input
             type="color"
             value={s.fillColor}
-            onChange={(e) => wb.updateStyle(layer.id, { fillColor: e.target.value })}
+            onChange={(event) => wb.updateStyle(layer.id, { fillColor: event.target.value })}
             className="h-8 w-full cursor-pointer rounded-lg border border-border bg-card"
             aria-label="Fill color"
           />
@@ -39,38 +58,12 @@ export function StyleEditor({ layer }: { layer: GisLayer }) {
           <input
             type="color"
             value={s.strokeColor}
-            onChange={(e) => wb.updateStyle(layer.id, { strokeColor: e.target.value })}
+            onChange={(event) => wb.updateStyle(layer.id, { strokeColor: event.target.value })}
             className="h-8 w-full cursor-pointer rounded-lg border border-border bg-card"
             aria-label="Stroke color"
           />
         </Field>
       </div>
-
-      <Field label="Stroke pattern">
-        <div className="grid grid-cols-3 gap-1">
-          {strokePatterns.map((pattern) => (
-            <button
-              key={pattern.value}
-              onClick={() => wb.updateStyle(layer.id, { strokePattern: pattern.value })}
-              className={cn(
-                "rounded-lg border px-2 py-1 text-[11px] transition-colors",
-                (s.strokePattern ?? "solid") === pattern.value
-                  ? "border-primary bg-primary text-primary-foreground"
-                  : "border-border bg-card hover:bg-accent",
-              )}
-            >
-              <span
-                className="mx-auto mb-1 block w-8 border-t-2"
-                style={{
-                  borderColor: "currentColor",
-                  borderTopStyle: pattern.value === "solid" ? "solid" : pattern.value,
-                }}
-              />
-              {pattern.label}
-            </button>
-          ))}
-        </div>
-      </Field>
 
       <Field label={`Fill opacity ${Math.round(s.fillOpacity * 100)}%`}>
         <div className="flex items-center gap-2">
@@ -80,7 +73,9 @@ export function StyleEditor({ layer }: { layer: GisLayer }) {
             max={1}
             step={0.05}
             value={s.fillOpacity}
-            onChange={(e) => wb.updateStyle(layer.id, { fillOpacity: Number(e.target.value) })}
+            onChange={(event) =>
+              wb.updateStyle(layer.id, { fillOpacity: Number(event.target.value) })
+            }
             className="min-w-0 flex-1 accent-primary"
           />
           <button
@@ -89,7 +84,7 @@ export function StyleEditor({ layer }: { layer: GisLayer }) {
             }
             aria-pressed={s.fillOpacity === 0}
             className={cn(
-              "shrink-0 rounded-lg border px-2 py-1 text-[11px] font-medium transition-colors",
+              "shrink-0 rounded-lg border px-2 py-1 text-[11px] font-medium",
               s.fillOpacity === 0
                 ? "border-primary bg-primary text-primary-foreground"
                 : "border-border bg-card hover:bg-accent",
@@ -100,110 +95,201 @@ export function StyleEditor({ layer }: { layer: GisLayer }) {
         </div>
       </Field>
 
-      <Field label="Fill pattern">
-        <div className="grid grid-cols-3 gap-1">
-          {patterns.map((p) => (
-            <button
-              key={p}
-              onClick={() => wb.updateStyle(layer.id, { fillPattern: p })}
-              className={cn(
-                "rounded-lg border px-1 py-1 text-[11px] capitalize transition-colors",
-                s.fillPattern === p
-                  ? "border-primary bg-primary text-primary-foreground"
-                  : "border-border bg-card hover:bg-accent",
-              )}
-            >
-              {p}
-            </button>
-          ))}
-        </div>
-      </Field>
-
-      <div className="grid grid-cols-2 gap-3">
-        <Field label={`Stroke ${s.strokeWidth}px`}>
-          <input
-            type="range"
-            min={0}
-            max={10}
-            step={0.5}
-            value={s.strokeWidth}
-            onChange={(e) => wb.updateStyle(layer.id, { strokeWidth: Number(e.target.value) })}
-            className="w-full accent-primary"
-          />
-        </Field>
-        <Field label={`Point size ${s.pointSize}px`}>
-          <input
-            type="range"
-            min={2}
-            max={20}
-            step={1}
-            value={s.pointSize}
-            onChange={(e) => wb.updateStyle(layer.id, { pointSize: Number(e.target.value) })}
-            className="w-full accent-primary"
-          />
-        </Field>
-      </div>
-
-      <div className="space-y-2 border-t border-border pt-3">
+      <section className="space-y-2 border-t border-border pt-3">
         <label className="flex items-center gap-2 text-xs font-medium">
           <input
             type="checkbox"
             checked={s.labelEnabled}
-            onChange={(e) => wb.updateStyle(layer.id, { labelEnabled: e.target.checked })}
+            disabled={!s.labelTemplate.trim()}
+            onChange={(event) => wb.updateStyle(layer.id, { labelEnabled: event.target.checked })}
             className="accent-primary"
           />
           <Tag className="size-3.5 text-primary" /> Show labels
         </label>
-        <input
-          value={s.labelTemplate}
-          onChange={(e) => wb.updateStyle(layer.id, { labelTemplate: e.target.value })}
-          placeholder="{OWNER} · {ACRES} acres"
-          aria-label="Label template"
-          className="num w-full rounded-lg border border-border bg-card px-2 py-1.5 text-xs outline-none focus:border-primary"
-        />
-        <div className="flex flex-wrap gap-1">
-          {Array.from(new Set([...LABEL_TOKENS, ...keys]))
-            .slice(0, 20)
-            .map((token) => (
-              <button
-                key={token}
-                onClick={() =>
+
+        <label className="block text-[11px] font-medium text-muted-foreground">
+          Label from attribute fields
+          <select
+            value=""
+            onChange={(event) => {
+              if (event.target.value) applyLabelFields([...selectedFields, event.target.value]);
+            }}
+            aria-label="Add label attribute field"
+            className="mt-1 w-full rounded-lg border border-border bg-card px-2 py-1.5 text-xs text-foreground"
+          >
+            <option value="">Choose a field…</option>
+            {availableFields
+              .filter((field) => !selectedFields.includes(field))
+              .map((field) => (
+                <option key={field} value={field}>
+                  {field}
+                </option>
+              ))}
+          </select>
+        </label>
+
+        {selectedFields.length > 0 ? (
+          <div className="flex flex-wrap gap-1">
+            {selectedFields.map((field) => (
+              <span
+                key={field}
+                className="num flex items-center gap-1 rounded-full bg-card px-2 py-1 text-[10px]"
+              >
+                {field}
+                <button
+                  onClick={() => applyLabelFields(selectedFields.filter((item) => item !== field))}
+                  aria-label={`Remove ${field} from labels`}
+                  className="text-muted-foreground hover:text-destructive"
+                >
+                  <X className="size-3" />
+                </button>
+              </span>
+            ))}
+          </div>
+        ) : (
+          <p className="text-[10px] text-muted-foreground">
+            Choose one or more fields to label every feature.
+          </p>
+        )}
+
+        <details className="group rounded-lg border border-border bg-card/70">
+          <summary className="flex cursor-pointer list-none items-center gap-1 px-2 py-1.5 text-[11px] font-medium">
+            <ChevronRight className="size-3.5 transition-transform group-open:rotate-90" />
+            Advanced labeling
+          </summary>
+          <div className="space-y-2 border-t border-border p-2">
+            <Field label="Field separator">
+              <select
+                value={separator}
+                onChange={(event) => applyLabelFields(selectedFields, event.target.value)}
+                className="w-full rounded-lg border border-border bg-secondary px-2 py-1 text-xs"
+              >
+                <option value=" · ">Dot · separator</option>
+                <option value=", ">Comma separator</option>
+                <option value=" — ">Dash separator</option>
+                <option value=" / ">Slash separator</option>
+                <option value="\n">New line</option>
+                <option value=" ">Space</option>
+              </select>
+            </Field>
+            <Field label="Custom label template">
+              <input
+                value={s.labelTemplate}
+                onChange={(event) =>
                   wb.updateStyle(layer.id, {
-                    labelTemplate: `${s.labelTemplate}${s.labelTemplate ? " · " : ""}{${token}}`,
-                    labelEnabled: true,
+                    labelTemplate: event.target.value,
+                    labelFields: labelFieldsFromTemplate(event.target.value),
                   })
                 }
-                className="num rounded-full bg-card px-2 py-0.5 text-[10px] text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-              >
-                {`{${token}}`}
-              </button>
-            ))}
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-          <Field label={`Labels start at zoom ${s.labelMinZoom}`}>
-            <input
-              type="range"
-              min={0}
-              max={18}
-              step={1}
-              value={s.labelMinZoom}
-              onChange={(e) => wb.updateStyle(layer.id, { labelMinZoom: Number(e.target.value) })}
-              className="w-full accent-primary"
-            />
+                placeholder="{OWNER} · {ACRES} acres"
+                aria-label="Custom label template"
+                className="num w-full rounded-lg border border-border bg-secondary px-2 py-1.5 text-xs outline-none focus:border-primary"
+              />
+            </Field>
+            <div className="grid grid-cols-2 gap-2">
+              <Field label={`Start zoom ${s.labelMinZoom}`}>
+                <input
+                  type="range"
+                  min={0}
+                  max={18}
+                  step={1}
+                  value={s.labelMinZoom}
+                  onChange={(event) =>
+                    wb.updateStyle(layer.id, { labelMinZoom: Number(event.target.value) })
+                  }
+                  className="w-full accent-primary"
+                />
+              </Field>
+              <Field label={`End zoom ${s.labelMaxZoom}`}>
+                <input
+                  type="range"
+                  min={6}
+                  max={24}
+                  step={1}
+                  value={s.labelMaxZoom}
+                  onChange={(event) =>
+                    wb.updateStyle(layer.id, { labelMaxZoom: Number(event.target.value) })
+                  }
+                  className="w-full accent-primary"
+                />
+              </Field>
+            </div>
+          </div>
+        </details>
+      </section>
+
+      <details className="group border-t border-border pt-2">
+        <summary className="flex cursor-pointer list-none items-center gap-1 text-[11px] font-semibold">
+          <ChevronRight className="size-3.5 transition-transform group-open:rotate-90" />
+          Advanced symbology
+        </summary>
+        <div className="mt-3 space-y-3">
+          <Field label="Stroke pattern">
+            <div className="grid grid-cols-3 gap-1">
+              {strokePatterns.map((pattern) => (
+                <button
+                  key={pattern.value}
+                  onClick={() => wb.updateStyle(layer.id, { strokePattern: pattern.value })}
+                  className={cn(
+                    "rounded-lg border px-2 py-1 text-[11px]",
+                    (s.strokePattern ?? "solid") === pattern.value
+                      ? "border-primary bg-primary text-primary-foreground"
+                      : "border-border bg-card hover:bg-accent",
+                  )}
+                >
+                  {pattern.label}
+                </button>
+              ))}
+            </div>
           </Field>
-          <Field label={`Labels end at zoom ${s.labelMaxZoom}`}>
-            <input
-              type="range"
-              min={6}
-              max={24}
-              step={1}
-              value={s.labelMaxZoom}
-              onChange={(e) => wb.updateStyle(layer.id, { labelMaxZoom: Number(e.target.value) })}
-              className="w-full accent-primary"
-            />
+          <Field label="Fill pattern">
+            <div className="grid grid-cols-3 gap-1">
+              {patterns.map((pattern) => (
+                <button
+                  key={pattern}
+                  onClick={() => wb.updateStyle(layer.id, { fillPattern: pattern })}
+                  className={cn(
+                    "rounded-lg border px-1 py-1 text-[11px] capitalize",
+                    s.fillPattern === pattern
+                      ? "border-primary bg-primary text-primary-foreground"
+                      : "border-border bg-card hover:bg-accent",
+                  )}
+                >
+                  {pattern}
+                </button>
+              ))}
+            </div>
           </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label={`Stroke ${s.strokeWidth}px`}>
+              <input
+                type="range"
+                min={0}
+                max={10}
+                step={0.5}
+                value={s.strokeWidth}
+                onChange={(event) =>
+                  wb.updateStyle(layer.id, { strokeWidth: Number(event.target.value) })
+                }
+                className="w-full accent-primary"
+              />
+            </Field>
+            <Field label={`Point size ${s.pointSize}px`}>
+              <input
+                type="range"
+                min={2}
+                max={20}
+                step={1}
+                value={s.pointSize}
+                onChange={(event) =>
+                  wb.updateStyle(layer.id, { pointSize: Number(event.target.value) })
+                }
+                className="w-full accent-primary"
+              />
+            </Field>
+          </div>
         </div>
-      </div>
+      </details>
     </div>
   );
 }

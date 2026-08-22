@@ -14,6 +14,8 @@ export interface LayerStyle {
   strokePattern: StrokePattern;
   pointSize: number;
   labelTemplate: string;
+  labelFields: string[];
+  labelSeparator: string;
   labelEnabled: boolean;
   labelMinZoom: number;
   labelMaxZoom: number;
@@ -66,6 +68,7 @@ export interface ProjectState {
   basemapId: string;
   units: AreaUnitsPref;
   selectedStates?: string[];
+  derivedLayerGroupId?: string;
   savedAt?: number;
 }
 
@@ -84,6 +87,8 @@ export const defaultStyle = (seed = 0): LayerStyle => {
     strokePattern: "solid",
     pointSize: 6,
     labelTemplate: "",
+    labelFields: [],
+    labelSeparator: " · ",
     labelEnabled: false,
     labelMinZoom: 4,
     labelMaxZoom: 24,

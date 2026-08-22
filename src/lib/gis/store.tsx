@@ -54,6 +54,7 @@ interface WorkbenchState {
   drawMode: DrawMode;
   snapEnabled: boolean;
   selectedStates: string[];
+  derivedLayerGroupId: string;
 }
 
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -82,6 +83,7 @@ const initialState = (): WorkbenchState => ({
   drawMode: "none",
   snapEnabled: true,
   selectedStates: ["TX"],
+  derivedLayerGroupId: "working",
 });
 
 const blankProjectState = (name: string): ProjectState => ({
@@ -97,7 +99,25 @@ const blankProjectState = (name: string): ProjectState => ({
   basemapId: "street",
   units: { area: "acres", length: "miles" },
   selectedStates: ["TX"],
+  derivedLayerGroupId: "working",
 });
+
+const normalizedLayer = (layer: GisLayer, index: number): GisLayer => {
+  const source =
+    layer.source.kind === "remote" && layer.source.catalogId && !layer.source.requiresViewport
+      ? { ...layer.source, requiresViewport: true }
+      : layer.source;
+  const style = { ...defaultStyle(index), ...layer.style };
+  return {
+    ...layer,
+    source,
+    style: {
+      ...style,
+      labelFields: Array.isArray(style.labelFields) ? style.labelFields : [],
+      labelSeparator: style.labelSeparator || " · ",
+    },
+  };
+};
 
 const durableLayer = (layer: GisLayer): GisLayer => {
   if (layer.source.kind !== "remote" || !layer.source.requiresViewport) return layer;
@@ -125,10 +145,7 @@ const normalizedProject = (project: StoredProject, projects: ProjectSummary[]) =
     autosave: project.autosave,
     lastSavedAt: project.updatedAt,
     groups,
-    layers: stored.layers.map((layer, index) => {
-      const durable = durableLayer(layer);
-      return { ...durable, style: { ...defaultStyle(index), ...durable.style } };
-    }),
+    layers: stored.layers.map((layer, index) => durableLayer(normalizedLayer(layer, index))),
     basemapId: stored.basemapId,
     units: stored.units,
     activeLayerId: null,
@@ -137,6 +154,9 @@ const normalizedProject = (project: StoredProject, projects: ProjectSummary[]) =
     selectedFeatures: [],
     drawMode: "none" as DrawMode,
     selectedStates: stored.selectedStates?.length ? stored.selectedStates : ["TX"],
+    derivedLayerGroupId: groups.some((group) => group.id === stored.derivedLayerGroupId)
+      ? (stored.derivedLayerGroupId as string)
+      : "working",
   };
 };
 
@@ -148,6 +168,7 @@ const stateToProject = (state: WorkbenchState): ProjectState => ({
   basemapId: state.basemapId,
   units: state.units,
   selectedStates: state.selectedStates,
+  derivedLayerGroupId: state.derivedLayerGroupId,
 });
 
 export interface WorkbenchApi extends WorkbenchState {
@@ -175,6 +196,7 @@ export interface WorkbenchApi extends WorkbenchState {
   setDrawMode: (mode: DrawMode) => void;
   setSnapEnabled: (enabled: boolean) => void;
   setSelectedStates: (states: string[]) => void;
+  setDerivedLayerGroupId: (groupId: string) => void;
   setBasemapId: (id: string) => void;
   setUnits: (units: Partial<AreaUnitsPref>) => void;
   setProjectName: (name: string) => void;
@@ -536,6 +558,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
     state.projectName,
     state.projectReady,
     state.selectedStates,
+    state.derivedLayerGroupId,
     state.units,
   ]);
 
@@ -562,6 +585,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       setDrawMode: (mode) => patch({ drawMode: mode }),
       setSnapEnabled: (enabled) => patch({ snapEnabled: enabled }),
       setSelectedStates: (states) => patch({ selectedStates: states }),
+      setDerivedLayerGroupId: (groupId) => patch({ derivedLayerGroupId: groupId }),
       setBasemapId: (id) => patch({ basemapId: id }),
       setUnits: (units) => setState((s) => ({ ...s, units: { ...s.units, ...units } })),
       setProjectName: (name) => patch({ projectName: name }),

@@ -60,12 +60,21 @@ export function TopBar({
         </div>
       </div>
 
-      <input
-        value={wb.projectName}
-        onChange={(e) => wb.setProjectName(e.target.value)}
-        aria-label="Project name"
-        className="ml-2 hidden w-44 rounded-xl border border-transparent bg-secondary px-3 py-1.5 text-xs font-medium outline-none focus:border-primary md:block"
-      />
+      <label className="ml-2 hidden items-center gap-1 md:flex">
+        <FolderOpen className="size-3.5 text-muted-foreground" />
+        <select
+          value={wb.projectId}
+          onChange={(event) => void wb.openProject(event.target.value)}
+          aria-label="Switch project"
+          className="w-44 rounded-xl border border-transparent bg-secondary px-3 py-1.5 text-xs font-medium outline-none focus:border-primary"
+        >
+          {wb.projects.map((project) => (
+            <option key={project.id} value={project.id}>
+              {project.name}
+            </option>
+          ))}
+        </select>
+      </label>
 
       <div className="ml-auto flex items-center gap-1">
         <BarBtn

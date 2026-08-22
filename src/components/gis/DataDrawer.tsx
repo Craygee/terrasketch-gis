@@ -74,72 +74,31 @@ export function DataDrawer() {
       entry.countyField && county.trim()
         ? `${entry.countyField}='${county.trim().replaceAll("'", "''")}'`
         : undefined;
+    const effectiveMinZoom =
+      entry.minZoom ?? (entry.geometry === "point" ? 7 : entry.geometry === "line" ? 5 : 5);
     const source = {
       kind: "remote" as const,
       url: entry.url,
       catalogId: entry.id,
       attribution: entry.agency,
       ...(where ? { where } : {}),
-      ...(entry.requiresViewport ? { requiresViewport: true } : {}),
-      ...(entry.minZoom !== undefined ? { minZoom: entry.minZoom } : {}),
+      requiresViewport: true,
+      minZoom: effectiveMinZoom,
     };
-    if (entry.requiresViewport) {
-      wb.addLayer({
-        name: entry.name,
-        data: { type: "FeatureCollection", features: [] },
-        groupId: "public",
-        source,
-        style: catalogLayerStyle(entry),
-      });
-      toast.success(`${entry.name} added`, {
-        description:
-          entry.minZoom && map && map.getZoom() < entry.minZoom
-            ? `It will load automatically when you reach zoom ${entry.minZoom} or closer.`
-            : "Loading the visible map area now.",
-      });
-      setDrawerOpen(false);
-      return;
-    }
-    setLoadingId(entry.id);
-    try {
-      const bboxValue = entry.requiresViewport ? viewportBbox() : undefined;
-      const data = await fetchRemoteGeoJSON(entry.url, {
-        ...(bboxValue ? { bbox: bboxValue } : {}),
-        ...(where ? { where } : {}),
-        maxFeatures: 2000,
-      });
-      if (data.features.length === 0) {
-        wb.addLayer({
-          name: entry.name,
-          data,
-          groupId: "public",
-          source,
-          style: catalogLayerStyle(entry),
-        });
-        toast.warning(`${entry.name} added with no records in this view`, {
-          description: "Pan or zoom to an area with coverage and it will retry automatically.",
-        });
-        setDrawerOpen(false);
-        return;
-      }
-      wb.addLayer({
-        name: entry.name,
-        data,
-        groupId: "public",
-        source: { ...source, lastRefreshedAt: Date.now() },
-        style: catalogLayerStyle(entry),
-      });
-      toast.success(`${entry.name} added`, {
-        description: `${data.features.length} features from ${entry.agency}`,
-      });
-      setDrawerOpen(false);
-    } catch (err) {
-      toast.error(`Couldn't load ${entry.name}`, {
-        description: err instanceof Error ? err.message : "The service did not respond",
-      });
-    } finally {
-      setLoadingId(null);
-    }
+    wb.addLayer({
+      name: entry.name,
+      data: { type: "FeatureCollection", features: [] },
+      groupId: "public",
+      source,
+      style: catalogLayerStyle(entry),
+    });
+    toast.success(`${entry.name} added`, {
+      description:
+        map && map.getZoom() < effectiveMinZoom
+          ? `It will load automatically when you reach zoom ${effectiveMinZoom} or closer.`
+          : "Loading the visible map area now.",
+    });
+    setDrawerOpen(false);
   };
 
   const loadCustom = async () => {
@@ -278,7 +237,7 @@ export function DataDrawer() {
                       <span className="rounded-full bg-secondary px-2 py-0.5">
                         {entry.geometry}
                       </span>
-                      {entry.requiresViewport && (
+                      {entry.url && (
                         <span className="rounded-full bg-secondary px-2 py-0.5">
                           loads current view
                         </span>
@@ -301,9 +260,9 @@ export function DataDrawer() {
                       <span className="rounded-full bg-secondary px-2 py-0.5">
                         {entry.updateCadence}
                       </span>
-                      {entry.minZoom && (
+                      {entry.url && (
                         <span className="rounded-full bg-secondary px-2 py-0.5">
-                          zoom {entry.minZoom}+
+                          zoom {entry.minZoom ?? (entry.geometry === "point" ? 7 : 5)}+
                         </span>
                       )}
                       <span className="rounded-full bg-secondary px-2 py-0.5">{entry.license}</span>

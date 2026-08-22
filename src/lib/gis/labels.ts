@@ -22,6 +22,23 @@ export function composeLabel(feature: GisFeature, template: string): string {
     .trim();
 }
 
+export function labelFieldsFromTemplate(template: string): string[] {
+  return Array.from(
+    new Set(
+      Array.from(template.matchAll(/\{([^}]+)\}/g))
+        .map((match) => match[1]?.trim() ?? "")
+        .filter(Boolean),
+    ),
+  );
+}
+
+export function buildLabelTemplate(fields: string[], separator = " · "): string {
+  return fields
+    .filter(Boolean)
+    .map((field) => `{${field}}`)
+    .join(separator);
+}
+
 function builtinToken(feature: GisFeature, key: string): string | null {
   const num = (n: number, digits = 2) =>
     n.toLocaleString(undefined, { maximumFractionDigits: digits });

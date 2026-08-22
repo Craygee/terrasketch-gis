@@ -81,7 +81,7 @@ export function AttributeTable() {
     if (!layer || rows.length === 0) return;
     wb.addLayer({
       name: `${layer.name} · selection`,
-      groupId: layer.groupId,
+      groupId: wb.derivedLayerGroupId,
       source: {
         kind: "derived",
         sourceLayerId: layer.id,
