@@ -89,6 +89,8 @@ export function buildLayerSpecs(layer: GisLayer, map: MlMap): LayerSpecification
     layer.source.kind === "remote" && layer.source.minZoom !== undefined
       ? { minzoom: layer.source.minZoom }
       : {};
+  const lineDash =
+    s.strokePattern === "dashed" ? [3, 2] : s.strokePattern === "dotted" ? [0.2, 1.6] : undefined;
 
   const fillPaint: Record<string, unknown> = patternId
     ? { "fill-pattern": patternId, "fill-opacity": Math.min(1, s.fillOpacity + 0.35) }
@@ -113,6 +115,7 @@ export function buildLayerSpecs(layer: GisLayer, map: MlMap): LayerSpecification
         "line-color": s.strokeColor,
         "line-width": s.strokeWidth,
         "line-opacity": s.strokeOpacity,
+        ...(lineDash ? { "line-dasharray": lineDash } : {}),
       },
       ...zoomRange,
     },

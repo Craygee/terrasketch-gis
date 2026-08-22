@@ -2,6 +2,7 @@ import type { Feature, FeatureCollection, Geometry } from "geojson";
 
 export type FillPattern =
   "solid" | "diagonal" | "horizontal" | "vertical" | "crosshatch" | "dotted";
+export type StrokePattern = "solid" | "dashed" | "dotted";
 
 export interface LayerStyle {
   fillColor: string;
@@ -10,6 +11,7 @@ export interface LayerStyle {
   strokeColor: string;
   strokeWidth: number;
   strokeOpacity: number;
+  strokePattern: StrokePattern;
   pointSize: number;
   labelTemplate: string;
   labelEnabled: boolean;
@@ -78,6 +80,7 @@ export const defaultStyle = (seed = 0): LayerStyle => {
     strokeColor: color,
     strokeWidth: 2,
     strokeOpacity: 1,
+    strokePattern: "solid",
     pointSize: 6,
     labelTemplate: "",
     labelEnabled: false,

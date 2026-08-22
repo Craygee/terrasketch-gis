@@ -7,8 +7,7 @@ import {
   ChevronRight,
   Copy,
   Trash2,
-  ArrowUp,
-  ArrowDown,
+  GripVertical,
   Crosshair,
   Palette,
   Table2,
@@ -25,7 +24,7 @@ import { useMapRef } from "@/lib/gis/mapRef";
 import { importFiles, SUPPORTED_EXTENSIONS } from "@/lib/gis/import";
 import { exportLayer, type ExportFormat } from "@/lib/gis/export";
 import { squareMeters, formatArea } from "@/lib/gis/measure";
-import type { GisLayer } from "@/lib/gis/types";
+import type { FillPattern, GisLayer, StrokePattern } from "@/lib/gis/types";
 import { StyleEditor } from "./StyleEditor";
 import { cn } from "@/lib/utils";
 import type { LayerSource } from "@/lib/gis/types";
@@ -45,6 +44,20 @@ export function LayerPanel() {
   const [busy, setBusy] = useState(false);
   const [styleFor, setStyleFor] = useState<string | null>(null);
   const [exportFor, setExportFor] = useState<string | null>(null);
+  const [expandedLayers, setExpandedLayers] = useState<Set<string>>(() => new Set());
+  const [draggedLayerId, setDraggedLayerId] = useState<string | null>(null);
+  const draggedLayerRef = useRef<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
+  const [duplicateTargets, setDuplicateTargets] = useState<Record<string, string>>({});
+
+  const toggleLayerExpanded = (id: string) => {
+    setExpandedLayers((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   const handleFiles = async (files: File[]) => {
     if (files.length === 0) return;
@@ -87,14 +100,18 @@ export function LayerPanel() {
     <div
       className="flex h-full flex-col bg-sidebar"
       onDragOver={(e) => {
-        e.preventDefault();
-        setDragging(true);
+        if (Array.from(e.dataTransfer.types).includes("Files")) {
+          e.preventDefault();
+          setDragging(true);
+        }
       }}
       onDragLeave={() => setDragging(false)}
       onDrop={(e) => {
-        e.preventDefault();
-        setDragging(false);
-        void handleFiles(Array.from(e.dataTransfer.files));
+        if (e.dataTransfer.files.length) {
+          e.preventDefault();
+          setDragging(false);
+          void handleFiles(Array.from(e.dataTransfer.files));
+        }
       }}
     >
       <div className="flex items-center justify-between border-b border-sidebar-border px-3 py-2.5">
@@ -152,7 +169,30 @@ export function LayerPanel() {
         {wb.groups.map((group) => {
           const layers = wb.layers.filter((l) => l.groupId === group.id);
           return (
-            <div key={group.id} className="mb-2">
+            <div
+              key={group.id}
+              className={cn(
+                "mb-2 rounded-xl transition-colors",
+                dropTarget === `group:${group.id}` && "bg-accent/70 ring-2 ring-primary/60",
+              )}
+              onDragOver={(event) => {
+                if (!draggedLayerRef.current) return;
+                event.preventDefault();
+                event.dataTransfer.dropEffect = "move";
+                setDropTarget(`group:${group.id}`);
+              }}
+              onDrop={(event) => {
+                const dragged = draggedLayerRef.current;
+                if (!dragged) return;
+                event.preventDefault();
+                event.stopPropagation();
+                wb.reorderLayer(dragged, group.id);
+                draggedLayerRef.current = null;
+                setDraggedLayerId(null);
+                setDropTarget(null);
+                toast.success(`Layer moved to ${group.name}`);
+              }}
+            >
               <button
                 onClick={() => wb.toggleGroup(group.id)}
                 className="flex w-full items-center gap-1 rounded-lg px-2 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground hover:bg-sidebar-accent"
@@ -172,22 +212,69 @@ export function LayerPanel() {
                   )}
                   {layers.map((layer) => {
                     const selected = wb.selectedLayerIds.includes(layer.id);
+                    const expanded = expandedLayers.has(layer.id);
                     const sqm = squareMeters(layer.data);
                     return (
                       <div
                         key={layer.id}
+                        draggable
+                        onDragStart={(event) => {
+                          draggedLayerRef.current = layer.id;
+                          setDraggedLayerId(layer.id);
+                          event.dataTransfer.effectAllowed = "move";
+                          event.dataTransfer.setData("application/x-terrasketch-layer", layer.id);
+                          event.dataTransfer.setData("text/plain", layer.name);
+                        }}
+                        onDragEnd={() => {
+                          draggedLayerRef.current = null;
+                          setDraggedLayerId(null);
+                          setDropTarget(null);
+                        }}
+                        onDragOver={(event) => {
+                          const dragged = draggedLayerRef.current;
+                          if (!dragged || dragged === layer.id) return;
+                          event.preventDefault();
+                          event.stopPropagation();
+                          event.dataTransfer.dropEffect = "move";
+                          setDropTarget(`layer:${layer.id}`);
+                        }}
+                        onDrop={(event) => {
+                          const dragged = draggedLayerRef.current;
+                          if (!dragged || dragged === layer.id) return;
+                          event.preventDefault();
+                          event.stopPropagation();
+                          wb.reorderLayer(dragged, layer.groupId, layer.id);
+                          draggedLayerRef.current = null;
+                          setDraggedLayerId(null);
+                          setDropTarget(null);
+                        }}
                         className={cn(
-                          "rounded-xl border px-2 py-2 transition-colors",
+                          "rounded-xl border px-1.5 py-1.5 transition-all",
                           selected
                             ? "border-primary bg-accent/60"
                             : "border-transparent hover:bg-sidebar-accent",
+                          draggedLayerId === layer.id && "opacity-40",
+                          dropTarget === `layer:${layer.id}` &&
+                            "border-primary shadow-[0_-3px_0_0_hsl(var(--primary))]",
                         )}
                       >
-                        <div className="flex items-start gap-2">
+                        <div className="flex min-h-8 items-center gap-1.5">
+                          <button
+                            onClick={() => toggleLayerExpanded(layer.id)}
+                            aria-label={expanded ? "Collapse layer" : "Expand layer"}
+                            title={expanded ? "Collapse layer" : "Expand layer"}
+                            className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+                          >
+                            {expanded ? (
+                              <ChevronDown className="size-3.5" />
+                            ) : (
+                              <ChevronRight className="size-3.5" />
+                            )}
+                          </button>
                           <button
                             onClick={() => wb.toggleVisible(layer.id)}
                             aria-label={layer.visible ? "Hide layer" : "Show layer"}
-                            className="mt-0.5 rounded p-0.5 text-muted-foreground hover:text-foreground"
+                            className="rounded p-0.5 text-muted-foreground hover:text-foreground"
                           >
                             {layer.visible ? (
                               <Eye className="size-4" />
@@ -195,13 +282,7 @@ export function LayerPanel() {
                               <EyeOff className="size-4" />
                             )}
                           </button>
-                          <span
-                            className="mt-1 size-3 shrink-0 rounded-sm border"
-                            style={{
-                              backgroundColor: layer.style.fillColor,
-                              borderColor: layer.style.strokeColor,
-                            }}
-                          />
+                          <LayerStyleSwatch layer={layer} />
                           <button
                             onClick={(e) =>
                               wb.toggleLayerSelection(layer.id, e.metaKey || e.ctrlKey)
@@ -210,10 +291,19 @@ export function LayerPanel() {
                               const name = window.prompt("Rename layer", layer.name);
                               if (name) wb.updateLayer(layer.id, { name });
                             }}
-                            className="flex-1 text-left"
+                            className="min-w-0 flex-1 text-left"
                           >
                             <div className="truncate text-xs font-medium">{layer.name}</div>
-                            <div className="num text-[10px] text-muted-foreground">
+                          </button>
+                          <GripVertical
+                            className="size-4 shrink-0 cursor-grab text-muted-foreground active:cursor-grabbing"
+                            aria-label="Drag to reorder layer"
+                          />
+                        </div>
+
+                        {expanded && (
+                          <div className="mt-2 space-y-2">
+                            <div className="num px-1 text-[10px] text-muted-foreground">
                               {layer.source.kind === "remote" &&
                               layer.source.minZoom !== undefined &&
                               layer.data.features.length === 0
@@ -221,11 +311,6 @@ export function LayerPanel() {
                                 : `${layer.data.features.length} features`}
                               {sqm > 0 ? ` · ${formatArea(sqm, wb.units.area)}` : ""}
                             </div>
-                          </button>
-                        </div>
-
-                        {selected && (
-                          <div className="mt-2 space-y-2">
                             <div className="flex flex-wrap gap-1">
                               <IconBtn
                                 label="Zoom to layer"
@@ -255,17 +340,7 @@ export function LayerPanel() {
                                 active={exportFor === layer.id}
                               />
                               <IconBtn
-                                label="Move up"
-                                onClick={() => wb.moveLayer(layer.id, -1)}
-                                icon={<ArrowUp className="size-3.5" />}
-                              />
-                              <IconBtn
-                                label="Move down"
-                                onClick={() => wb.moveLayer(layer.id, 1)}
-                                icon={<ArrowDown className="size-3.5" />}
-                              />
-                              <IconBtn
-                                label="Duplicate"
+                                label="Duplicate in this category"
                                 onClick={() => wb.duplicateLayer(layer.id)}
                                 icon={<Copy className="size-3.5" />}
                               />
@@ -277,18 +352,49 @@ export function LayerPanel() {
                               />
                             </div>
 
-                            <select
-                              value={layer.groupId}
-                              onChange={(e) => wb.setLayerGroup(layer.id, e.target.value)}
-                              aria-label="Move layer to group"
-                              className="w-full rounded-lg border border-border bg-card px-2 py-1 text-[11px]"
-                            >
-                              {wb.groups.map((g) => (
-                                <option key={g.id} value={g.id}>
-                                  {g.name}
-                                </option>
-                              ))}
-                            </select>
+                            <div className="grid grid-cols-2 gap-1">
+                              <label className="text-[10px] text-muted-foreground">
+                                Move to
+                                <select
+                                  value={layer.groupId}
+                                  onChange={(e) => wb.setLayerGroup(layer.id, e.target.value)}
+                                  aria-label="Move layer to category"
+                                  className="mt-0.5 w-full rounded-lg border border-border bg-card px-2 py-1 text-[11px] text-foreground"
+                                >
+                                  {wb.groups.map((g) => (
+                                    <option key={g.id} value={g.id}>
+                                      {g.name}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+                              <label className="text-[10px] text-muted-foreground">
+                                Duplicate into
+                                <select
+                                  value={duplicateTargets[layer.id] ?? layer.groupId}
+                                  onChange={(event) => {
+                                    const groupId = event.target.value;
+                                    wb.duplicateLayer(layer.id, groupId);
+                                    setDuplicateTargets((current) => ({
+                                      ...current,
+                                      [layer.id]: layer.groupId,
+                                    }));
+                                    const target = wb.groups.find((group) => group.id === groupId);
+                                    toast.success(
+                                      `Layer duplicated into ${target?.name ?? "category"}`,
+                                    );
+                                  }}
+                                  aria-label="Duplicate layer into category"
+                                  className="mt-0.5 w-full rounded-lg border border-border bg-card px-2 py-1 text-[11px] text-foreground"
+                                >
+                                  {wb.groups.map((g) => (
+                                    <option key={g.id} value={g.id}>
+                                      {g.name}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+                            </div>
 
                             {exportFor === layer.id && (
                               <div className="grid grid-cols-2 gap-1">
@@ -343,6 +449,40 @@ export function LayerPanel() {
         </p>
       </div>
     </div>
+  );
+}
+
+function LayerStyleSwatch({ layer }: { layer: GisLayer }) {
+  const fillPattern = layer.style.fillPattern as FillPattern;
+  const strokePattern = (layer.style.strokePattern ?? "solid") as StrokePattern;
+  const fill = layer.style.fillColor;
+  const backgroundImage =
+    fillPattern === "diagonal"
+      ? `repeating-linear-gradient(135deg, transparent 0 3px, ${fill} 3px 5px)`
+      : fillPattern === "horizontal"
+        ? `repeating-linear-gradient(0deg, transparent 0 3px, ${fill} 3px 5px)`
+        : fillPattern === "vertical"
+          ? `repeating-linear-gradient(90deg, transparent 0 3px, ${fill} 3px 5px)`
+          : fillPattern === "crosshatch"
+            ? `repeating-linear-gradient(45deg, transparent 0 4px, ${fill} 4px 5px), repeating-linear-gradient(-45deg, transparent 0 4px, ${fill} 4px 5px)`
+            : fillPattern === "dotted"
+              ? `radial-gradient(circle, ${fill} 1.5px, transparent 1.7px)`
+              : undefined;
+  return (
+    <span
+      className="size-5 shrink-0 rounded bg-card"
+      aria-label={`${fillPattern} fill with ${strokePattern} stroke`}
+      title={`${fillPattern} fill · ${strokePattern} stroke`}
+      style={{
+        backgroundColor: fillPattern === "solid" ? fill : `${fill}33`,
+        backgroundImage,
+        backgroundSize: fillPattern === "dotted" ? "6px 6px" : undefined,
+        borderColor: layer.style.strokeColor,
+        borderWidth: Math.max(1, Math.min(3, layer.style.strokeWidth)),
+        borderStyle: strokePattern,
+        opacity: Math.max(0.45, layer.style.fillOpacity + 0.35),
+      }}
+    />
   );
 }
 

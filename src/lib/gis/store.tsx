@@ -39,6 +39,7 @@ const uid = () => Math.random().toString(36).slice(2, 10);
 const initialState = (): WorkbenchState => ({
   projectName: "Untitled project",
   groups: [
+    { id: "working", name: "Working layers", collapsed: false },
     { id: "sketch", name: "My sketches", collapsed: false },
     { id: "imports", name: "Imported files", collapsed: false },
     { id: "public", name: "Public data", collapsed: false },
@@ -66,9 +67,10 @@ export interface WorkbenchApi extends WorkbenchState {
   updateLayer: (id: string, patch: Partial<Omit<GisLayer, "id">>) => void;
   updateStyle: (id: string, patch: Partial<LayerStyle>) => void;
   removeLayers: (ids: string[]) => void;
-  duplicateLayer: (id: string) => void;
+  duplicateLayer: (id: string, targetGroupId?: string) => void;
   toggleVisible: (id: string) => void;
   moveLayer: (id: string, direction: -1 | 1) => void;
+  reorderLayer: (id: string, targetGroupId: string, beforeLayerId?: string) => void;
   setLayerGroup: (id: string, groupId: string) => void;
   addGroup: (name: string) => void;
   toggleGroup: (id: string) => void;
@@ -148,7 +150,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
-  const duplicateLayer = useCallback<WorkbenchApi["duplicateLayer"]>((id) => {
+  const duplicateLayer = useCallback<WorkbenchApi["duplicateLayer"]>((id, targetGroupId) => {
     setState((s) => {
       const source = s.layers.find((l) => l.id === id);
       if (!source) return s;
@@ -156,15 +158,41 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
         ...source,
         id: uid(),
         name: `${source.name} copy`,
+        groupId: targetGroupId ?? source.groupId,
         data: JSON.parse(JSON.stringify(source.data)) as FeatureCollection,
         createdAt: Date.now(),
       };
       const index = s.layers.findIndex((l) => l.id === id);
       const layers = [...s.layers];
-      layers.splice(index, 0, copy);
+      const firstInTarget = layers.findIndex((layer) => layer.groupId === copy.groupId);
+      layers.splice(firstInTarget >= 0 ? firstInTarget : index, 0, copy);
       return { ...s, layers, activeLayerId: copy.id, selectedLayerIds: [copy.id] };
     });
   }, []);
+
+  const reorderLayer = useCallback<WorkbenchApi["reorderLayer"]>(
+    (id, targetGroupId, beforeLayerId) => {
+      setState((s) => {
+        const source = s.layers.find((layer) => layer.id === id);
+        if (!source) return s;
+        const moved = { ...source, groupId: targetGroupId };
+        const layers = s.layers.filter((layer) => layer.id !== id);
+        const beforeIndex = beforeLayerId
+          ? layers.findIndex((layer) => layer.id === beforeLayerId)
+          : -1;
+        if (beforeIndex >= 0) layers.splice(beforeIndex, 0, moved);
+        else {
+          const lastInGroup = layers.reduce(
+            (last, layer, index) => (layer.groupId === targetGroupId ? index : last),
+            -1,
+          );
+          layers.splice(lastInGroup + 1, 0, moved);
+        }
+        return { ...s, layers, activeLayerId: id, selectedLayerIds: [id] };
+      });
+    },
+    [],
+  );
 
   const toggleVisible = useCallback<WorkbenchApi["toggleVisible"]>((id) => {
     setState((s) => ({
@@ -186,12 +214,10 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const setLayerGroup = useCallback<WorkbenchApi["setLayerGroup"]>((id, groupId) => {
-    setState((s) => ({
-      ...s,
-      layers: s.layers.map((l) => (l.id === id ? { ...l, groupId } : l)),
-    }));
-  }, []);
+  const setLayerGroup = useCallback<WorkbenchApi["setLayerGroup"]>(
+    (id, groupId) => reorderLayer(id, groupId),
+    [reorderLayer],
+  );
 
   const addGroup = useCallback<WorkbenchApi["addGroup"]>((name) => {
     setState((s) => ({ ...s, groups: [...s.groups, { id: uid(), name, collapsed: false }] }));
@@ -269,11 +295,17 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
   const loadProject = useCallback(async () => {
     const loaded = await localProjectStore.load();
     if (!loaded) return false;
+    const groups = loaded.groups.some((group) => group.id === "working")
+      ? loaded.groups
+      : [{ id: "working", name: "Working layers", collapsed: false }, ...loaded.groups];
     setState((s) => ({
       ...s,
       projectName: loaded.name,
-      groups: loaded.groups,
-      layers: loaded.layers,
+      groups,
+      layers: loaded.layers.map((layer, index) => ({
+        ...layer,
+        style: { ...defaultStyle(index), ...layer.style },
+      })),
       basemapId: loaded.basemapId,
       units: loaded.units,
       activeLayerId: null,
@@ -295,6 +327,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       duplicateLayer,
       toggleVisible,
       moveLayer,
+      reorderLayer,
       setLayerGroup,
       addGroup,
       toggleGroup,
@@ -327,6 +360,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       duplicateLayer,
       toggleVisible,
       moveLayer,
+      reorderLayer,
       setLayerGroup,
       addGroup,
       toggleGroup,

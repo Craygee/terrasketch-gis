@@ -129,27 +129,29 @@ export function MapCanvas() {
   }, [wb.basemapId, ready]);
 
   /* ---------------- layer sync ---------------- */
-  const prepared = useMemo(
-    () =>
-      wb.layers.map((layer) => {
-        const features: Feature[] = layer.data.features.map((f, index) => ({
-          ...f,
-          properties: {
-            ...(f.properties ?? {}),
-            __idx: index,
-            __selected: wb.selectedFeatures.some(
-              (selection) => selection.layerId === layer.id && selection.index === index,
-            ),
-            __label:
-              layer.style.labelEnabled && layer.style.labelTemplate
-                ? composeLabel(f as never, layer.style.labelTemplate)
-                : "",
-          },
-        }));
-        return { layer, fc: { type: "FeatureCollection", features } as FeatureCollection };
-      }),
-    [wb.layers, wb.selectedFeatures],
-  );
+  const prepared = useMemo(() => {
+    const ordered = [
+      ...wb.groups.flatMap((group) => wb.layers.filter((layer) => layer.groupId === group.id)),
+      ...wb.layers.filter((layer) => !wb.groups.some((group) => group.id === layer.groupId)),
+    ];
+    return ordered.map((layer) => {
+      const features: Feature[] = layer.data.features.map((f, index) => ({
+        ...f,
+        properties: {
+          ...(f.properties ?? {}),
+          __idx: index,
+          __selected: wb.selectedFeatures.some(
+            (selection) => selection.layerId === layer.id && selection.index === index,
+          ),
+          __label:
+            layer.style.labelEnabled && layer.style.labelTemplate
+              ? composeLabel(f as never, layer.style.labelTemplate)
+              : "",
+        },
+      }));
+      return { layer, fc: { type: "FeatureCollection", features } as FeatureCollection };
+    });
+  }, [wb.groups, wb.layers, wb.selectedFeatures]);
 
   useEffect(() => {
     const map = mapObj.current;
