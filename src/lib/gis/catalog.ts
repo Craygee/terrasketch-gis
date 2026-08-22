@@ -70,7 +70,7 @@ export const catalog: CatalogEntry[] = [
     agency: "U.S. Energy Information Administration",
     category: "Energy",
     description: "Interstate and intrastate natural gas transmission pipelines.",
-    url: "https://services1.arcgis.com/Hp6G80Pky0om7QvQ/arcgis/rest/services/Natural_Gas_Liquid_Pipelines/FeatureServer/0",
+    url: "https://services2.arcgis.com/FiaPA4ga0iQKduv3/arcgis/rest/services/Natural_Gas_Interstate_and_Intrastate_Pipelines_1/FeatureServer/0",
     geometry: "line",
     keywords: ["pipeline", "gas", "energy", "midstream", "oil"],
     requiresViewport: true,
