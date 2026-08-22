@@ -27,7 +27,10 @@ interface WorkbenchState {
   activeLayerId: string | null;
   selectedLayerIds: string[];
   selectedFeature: SelectedFeature | null;
+  selectedFeatures: SelectedFeature[];
   drawMode: DrawMode;
+  snapEnabled: boolean;
+  selectedStates: string[];
 }
 
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -45,7 +48,10 @@ const initialState = (): WorkbenchState => ({
   activeLayerId: null,
   selectedLayerIds: [],
   selectedFeature: null,
+  selectedFeatures: [],
   drawMode: "none",
+  snapEnabled: true,
+  selectedStates: ["TX"],
 });
 
 export interface WorkbenchApi extends WorkbenchState {
@@ -68,7 +74,10 @@ export interface WorkbenchApi extends WorkbenchState {
   setActiveLayer: (id: string | null) => void;
   toggleLayerSelection: (id: string, additive: boolean) => void;
   setSelectedFeature: (sel: SelectedFeature | null) => void;
+  setSelectedFeatures: (selections: SelectedFeature[]) => void;
   setDrawMode: (mode: DrawMode) => void;
+  setSnapEnabled: (enabled: boolean) => void;
+  setSelectedStates: (states: string[]) => void;
   setBasemapId: (id: string) => void;
   setUnits: (units: Partial<AreaUnitsPref>) => void;
   setProjectName: (name: string) => void;
@@ -129,6 +138,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       selectedLayerIds: s.selectedLayerIds.filter((id) => !ids.includes(id)),
       selectedFeature:
         s.selectedFeature && ids.includes(s.selectedFeature.layerId) ? null : s.selectedFeature,
+      selectedFeatures: s.selectedFeatures.filter((item) => !ids.includes(item.layerId)),
     }));
   }, []);
 
@@ -218,6 +228,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       layers: state.layers,
       basemapId: state.basemapId,
       units: state.units,
+      selectedStates: state.selectedStates,
     }),
     [state],
   );
@@ -239,6 +250,8 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       activeLayerId: null,
       selectedLayerIds: [],
       selectedFeature: null,
+      selectedFeatures: [],
+      selectedStates: loaded.selectedStates?.length ? loaded.selectedStates : ["TX"],
     }));
     return true;
   }, []);
@@ -258,8 +271,13 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       toggleGroup,
       setActiveLayer: (id) => patch({ activeLayerId: id }),
       toggleLayerSelection,
-      setSelectedFeature: (sel) => patch({ selectedFeature: sel }),
+      setSelectedFeature: (sel) =>
+        patch({ selectedFeature: sel, selectedFeatures: sel ? [sel] : [] }),
+      setSelectedFeatures: (selections) =>
+        patch({ selectedFeatures: selections, selectedFeature: selections[0] ?? null }),
       setDrawMode: (mode) => patch({ drawMode: mode }),
+      setSnapEnabled: (enabled) => patch({ snapEnabled: enabled }),
+      setSelectedStates: (states) => patch({ selectedStates: states }),
       setBasemapId: (id) => patch({ basemapId: id }),
       setUnits: (units) => setState((s) => ({ ...s, units: { ...s.units, ...units } })),
       setProjectName: (name) => patch({ projectName: name }),

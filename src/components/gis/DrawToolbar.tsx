@@ -1,5 +1,16 @@
-import { Hexagon, Minus, MapPin, Ruler, MousePointer2, Move3d } from "lucide-react";
+import {
+  Hexagon,
+  Minus,
+  MapPin,
+  Ruler,
+  MousePointer2,
+  Move3d,
+  Magnet,
+  LocateFixed,
+} from "lucide-react";
+import { toast } from "sonner";
 import { useWorkbench, type DrawMode } from "@/lib/gis/store";
+import { useMapRef } from "@/lib/gis/mapRef";
 import { cn } from "@/lib/utils";
 import { AREA_UNITS, LENGTH_UNITS, type AreaUnit, type LengthUnit } from "@/lib/gis/measure";
 
@@ -14,6 +25,44 @@ const tools: Array<{ mode: DrawMode; label: string; icon: React.ReactNode }> = [
 
 export function DrawToolbar() {
   const wb = useWorkbench();
+  const { map } = useMapRef();
+  const addGpsPoint = () => {
+    if (!navigator.geolocation) {
+      toast.error("Location is not available in this browser");
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      ({ coords }) => {
+        const feature = {
+          type: "Feature" as const,
+          geometry: { type: "Point" as const, coordinates: [coords.longitude, coords.latitude] },
+          properties: {
+            NAME: "GPS location",
+            LAT: Number(coords.latitude.toFixed(6)),
+            LON: Number(coords.longitude.toFixed(6)),
+            ACCURACY_M: Math.round(coords.accuracy),
+            CAPTURED: new Date().toISOString(),
+          },
+        };
+        const existing = wb.layers.find((layer) => layer.source.kind === "draw");
+        if (existing) wb.appendFeature(existing.id, feature);
+        else
+          wb.addLayer({
+            name: "My sketch",
+            data: { type: "FeatureCollection", features: [feature] },
+            groupId: "sketch",
+            source: { kind: "draw" },
+          });
+        map?.easeTo({
+          center: [coords.longitude, coords.latitude],
+          zoom: Math.max(map.getZoom(), 16),
+        });
+        toast.success(`GPS point added · ±${Math.round(coords.accuracy)} m`);
+      },
+      (error) => toast.error("Could not read your location", { description: error.message }),
+      { enableHighAccuracy: true, timeout: 15000 },
+    );
+  };
   return (
     <div className="float-surface flex items-center gap-1 rounded-2xl p-1.5">
       <div className="flex items-center gap-1">
@@ -35,6 +84,27 @@ export function DrawToolbar() {
           </button>
         ))}
       </div>
+      <div className="mx-1 h-7 w-px bg-border" />
+      <button
+        onClick={() => wb.setSnapEnabled(!wb.snapEnabled)}
+        title="Snap to visible features"
+        aria-label="Snap to visible features"
+        aria-pressed={wb.snapEnabled}
+        className={cn(
+          "flex size-9 items-center justify-center rounded-xl",
+          wb.snapEnabled ? "bg-accent text-primary" : "hover:bg-accent",
+        )}
+      >
+        <Magnet className="size-4" />
+      </button>
+      <button
+        onClick={addGpsPoint}
+        title="Add GPS point"
+        aria-label="Add GPS point"
+        className="flex size-9 items-center justify-center rounded-xl hover:bg-accent"
+      >
+        <LocateFixed className="size-4" />
+      </button>
       <div className="mx-1 h-7 w-px bg-border" />
       <select
         value={wb.units.area}

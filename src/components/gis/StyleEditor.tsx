@@ -4,7 +4,14 @@ import type { FillPattern, GisLayer } from "@/lib/gis/types";
 import { LABEL_TOKENS, propertyKeys } from "@/lib/gis/labels";
 import { cn } from "@/lib/utils";
 
-const patterns: FillPattern[] = ["solid", "diagonal", "crosshatch", "dotted"];
+const patterns: FillPattern[] = [
+  "solid",
+  "diagonal",
+  "horizontal",
+  "vertical",
+  "crosshatch",
+  "dotted",
+];
 
 export function StyleEditor({ layer }: { layer: GisLayer }) {
   const wb = useWorkbench();
@@ -47,7 +54,7 @@ export function StyleEditor({ layer }: { layer: GisLayer }) {
       </Field>
 
       <Field label="Fill pattern">
-        <div className="grid grid-cols-4 gap-1">
+        <div className="grid grid-cols-3 gap-1">
           {patterns.map((p) => (
             <button
               key={p}
@@ -122,6 +129,30 @@ export function StyleEditor({ layer }: { layer: GisLayer }) {
               {`{${token}}`}
             </button>
           ))}
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <Field label={`Labels start at zoom ${s.labelMinZoom}`}>
+            <input
+              type="range"
+              min={0}
+              max={18}
+              step={1}
+              value={s.labelMinZoom}
+              onChange={(e) => wb.updateStyle(layer.id, { labelMinZoom: Number(e.target.value) })}
+              className="w-full accent-primary"
+            />
+          </Field>
+          <Field label={`Labels end at zoom ${s.labelMaxZoom}`}>
+            <input
+              type="range"
+              min={6}
+              max={24}
+              step={1}
+              value={s.labelMaxZoom}
+              onChange={(e) => wb.updateStyle(layer.id, { labelMaxZoom: Number(e.target.value) })}
+              className="w-full accent-primary"
+            />
+          </Field>
         </div>
       </div>
     </div>

@@ -71,6 +71,7 @@ export function MapCanvas() {
       center: TEXAS_CENTER,
       zoom: 6,
       attributionControl: { compact: true },
+      canvasContextAttributes: { preserveDrawingBuffer: true },
     });
     map.addControl(new NavigationControl({ visualizePitch: false }), "bottom-right");
     map.addControl(new ScaleControl({ unit: "imperial" }), "bottom-left");
@@ -122,8 +123,9 @@ export function MapCanvas() {
           properties: {
             ...(f.properties ?? {}),
             __idx: index,
-            __selected:
-              wb.selectedFeature?.layerId === layer.id && wb.selectedFeature.index === index,
+            __selected: wb.selectedFeatures.some(
+              (selection) => selection.layerId === layer.id && selection.index === index,
+            ),
             __label:
               layer.style.labelEnabled && layer.style.labelTemplate
                 ? composeLabel(f as never, layer.style.labelTemplate)
@@ -132,7 +134,7 @@ export function MapCanvas() {
         }));
         return { layer, fc: { type: "FeatureCollection", features } as FeatureCollection };
       }),
-    [wb.layers, wb.selectedFeature],
+    [wb.layers, wb.selectedFeatures],
   );
 
   useEffect(() => {
@@ -316,15 +318,18 @@ export function MapCanvas() {
         }
         return;
       }
-      const coord: Position = [e.lngLat.lng, e.lngLat.lat];
+      const coord: Position = wb.snapEnabled
+        ? (nearestVisibleVertex(map, e.point.x, e.point.y) ?? [e.lngLat.lng, e.lngLat.lat])
+        : [e.lngLat.lng, e.lngLat.lat];
       if (mode === "point") {
         addToSketchLayer({
           type: "Feature",
           geometry: { type: "Point", coordinates: coord },
           properties: {
             NAME: "New point",
-            LAT: Number(e.lngLat.lat.toFixed(6)),
-            LON: Number(e.lngLat.lng.toFixed(6)),
+            LAT: Number(Number(coord[1]).toFixed(6)),
+            LON: Number(Number(coord[0]).toFixed(6)),
+            SNAPPED: coord[0] !== e.lngLat.lng || coord[1] !== e.lngLat.lat,
           },
         });
         toast.success("Point added");
@@ -587,6 +592,37 @@ function MenuItem({
       {label}
     </button>
   );
+}
+
+function nearestVisibleVertex(map: MlMap, x: number, y: number): Position | null {
+  const tolerance = 12;
+  const hits = map.queryRenderedFeatures([
+    [x - tolerance, y - tolerance],
+    [x + tolerance, y + tolerance],
+  ]);
+  let bestCoordinate: Position | null = null;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  const visit = (value: unknown) => {
+    if (!Array.isArray(value)) return;
+    if (value.length >= 2 && typeof value[0] === "number" && typeof value[1] === "number") {
+      const point = map.project([value[0], value[1]]);
+      const distance = Math.hypot(point.x - x, point.y - y);
+      if (distance <= tolerance && distance < bestDistance) {
+        bestCoordinate = [value[0], value[1]];
+        bestDistance = distance;
+      }
+      return;
+    }
+    for (const child of value) visit(child);
+  };
+  for (const hit of hits) {
+    if (hit.geometry.type === "GeometryCollection") {
+      for (const geometry of hit.geometry.geometries) {
+        if ("coordinates" in geometry) visit(geometry.coordinates);
+      }
+    } else visit(hit.geometry.coordinates);
+  }
+  return bestCoordinate;
 }
 
 function ensureDraftLayers(map: MlMap) {

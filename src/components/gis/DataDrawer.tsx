@@ -1,8 +1,19 @@
 import { useMemo, useState } from "react";
-import { Search, X, Database, Loader2, Plus, Link2, ShieldAlert } from "lucide-react";
+import {
+  Search,
+  X,
+  Database,
+  Loader2,
+  Plus,
+  Link2,
+  ShieldAlert,
+  ExternalLink,
+  Radio,
+  Clock3,
+} from "lucide-react";
 import { toast } from "sonner";
 
-import { categories, searchCatalog, type CatalogEntry } from "@/lib/gis/catalog";
+import { categories, searchCatalog, US_STATES, type CatalogEntry } from "@/lib/gis/catalog";
 import { fetchRemoteGeoJSON } from "@/lib/gis/arcgis";
 import { useWorkbench } from "@/lib/gis/store";
 import { useMapRef } from "@/lib/gis/mapRef";
@@ -15,8 +26,13 @@ export function DataDrawer() {
   const [category, setCategory] = useState<string | null>(null);
   const [loadingId, setLoadingId] = useState<string | null>(null);
   const [customUrl, setCustomUrl] = useState("");
+  const [county, setCounty] = useState("");
+  const [showStates, setShowStates] = useState(false);
 
-  const results = useMemo(() => searchCatalog(query, category), [query, category]);
+  const results = useMemo(
+    () => searchCatalog(query, category, wb.selectedStates),
+    [query, category, wb.selectedStates],
+  );
 
   const viewportBbox = (): [number, number, number, number] | undefined => {
     if (!map) return undefined;
@@ -25,11 +41,24 @@ export function DataDrawer() {
   };
 
   const load = async (entry: CatalogEntry) => {
+    if (!entry.url) {
+      if (entry.sourcePage) window.open(entry.sourcePage, "_blank", "noopener,noreferrer");
+      return;
+    }
+    if (entry.minZoom && map && map.getZoom() < entry.minZoom) {
+      toast.warning(`Zoom in to level ${entry.minZoom} before adding ${entry.name}`, {
+        description: "This keeps dense records fast and limits the request to what is on screen.",
+      });
+      return;
+    }
     setLoadingId(entry.id);
     try {
       const bboxValue = entry.requiresViewport ? viewportBbox() : undefined;
       const data = await fetchRemoteGeoJSON(entry.url, {
         ...(bboxValue ? { bbox: bboxValue } : {}),
+        ...(entry.countyField && county.trim()
+          ? { where: `${entry.countyField}='${county.trim().replaceAll("'", "''")}'` }
+          : {}),
         maxFeatures: 3000,
       });
       if (data.features.length === 0) {
@@ -42,7 +71,18 @@ export function DataDrawer() {
         name: entry.name,
         data,
         groupId: "public",
-        source: { kind: "remote", url: entry.url, catalogId: entry.id, attribution: entry.agency },
+        source: {
+          kind: "remote",
+          url: entry.url,
+          catalogId: entry.id,
+          attribution: entry.agency,
+          ...(entry.countyField && county.trim()
+            ? { where: `${entry.countyField}='${county.trim().replaceAll("'", "''")}'` }
+            : {}),
+          ...(entry.requiresViewport ? { requiresViewport: true } : {}),
+          ...(entry.minZoom !== undefined ? { minZoom: entry.minZoom } : {}),
+          lastRefreshedAt: Date.now(),
+        },
         style: entry.geometry === "line" ? { fillOpacity: 0, strokeWidth: 2.5 } : {},
       });
       toast.success(`${entry.name} added`, {
@@ -129,6 +169,44 @@ export function DataDrawer() {
               </Chip>
             ))}
           </div>
+          <button
+            onClick={() => setShowStates((value) => !value)}
+            className="w-full rounded-xl bg-secondary px-3 py-2 text-left text-xs font-medium"
+          >
+            Project coverage · {wb.selectedStates.join(", ")}{" "}
+            <span className="float-right text-muted-foreground">change</span>
+          </button>
+          {showStates && (
+            <div className="max-h-28 overflow-y-auto rounded-xl border border-border bg-card p-2">
+              <div className="grid grid-cols-8 gap-1">
+                {US_STATES.map((state) => {
+                  const active = wb.selectedStates.includes(state);
+                  return (
+                    <button
+                      key={state}
+                      onClick={() =>
+                        wb.setSelectedStates(
+                          active
+                            ? wb.selectedStates.filter((value) => value !== state)
+                            : [...wb.selectedStates, state],
+                        )
+                      }
+                      className={cn(
+                        "rounded px-1 py-1 text-[10px]",
+                        active ? "bg-primary text-primary-foreground" : "bg-secondary",
+                      )}
+                    >
+                      {state}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="mt-2 text-[10px] text-muted-foreground">
+                Texas sources appear when TX is selected; nationwide sources remain available for
+                every project.
+              </p>
+            </div>
+          )}
         </div>
 
         <div className="flex-1 overflow-y-auto px-4 py-3">
@@ -140,6 +218,15 @@ export function DataDrawer() {
                     <div className="text-sm font-semibold">{entry.name}</div>
                     <div className="text-[11px] font-medium text-primary">{entry.agency}</div>
                     <p className="mt-1 text-xs text-muted-foreground">{entry.description}</p>
+                    {entry.countyField && (
+                      <input
+                        value={county}
+                        onChange={(event) => setCounty(event.target.value)}
+                        placeholder="Optional county name, e.g. Travis"
+                        aria-label="Parcel county filter"
+                        className="mt-2 w-full rounded-lg border border-border bg-secondary/50 px-2 py-1 text-[11px] outline-none focus:border-primary"
+                      />
+                    )}
                     <div className="mt-1 flex flex-wrap gap-1 text-[10px] text-muted-foreground">
                       <span className="rounded-full bg-secondary px-2 py-0.5">
                         {entry.category}
@@ -152,6 +239,29 @@ export function DataDrawer() {
                           loads current view
                         </span>
                       )}
+                      <span
+                        className={cn(
+                          "flex items-center gap-1 rounded-full px-2 py-0.5",
+                          entry.connection === "live"
+                            ? "bg-accent text-accent-foreground"
+                            : "bg-secondary",
+                        )}
+                      >
+                        {entry.connection === "live" ? (
+                          <Radio className="size-2.5" />
+                        ) : (
+                          <Clock3 className="size-2.5" />
+                        )}
+                        {entry.connection}
+                      </span>
+                      <span className="rounded-full bg-secondary px-2 py-0.5">
+                        {entry.updateCadence}
+                      </span>
+                      {entry.minZoom && (
+                        <span className="rounded-full bg-secondary px-2 py-0.5">
+                          zoom {entry.minZoom}+
+                        </span>
+                      )}
                       <span className="rounded-full bg-secondary px-2 py-0.5">{entry.license}</span>
                     </div>
                   </div>
@@ -162,12 +272,24 @@ export function DataDrawer() {
                   >
                     {loadingId === entry.id ? (
                       <Loader2 className="size-3.5 animate-spin" />
-                    ) : (
+                    ) : entry.url ? (
                       <Plus className="size-3.5" />
+                    ) : (
+                      <ExternalLink className="size-3.5" />
                     )}
-                    Add
+                    {entry.url ? "Add" : "Source"}
                   </button>
                 </div>
+                {entry.sourcePage && entry.url && (
+                  <a
+                    href={entry.sourcePage}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mt-2 inline-flex items-center gap-1 text-[10px] text-primary hover:underline"
+                  >
+                    <ExternalLink className="size-3" /> Source details
+                  </a>
+                )}
               </div>
             ))}
             {results.length === 0 && (

@@ -1,11 +1,21 @@
 import { useEffect, useState } from "react";
-import { Mountain, Save, FolderOpen, Database, Table2, PanelLeft, Info } from "lucide-react";
+import {
+  Mountain,
+  Save,
+  FolderOpen,
+  Database,
+  Table2,
+  PanelLeft,
+  Info,
+  FileDown,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { useWorkbench } from "@/lib/gis/store";
 import { useMapRef } from "@/lib/gis/mapRef";
 import { downloadProjectFile } from "@/lib/gis/project";
 import { cn } from "@/lib/utils";
+import { exportMapPdf } from "@/lib/gis/mapPdf";
 
 export function TopBar({
   onTogglePanel,
@@ -15,7 +25,7 @@ export function TopBar({
   panelOpen: boolean;
 }) {
   const wb = useWorkbench();
-  const { setDrawerOpen, setTableOpen, tableOpen } = useMapRef();
+  const { setDrawerOpen, setTableOpen, tableOpen, map } = useMapRef();
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [showAbout, setShowAbout] = useState(false);
 
@@ -77,6 +87,21 @@ export function TopBar({
           onClick={() => setTableOpen(!tableOpen)}
         />
         <BarBtn icon={<Save className="size-4" />} label="Save" onClick={() => void save()} />
+        <BarBtn
+          icon={<FileDown className="size-4" />}
+          label="PDF"
+          onClick={() => {
+            if (!map) {
+              toast.error("The map is still loading");
+              return;
+            }
+            void exportMapPdf(map, wb.projectName, wb.layers, "letter")
+              .then(() => toast.success("PDF map exported"))
+              .catch((error: unknown) =>
+                toast.error(error instanceof Error ? error.message : "PDF export failed"),
+              );
+          }}
+        />
         <BarBtn
           icon={<FolderOpen className="size-4" />}
           label="Backup"

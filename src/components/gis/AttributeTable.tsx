@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { bbox as turfBbox } from "@turf/turf";
-import { Search, X, Table2, Crosshair } from "lucide-react";
+import { Search, X, Table2, Crosshair, CopyPlus, CheckSquare } from "lucide-react";
 import { useWorkbench } from "@/lib/gis/store";
 import { useMapRef } from "@/lib/gis/mapRef";
 import { propertyKeys } from "@/lib/gis/labels";
@@ -11,6 +11,9 @@ export function AttributeTable() {
   const wb = useWorkbench();
   const { tableOpen, setTableOpen, map } = useMapRef();
   const [query, setQuery] = useState("");
+  const [field, setField] = useState("");
+  const [operator, setOperator] = useState("contains");
+  const [value, setValue] = useState("");
   const layer = wb.activeLayer;
 
   const keys = useMemo(
@@ -24,16 +27,49 @@ export function AttributeTable() {
     const q = query.trim().toLowerCase();
     return layer.data.features
       .map((f, index) => ({ f, index }))
-      .filter(({ f }) =>
-        q
+      .filter(({ f }) => {
+        const searchMatch = q
           ? Object.values(f.properties ?? {}).some((v) =>
               String(v ?? "")
                 .toLowerCase()
                 .includes(q),
             )
-          : true,
-      );
-  }, [layer, query]);
+          : true;
+        if (!searchMatch || !field || !value) return searchMatch;
+        const actual = (f.properties ?? {})[field];
+        const actualText = String(actual ?? "").toLowerCase();
+        const wanted = value.toLowerCase();
+        const actualNumber = Number(actual);
+        const wantedNumber = Number(value);
+        if (operator === "equals") return actualText === wanted;
+        if (operator === "starts") return actualText.startsWith(wanted);
+        if (operator === "greater")
+          return Number.isFinite(actualNumber) && actualNumber > wantedNumber;
+        if (operator === "less")
+          return Number.isFinite(actualNumber) && actualNumber < wantedNumber;
+        return actualText.includes(wanted);
+      });
+  }, [layer, query, field, operator, value]);
+
+  const selectResults = () => {
+    if (!layer) return;
+    wb.setSelectedFeatures(rows.map(({ index }) => ({ layerId: layer.id, index })));
+  };
+
+  const createFromResults = () => {
+    if (!layer || rows.length === 0) return;
+    wb.addLayer({
+      name: `${layer.name} · selection`,
+      groupId: layer.groupId,
+      source: {
+        kind: "derived",
+        sourceLayerId: layer.id,
+        query: [field, operator, value].filter(Boolean).join(" ") || query,
+      },
+      data: { type: "FeatureCollection", features: rows.map(({ f }) => structuredClone(f)) },
+      style: layer.style,
+    });
+  };
 
   if (!tableOpen) return null;
 
@@ -66,6 +102,56 @@ export function AttributeTable() {
         </div>
       </div>
 
+      {layer && (
+        <div className="flex flex-wrap items-center gap-1 border-b border-border bg-secondary/40 px-3 py-2">
+          <select
+            value={field}
+            onChange={(event) => setField(event.target.value)}
+            aria-label="Attribute field"
+            className="rounded-lg border border-border bg-card px-2 py-1 text-xs"
+          >
+            <option value="">Any field</option>
+            {keys.map((key) => (
+              <option key={key} value={key}>
+                {key}
+              </option>
+            ))}
+          </select>
+          <select
+            value={operator}
+            onChange={(event) => setOperator(event.target.value)}
+            aria-label="Attribute operator"
+            className="rounded-lg border border-border bg-card px-2 py-1 text-xs"
+          >
+            <option value="contains">contains</option>
+            <option value="equals">equals</option>
+            <option value="starts">starts with</option>
+            <option value="greater">is greater than</option>
+            <option value="less">is less than</option>
+          </select>
+          <input
+            value={value}
+            onChange={(event) => setValue(event.target.value)}
+            placeholder="Value"
+            aria-label="Attribute value"
+            className="w-36 rounded-lg border border-border bg-card px-2 py-1 text-xs outline-none focus:border-primary"
+          />
+          <button
+            onClick={selectResults}
+            className="ml-auto flex items-center gap-1 rounded-lg bg-secondary px-2 py-1 text-xs hover:bg-accent"
+          >
+            <CheckSquare className="size-3.5" /> Select {rows.length}
+          </button>
+          <button
+            onClick={createFromResults}
+            disabled={rows.length === 0}
+            className="flex items-center gap-1 rounded-lg bg-primary px-2 py-1 text-xs text-primary-foreground disabled:opacity-50"
+          >
+            <CopyPlus className="size-3.5" /> New layer
+          </button>
+        </div>
+      )}
+
       {!layer ? (
         <p className="p-4 text-sm text-muted-foreground">
           Pick a layer in the panel to browse its attributes.
@@ -87,8 +173,9 @@ export function AttributeTable() {
             </thead>
             <tbody>
               {rows.map(({ f, index }) => {
-                const selected =
-                  wb.selectedFeature?.layerId === layer.id && wb.selectedFeature.index === index;
+                const selected = wb.selectedFeatures.some(
+                  (selection) => selection.layerId === layer.id && selection.index === index,
+                );
                 return (
                   <tr
                     key={index}

@@ -1,6 +1,7 @@
 import type { Feature, FeatureCollection, Geometry } from "geojson";
 
-export type FillPattern = "solid" | "diagonal" | "crosshatch" | "dotted";
+export type FillPattern =
+  "solid" | "diagonal" | "horizontal" | "vertical" | "crosshatch" | "dotted";
 
 export interface LayerStyle {
   fillColor: string;
@@ -12,6 +13,8 @@ export interface LayerStyle {
   pointSize: number;
   labelTemplate: string;
   labelEnabled: boolean;
+  labelMinZoom: number;
+  labelMaxZoom: number;
 }
 
 export interface AreaUnitsPref {
@@ -22,7 +25,18 @@ export interface AreaUnitsPref {
 export type LayerSource =
   | { kind: "import"; fileName: string }
   | { kind: "draw" }
-  | { kind: "remote"; url: string; catalogId?: string; attribution?: string };
+  | { kind: "derived"; sourceLayerId: string; query?: string }
+  | {
+      kind: "remote";
+      url: string;
+      catalogId?: string;
+      attribution?: string;
+      where?: string;
+      requiresViewport?: boolean;
+      minZoom?: number;
+      refreshMinutes?: number;
+      lastRefreshedAt?: number;
+    };
 
 export interface GisLayer {
   id: string;
@@ -48,6 +62,7 @@ export interface ProjectState {
   layers: GisLayer[];
   basemapId: string;
   units: AreaUnitsPref;
+  selectedStates?: string[];
   savedAt?: number;
 }
 
@@ -66,5 +81,7 @@ export const defaultStyle = (seed = 0): LayerStyle => {
     pointSize: 6,
     labelTemplate: "",
     labelEnabled: false,
+    labelMinZoom: 4,
+    labelMaxZoom: 24,
   };
 };

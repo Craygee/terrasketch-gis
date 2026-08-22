@@ -28,6 +28,7 @@ import { squareMeters, formatArea } from "@/lib/gis/measure";
 import type { GisLayer } from "@/lib/gis/types";
 import { StyleEditor } from "./StyleEditor";
 import { cn } from "@/lib/utils";
+import type { LayerSource } from "@/lib/gis/types";
 
 const exportFormats: Array<{ id: ExportFormat; label: string }> = [
   { id: "geojson", label: "GeoJSON" },
@@ -310,9 +311,7 @@ export function LayerPanel() {
                             {styleFor === layer.id && <StyleEditor layer={layer} />}
 
                             {layer.source.kind === "remote" && (
-                              <p className="text-[10px] text-muted-foreground">
-                                Public data · {layer.source.attribution ?? "official service"}
-                              </p>
+                              <RemoteLayerSettings layerId={layer.id} source={layer.source} />
                             )}
                           </div>
                         )}
@@ -339,6 +338,47 @@ export function LayerPanel() {
           establish legal boundaries or ownership.
         </p>
       </div>
+    </div>
+  );
+}
+
+function RemoteLayerSettings({
+  layerId,
+  source,
+}: {
+  layerId: string;
+  source: Extract<LayerSource, { kind: "remote" }>;
+}) {
+  const wb = useWorkbench();
+  return (
+    <div className="space-y-1 rounded-lg bg-card p-2 text-[10px] text-muted-foreground">
+      <p>
+        Public data · {source.attribution ?? "official service"}
+        {source.requiresViewport ? " · current view only" : ""}
+      </p>
+      <label className="flex items-center gap-2">
+        Auto refresh
+        <select
+          value={source.refreshMinutes ?? 0}
+          onChange={(event) => {
+            const minutes = Number(event.target.value);
+            const nextSource = { ...source };
+            delete nextSource.refreshMinutes;
+            wb.updateLayer(layerId, {
+              source: minutes ? { ...nextSource, refreshMinutes: minutes } : nextSource,
+            });
+          }}
+          className="ml-auto rounded border border-border bg-secondary px-1 py-0.5 text-[10px]"
+        >
+          <option value={0}>Off</option>
+          <option value={5}>5 min</option>
+          <option value={15}>15 min</option>
+          <option value={60}>Hourly</option>
+        </select>
+      </label>
+      {source.lastRefreshedAt && (
+        <p>Updated {new Date(source.lastRefreshedAt).toLocaleTimeString()}</p>
+      )}
     </div>
   );
 }

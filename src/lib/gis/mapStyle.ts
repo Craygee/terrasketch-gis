@@ -37,6 +37,19 @@ export function ensurePatternImage(map: MlMap, pattern: FillPattern, color: stri
     ctx.lineTo(size + 4, size / 2 - 4);
     ctx.stroke();
   }
+  if (pattern === "horizontal" || pattern === "vertical") {
+    ctx.beginPath();
+    for (let offset = 4; offset < size; offset += 8) {
+      if (pattern === "horizontal") {
+        ctx.moveTo(0, offset);
+        ctx.lineTo(size, offset);
+      } else {
+        ctx.moveTo(offset, 0);
+        ctx.lineTo(offset, size);
+      }
+    }
+    ctx.stroke();
+  }
   if (pattern === "crosshatch") {
     ctx.beginPath();
     ctx.moveTo(-4, -4);
@@ -68,6 +81,8 @@ export function ensurePatternImage(map: MlMap, pattern: FillPattern, color: stri
 export function buildLayerSpecs(layer: GisLayer, map: MlMap): LayerSpecification[] {
   const src = sourceId(layer.id);
   const s = layer.style;
+  const labelMinZoom = s.labelMinZoom ?? 4;
+  const labelMaxZoom = s.labelMaxZoom ?? 24;
   const patternId = ensurePatternImage(map, s.fillPattern, s.fillColor);
 
   const fillPaint: Record<string, unknown> = patternId
@@ -123,12 +138,24 @@ export function buildLayerSpecs(layer: GisLayer, map: MlMap): LayerSpecification
       source: src,
       layout: {
         "text-field": ["coalesce", ["get", "__label"], ""],
-        "text-size": 12,
+        "text-size": [
+          "interpolate",
+          ["linear"],
+          ["zoom"],
+          labelMinZoom,
+          10,
+          16,
+          14,
+          labelMaxZoom,
+          18,
+        ],
         "text-anchor": "center",
         "text-allow-overlap": false,
         "text-max-width": 12,
         "symbol-placement": "point",
       },
+      minzoom: labelMinZoom,
+      maxzoom: labelMaxZoom,
       paint: {
         "text-color": "#1d2a20",
         "text-halo-color": "#fdfbf3",

@@ -11,12 +11,14 @@ import { DrawToolbar } from "./DrawToolbar";
 import { AttributeTable } from "./AttributeTable";
 import { DataDrawer } from "./DataDrawer";
 import { cn } from "@/lib/utils";
+import { RemoteLayerManager } from "./RemoteLayerManager";
 
 export default function Workbench() {
   return (
     <WorkbenchProvider>
       <MapRefProvider>
         <WorkbenchShell />
+        <RemoteLayerManager />
         <Toaster />
       </MapRefProvider>
     </WorkbenchProvider>
