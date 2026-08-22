@@ -1,10 +1,11 @@
 import { lazy, Suspense } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { ClientOnly } from "@tanstack/react-router";
+import { LandDraftMark } from "@/components/brand/LandDraftMark";
 
 const Workbench = lazy(() => import("@/components/gis/Workbench"));
 
-const title = "TerraSketch GIS — Friendly Maps, Real GIS Power";
+const title = "LandDraft — Friendly Maps, Real GIS Power";
 const description =
   "Create signed-in GIS projects with autosave and save history: draw, measure, import GIS files, stream public data, style layers and export maps or data.";
 
@@ -26,8 +27,10 @@ function MapSkeleton() {
   return (
     <div className="flex h-screen w-full items-center justify-center bg-background">
       <div className="text-center">
-        <div className="mx-auto size-10 animate-pulse rounded-xl bg-primary" />
-        <p className="mt-3 text-sm font-medium text-foreground">TerraSketch GIS</p>
+        <div className="mx-auto flex size-10 animate-pulse items-center justify-center rounded-xl bg-primary text-primary-foreground">
+          <LandDraftMark className="size-6" />
+        </div>
+        <p className="mt-3 text-sm font-medium text-foreground">LandDraft</p>
         <p className="text-xs text-muted-foreground">Warming up the map workbench…</p>
       </div>
     </div>
@@ -37,7 +40,7 @@ function MapSkeleton() {
 function Index() {
   return (
     <>
-      <h1 className="sr-only">TerraSketch GIS map workbench</h1>
+      <h1 className="sr-only">LandDraft map workbench</h1>
       <ClientOnly fallback={<MapSkeleton />}>
         <Suspense fallback={<MapSkeleton />}>
           <Workbench />

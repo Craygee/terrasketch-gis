@@ -1,6 +1,6 @@
-# TerraSketch GIS
+# LandDraft
 
-TerraSketch is a browser-based GIS workbench for public data, field files, sketching, measurement, styling, inspection, and export. The interface keeps common map actions approachable while retaining powerful spatial workflows.
+LandDraft is a browser-based GIS workbench for public data, field files, sketching, measurement, styling, inspection, and export. The interface keeps common map actions approachable while retaining powerful spatial workflows.
 
 ## Current capabilities
 
@@ -31,7 +31,7 @@ The source repository is authoritative. Application changes must be made in code
 
 ## Content policy
 
-User-facing copy and documentation must describe TerraSketch with generic GIS terminology. Do not compare it to named third-party products. Third-party names may appear only where technically or legally required, including dependency identifiers, service URLs, licenses, and data attribution.
+User-facing copy and documentation must describe LandDraft with generic GIS terminology. Do not compare it to named third-party products. Third-party names may appear only where technically or legally required, including dependency identifiers, service URLs, licenses, and data attribution.
 
 ## Data disclaimer
 

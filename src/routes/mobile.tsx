@@ -6,7 +6,7 @@ const MobileWorkbench = lazy(() => import("@/components/gis/MobileWorkbench"));
 export const Route = createFileRoute("/mobile")({
   head: () => ({
     meta: [
-      { title: "TerraSketch Mobile Map" },
+      { title: "LandDraft Mobile Map" },
       {
         name: "description",
         content:

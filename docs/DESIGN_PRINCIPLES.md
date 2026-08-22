@@ -1,6 +1,6 @@
-# TerraSketch design principles
+# LandDraft design principles
 
-TerraSketch is designed from first principles around clear spatial workflows, accessible controls, reliable public data, and reversible analysis.
+LandDraft is designed from first principles around clear spatial workflows, accessible controls, reliable public data, and reversible analysis.
 
 ## Product principles
 
@@ -22,6 +22,6 @@ TerraSketch is designed from first principles around clear spatial workflows, ac
 
 ## Brand-neutral content policy
 
-- Do not compare TerraSketch to named third-party products in UI copy, documentation, screenshots, metadata, or marketing text.
+- Do not compare LandDraft to named third-party products in UI copy, documentation, screenshots, metadata, or marketing text.
 - Describe capabilities with generic GIS terminology instead of branded phrases.
 - Keep third-party names only where technically or legally required, such as dependency identifiers, service URLs, license notices, and data attribution.

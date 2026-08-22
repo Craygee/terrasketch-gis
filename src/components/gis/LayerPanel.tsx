@@ -228,7 +228,7 @@ export function LayerPanel() {
                           draggedLayerRef.current = layer.id;
                           setDraggedLayerId(layer.id);
                           event.dataTransfer.effectAllowed = "move";
-                          event.dataTransfer.setData("application/x-terrasketch-layer", layer.id);
+                          event.dataTransfer.setData("application/x-landdraft-layer", layer.id);
                           event.dataTransfer.setData("text/plain", layer.name);
                         }}
                         onDragEnd={() => {

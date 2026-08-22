@@ -1,14 +1,5 @@
 import { useState } from "react";
-import {
-  Mountain,
-  Save,
-  FolderOpen,
-  Database,
-  Table2,
-  PanelLeft,
-  Info,
-  FileDown,
-} from "lucide-react";
+import { Save, FolderOpen, Database, Table2, PanelLeft, Info, FileDown } from "lucide-react";
 import { toast } from "sonner";
 
 import { useWorkbench } from "@/lib/gis/store";
@@ -16,6 +7,7 @@ import { useMapRef } from "@/lib/gis/mapRef";
 import { cn } from "@/lib/utils";
 import { ExportPanel } from "./ExportMenu";
 import { ProjectMenu } from "./ProjectMenu";
+import { LandDraftMark } from "@/components/brand/LandDraftMark";
 
 export function TopBar({
   onTogglePanel,
@@ -50,12 +42,12 @@ export function TopBar({
 
       <div className="flex items-center gap-2">
         <span className="flex size-8 items-center justify-center rounded-xl bg-primary text-primary-foreground">
-          <Mountain className="size-4" />
+          <LandDraftMark className="size-5" />
         </span>
         <div className="leading-tight">
-          <h1 className="text-sm font-bold tracking-tight">TerraSketch GIS</h1>
+          <h1 className="text-sm font-bold tracking-tight">LandDraft</h1>
           <p className="hidden text-[10px] text-muted-foreground sm:block">
-            Map, measure and sketch the world
+            Map, measure and shape the land
           </p>
         </div>
       </div>
@@ -134,7 +126,7 @@ export function TopBar({
 
       {showAbout && (
         <div className="float-surface absolute right-2 top-14 w-80 rounded-2xl p-4 text-xs leading-relaxed">
-          <h2 className="mb-1 text-sm font-semibold">About TerraSketch</h2>
+          <h2 className="mb-1 text-sm font-semibold">About LandDraft</h2>
           <p className="text-muted-foreground">
             A friendly browser workbench for maps: bring your own files, stream official public
             datasets, draw, measure, label and organize multiple projects.

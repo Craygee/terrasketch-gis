@@ -28,9 +28,11 @@ export interface ProjectSummary {
   versionCount: number;
 }
 
-const WORKSPACE_KEY = "terrasketch.workspace.v2";
-const LEGACY_KEY = "terrasketch.project.v1";
-const lastProjectKey = (userId: string) => `terrasketch.last-project.${userId}`;
+const WORKSPACE_KEY = "landdraft.workspace.v2";
+const LEGACY_WORKSPACE_KEY = "terrasketch.workspace.v2";
+const LEGACY_PROJECT_KEY = "terrasketch.project.v1";
+const lastProjectKey = (userId: string) => `landdraft.last-project.${userId}`;
+const legacyLastProjectKey = (userId: string) => `terrasketch.last-project.${userId}`;
 
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 
@@ -56,7 +58,11 @@ const compactProject = (project: StoredProject): StoredProject => ({
 
 const readProjects = (): StoredProject[] => {
   try {
-    return JSON.parse(window.localStorage.getItem(WORKSPACE_KEY) ?? "[]") as StoredProject[];
+    const current = window.localStorage.getItem(WORKSPACE_KEY);
+    const legacy = window.localStorage.getItem(LEGACY_WORKSPACE_KEY);
+    const projects = JSON.parse(current ?? legacy ?? "[]") as StoredProject[];
+    if (!current && legacy) window.localStorage.setItem(WORKSPACE_KEY, legacy);
+    return projects;
   } catch {
     return [];
   }
@@ -118,7 +124,11 @@ export const workspaceProjectStore = {
   async loadLast(userId: string): Promise<StoredProject | null> {
     const projects = readProjects();
     const userProjects = projects.filter((item) => item.userId === userId);
-    const lastId = window.localStorage.getItem(lastProjectKey(userId));
+    const currentLastId = window.localStorage.getItem(lastProjectKey(userId));
+    const legacyLastId = window.localStorage.getItem(legacyLastProjectKey(userId));
+    const lastId = currentLastId ?? legacyLastId;
+    if (!currentLastId && legacyLastId)
+      window.localStorage.setItem(lastProjectKey(userId), legacyLastId);
     const stored =
       userProjects.find((item) => item.id === lastId) ??
       userProjects.sort((a, b) => b.updatedAt - a.updatedAt)[0];
@@ -193,7 +203,7 @@ export const workspaceProjectStore = {
 
   async readLegacy(): Promise<ProjectState | null> {
     try {
-      const raw = window.localStorage.getItem(LEGACY_KEY);
+      const raw = window.localStorage.getItem(LEGACY_PROJECT_KEY);
       if (!raw) return null;
       const state = JSON.parse(raw) as ProjectState;
       return state.version === 1 ? state : null;
@@ -208,7 +218,7 @@ export function downloadProjectFile(state: ProjectState) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `${state.name.replace(/[^\w-]+/g, "_") || "terrasketch"}.tsketch.json`;
+  a.download = `${state.name.replace(/[^\w-]+/g, "_") || "landdraft"}.landdraft.json`;
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 2000);
 }

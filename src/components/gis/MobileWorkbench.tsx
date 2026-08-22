@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Database, FileDown, FolderOpen, Layers3, Mountain, PencilRuler, X } from "lucide-react";
+import { Database, FileDown, FolderOpen, Layers3, PencilRuler, X } from "lucide-react";
 import { Toaster } from "@/components/ui/sonner";
 import { WorkbenchProvider, useWorkbench } from "@/lib/gis/store";
 import { MapRefProvider, useMapRef } from "@/lib/gis/mapRef";
@@ -16,6 +16,7 @@ import { ExportPanel } from "./ExportMenu";
 import { ProjectMenu } from "./ProjectMenu";
 import { AuthGate } from "@/lib/auth";
 import { cn } from "@/lib/utils";
+import { LandDraftMark } from "@/components/brand/LandDraftMark";
 
 export default function MobileWorkbench() {
   return (
@@ -53,7 +54,7 @@ function MobileShell() {
       <header className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-center gap-2 p-3 pt-[max(.75rem,env(safe-area-inset-top))]">
         <div className="float-surface pointer-events-auto flex min-w-0 items-center gap-2 rounded-2xl px-3 py-2">
           <span className="flex size-8 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground">
-            <Mountain className="size-4" />
+            <LandDraftMark className="size-5" />
           </span>
           <select
             value={wb.projectId}

@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { LockKeyhole, LogIn, Mountain, UserPlus } from "lucide-react";
+import { LockKeyhole, LogIn, UserPlus } from "lucide-react";
+import { LandDraftMark } from "@/components/brand/LandDraftMark";
 
 export interface LocalUser {
   id: string;
@@ -21,13 +22,19 @@ interface AuthApi {
   signOut(): void;
 }
 
-const ACCOUNTS_KEY = "terrasketch.accounts.v1";
-const SESSION_KEY = "terrasketch.session.v1";
+const ACCOUNTS_KEY = "landdraft.accounts.v1";
+const SESSION_KEY = "landdraft.session.v1";
+const LEGACY_ACCOUNTS_KEY = "terrasketch.accounts.v1";
+const LEGACY_SESSION_KEY = "terrasketch.session.v1";
 const AuthContext = createContext<AuthApi | null>(null);
 
 const readAccounts = (): StoredAccount[] => {
   try {
-    return JSON.parse(window.localStorage.getItem(ACCOUNTS_KEY) ?? "[]") as StoredAccount[];
+    const current = window.localStorage.getItem(ACCOUNTS_KEY);
+    const legacy = window.localStorage.getItem(LEGACY_ACCOUNTS_KEY);
+    const accounts = JSON.parse(current ?? legacy ?? "[]") as StoredAccount[];
+    if (!current && legacy) window.localStorage.setItem(ACCOUNTS_KEY, legacy);
+    return accounts;
   } catch {
     return [];
   }
@@ -63,7 +70,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     try {
-      const userId = window.localStorage.getItem(SESSION_KEY);
+      const currentSession = window.localStorage.getItem(SESSION_KEY);
+      const legacySession = window.localStorage.getItem(LEGACY_SESSION_KEY);
+      const userId = currentSession ?? legacySession;
+      if (!currentSession && legacySession) window.localStorage.setItem(SESSION_KEY, legacySession);
       const account = readAccounts().find((item) => item.id === userId);
       if (account) setUser({ id: account.id, email: account.email, name: account.name });
     } finally {
@@ -108,6 +118,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       },
       signOut() {
         window.localStorage.removeItem(SESSION_KEY);
+        window.localStorage.removeItem(LEGACY_SESSION_KEY);
         setUser(null);
       },
     }),
@@ -162,10 +173,10 @@ function LoginScreen() {
       <section className="panel-surface w-full max-w-sm rounded-3xl p-6 shadow-float">
         <div className="mb-5 flex items-center gap-3">
           <span className="flex size-11 items-center justify-center rounded-2xl bg-primary text-primary-foreground">
-            <Mountain className="size-6" />
+            <LandDraftMark className="size-7" />
           </span>
           <div>
-            <h1 className="text-xl font-bold">TerraSketch GIS</h1>
+            <h1 className="text-xl font-bold">LandDraft</h1>
             <p className="text-xs text-muted-foreground">Your maps, projects and save history</p>
           </div>
         </div>

@@ -78,12 +78,12 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "TerraSketch GIS" },
+      { title: "LandDraft" },
       {
         name: "description",
-        content: "A friendly browser GIS workbench for mapping, measuring and sketching.",
+        content: "A friendly browser GIS workbench for mapping, measuring and shaping land data.",
       },
-      { name: "author", content: "TerraSketch" },
+      { name: "author", content: "LandDraft" },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
     ],
@@ -92,7 +92,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
         rel: "stylesheet",
         href: appCss,
       },
-      { rel: "icon", href: "/favicon.ico", type: "image/x-icon" },
+      { rel: "icon", href: "/landdraft-mark.svg", type: "image/svg+xml" },
       { rel: "preconnect", href: "https://fonts.googleapis.com" },
       { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
       {
