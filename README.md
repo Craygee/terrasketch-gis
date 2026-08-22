@@ -7,6 +7,7 @@ TerraSketch is a friendly, browser-first GIS workbench for public records, field
 - Five switchable basemaps: streets, satellite, USGS topo, dark, and OpenStreetMap.
 - Drag-and-drop GeoJSON, KML, KMZ, zipped Shapefile, GPX, and latitude/longitude CSV files.
 - ArcGIS FeatureServer/MapServer and direct GeoJSON URL connections.
+- Viewport-streamed ArcGIS agency layers that refresh after navigation instead of retaining offscreen national datasets.
 - Curated public-data catalog seeded with TxDOT, Texas GLO, HIFLD, Census, USGS/EPA, and public parcel sources.
 - Grouped layers, visibility, reorder, selection, duplicated selections, and attribute tables.
 - Solid, diagonal, crosshatch, and dotted polygon fills; color, opacity, size, and stroke controls.
@@ -15,7 +16,7 @@ TerraSketch is a friendly, browser-first GIS workbench for public records, field
 - Coordinate readout, right-click coordinate tools, place search, local project save, and GeoJSON/KML/KMZ/zipped Shapefile export.
 - Optional Supabase authentication, account-backed map library, unlisted/public live links, configurable link editing, and realtime map refresh.
 - Browser-native spatial analysis that creates reversible result layers: buffers, centroids, envelopes, convex hulls, polygon dissolves, and select-by-location.
-- Search-across-all-fields attribute filtering and one-click GPS location.
+- Search-across-all-fields attribute filtering, lightweight 100-row paging, and one-click GPS location.
 
 ## Run locally
 

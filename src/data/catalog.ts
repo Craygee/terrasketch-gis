@@ -24,7 +24,7 @@ export const DATA_CATALOG: CatalogItem[] = [
   {
     id: 'eia-gas-pipelines', name: 'Major natural gas pipelines', provider: 'U.S. Energy Information Administration', category: 'Energy',
     description: 'Major interstate, intrastate, and gathering natural-gas transmission pipelines.', color: '#a16207', tags: ['gas', 'pipeline', 'energy', 'utility'],
-    serviceUrl: 'https://services.arcgis.com/2gdL2gxYNFY2TOUb/ArcGIS/rest/services/NaturalGas_Pipelines_US_Dissolved/FeatureServer', layerId: 0,
+    serviceUrl: 'https://services2.arcgis.com/FiaPA4ga0iQKduv3/arcgis/rest/services/Natural_Gas_Interstate_and_Intrastate_Pipelines_1/FeatureServer/0', layerId: 0,
   },
   {
     id: 'glo-psf', name: 'Permanent School Fund lands', provider: 'Texas General Land Office', category: 'Land',

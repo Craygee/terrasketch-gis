@@ -1,6 +1,7 @@
 import type { FeatureCollection } from 'geojson'
 
 export type Pattern = 'solid' | 'diagonal' | 'crosshatch' | 'dots'
+export type BBox = [number, number, number, number]
 
 export interface LayerStyle {
   color: string
@@ -21,6 +22,11 @@ export interface GisLayer {
   data: FeatureCollection
   style: LayerStyle
   source?: string
+  sourceLayerId?: number
+  viewportManaged?: boolean
+  loadedBounds?: BBox
+  loading?: boolean
+  loadError?: string
   selectedIds: Array<string | number>
 }
 

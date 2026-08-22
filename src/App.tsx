@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import maplibregl, { type Map as MapLibreMap } from 'maplibre-gl'
 import MapboxDraw from '@mapbox/mapbox-gl-draw'
 import * as turf from '@turf/turf'
@@ -9,17 +9,18 @@ import {
   MoveUp, Paintbrush, Plus, Redo2, Ruler, Save, Search, Share2, Sparkles, Table2,
   Trash2, Undo2, X, Zap,
 } from 'lucide-react'
-import type { Feature } from 'geojson'
+import type { Feature, FeatureCollection } from 'geojson'
 import { BASEMAPS, DATA_CATALOG } from './data/catalog'
 import { useGisStore } from './store'
-import { fetchGeoData, importGeoFile } from './utils/importers'
+import { fetchGeoData, importGeoFile, isArcGisService } from './utils/importers'
 import { exportGeoJSON, exportKml, exportShapefile } from './utils/exporters'
-import type { CloudMap, GisLayer, LayerStyle, MapSnapshot, Pattern } from './types'
+import type { BBox, CloudMap, GisLayer, LayerStyle, MapSnapshot, Pattern } from './types'
 import { AccountPanel, MapLibrary, SharePanel } from './components/CloudPanels'
 import AnalysisPanel from './components/AnalysisPanel'
 import { cloudConfigured, loadCloudMap, saveCloudMap, subscribeToMap, supabase } from './lib/supabase'
 
 const COLORS = ['#f97316', '#2563eb', '#16a34a', '#dc2626', '#7c3aed', '#0891b2', '#ca8a04', '#ec4899']
+const boundsKey = (bounds: BBox) => bounds.map((value) => value.toFixed(3)).join(':')
 const DRAW_STYLES: object[] = [
   { id: 'gl-draw-polygon-fill', type: 'fill', filter: ['all', ['==', '$type', 'Polygon']], paint: { 'fill-color': ['case', ['==', ['get', 'active'], 'true'], '#f97316', '#0f766e'], 'fill-opacity': .16 } },
   { id: 'gl-draw-lines', type: 'line', filter: ['any', ['==', '$type', 'LineString'], ['==', '$type', 'Polygon']], layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': ['case', ['==', ['get', 'active'], 'true'], '#f97316', '#0f766e'], 'line-width': 3 } },
@@ -32,9 +33,13 @@ function rasterStyle(tile: string, attribution: string): maplibregl.StyleSpecifi
   return { version: 8, sources: { basemap: { type: 'raster', tiles: [tile], tileSize: 256, attribution } }, layers: [{ id: 'basemap', type: 'raster', source: 'basemap' }] }
 }
 
+const geometryKindCache = new WeakMap<FeatureCollection, { polygon: boolean; line: boolean; point: boolean }>()
+
 function geometryKinds(layer: GisLayer) {
+  const cached = geometryKindCache.get(layer.data); if (cached) return cached
   const types = new Set(layer.data.features.map((f) => f.geometry?.type))
-  return { polygon: [...types].some((t) => t?.includes('Polygon')), line: [...types].some((t) => t?.includes('LineString')), point: [...types].some((t) => t?.includes('Point')) }
+  const kinds = { polygon: [...types].some((t) => t?.includes('Polygon')), line: [...types].some((t) => t?.includes('LineString')), point: [...types].some((t) => t?.includes('Point')) }
+  geometryKindCache.set(layer.data, kinds); return kinds
 }
 
 function makePattern(kind: Pattern, color: string): ImageData | null {
@@ -54,12 +59,13 @@ function labelExpression(template: string): maplibregl.ExpressionSpecification |
   return parts.length ? ['concat', ...parts] as maplibregl.ExpressionSpecification : ''
 }
 
-function MapCanvas({ onCoordinates, onSelection, onContext }: {
+function MapCanvas({ onCoordinates, onSelection, onContext, onViewportChange }: {
   onCoordinates: (value: string) => void
   onSelection: (layerId: string, feature: Feature) => void
   onContext: (x: number, y: number, lng: number, lat: number) => void
+  onViewportChange: (bounds: BBox) => void
 }) {
-  const container = useRef<HTMLDivElement>(null); const mapRef = useRef<MapLibreMap>(); const drawRef = useRef<MapboxDraw>(); const layersRef = useRef<GisLayer[]>([])
+  const container = useRef<HTMLDivElement>(null); const mapRef = useRef<MapLibreMap>(); const drawRef = useRef<MapboxDraw>(); const layersRef = useRef<GisLayer[]>([]); const sourceDataRef = useRef(new Map<string, FeatureCollection>()); const renderSignatureRef = useRef(new Map<string, string>())
   const { layers, basemap, addLayer } = useGisStore(); const styledBasemap = useRef(basemap)
   const base = BASEMAPS.find((b) => b.id === basemap) ?? BASEMAPS[0]
   useEffect(() => { layersRef.current = layers }, [layers])
@@ -67,27 +73,35 @@ function MapCanvas({ onCoordinates, onSelection, onContext }: {
   const syncLayers = useCallback((map: MapLibreMap) => {
     for (const layer of layers) {
       const sourceId = `source-${layer.id}`; const kinds = geometryKinds(layer)
-      if (!map.getSource(sourceId)) map.addSource(sourceId, { type: 'geojson', data: layer.data, promoteId: 'OBJECTID' })
-      else (map.getSource(sourceId) as maplibregl.GeoJSONSource).setData(layer.data)
+      const newSource = !map.getSource(sourceId)
+      if (newSource) map.addSource(sourceId, { type: 'geojson', data: layer.data, generateId: true, tolerance: .75, buffer: 64 })
+      else if (sourceDataRef.current.get(layer.id) !== layer.data) (map.getSource(sourceId) as maplibregl.GeoJSONSource).setData(layer.data)
+      sourceDataRef.current.set(layer.id, layer.data)
       const patternId = `pattern-${layer.id}`; const pattern = makePattern(layer.style.pattern, layer.style.color)
       if (pattern) { if (map.hasImage(patternId)) map.updateImage(patternId, pattern); else map.addImage(patternId, pattern) }
-      if (kinds.polygon && !map.getLayer(`fill-${layer.id}`)) map.addLayer({ id: `fill-${layer.id}`, type: 'fill', source: sourceId, paint: { 'fill-color': layer.style.color, 'fill-opacity': layer.style.opacity * .55 } })
-      if (kinds.line || kinds.polygon) if (!map.getLayer(`line-${layer.id}`)) map.addLayer({ id: `line-${layer.id}`, type: 'line', source: sourceId, paint: { 'line-color': layer.style.color, 'line-width': layer.style.width, 'line-opacity': layer.style.opacity } })
-      if (kinds.point && !map.getLayer(`circle-${layer.id}`)) map.addLayer({ id: `circle-${layer.id}`, type: 'circle', source: sourceId, paint: { 'circle-color': layer.style.color, 'circle-radius': layer.style.radius, 'circle-stroke-color': '#fff', 'circle-stroke-width': 1.5, 'circle-opacity': layer.style.opacity } })
+      let createdLayer = false
+      if (kinds.polygon && !map.getLayer(`fill-${layer.id}`)) { map.addLayer({ id: `fill-${layer.id}`, type: 'fill', source: sourceId, paint: { 'fill-color': layer.style.color, 'fill-opacity': layer.style.opacity * .55 } }); createdLayer = true }
+      if (kinds.line || kinds.polygon) if (!map.getLayer(`line-${layer.id}`)) { map.addLayer({ id: `line-${layer.id}`, type: 'line', source: sourceId, paint: { 'line-color': layer.style.color, 'line-width': layer.style.width, 'line-opacity': layer.style.opacity } }); createdLayer = true }
+      if (kinds.point && !map.getLayer(`circle-${layer.id}`)) { map.addLayer({ id: `circle-${layer.id}`, type: 'circle', source: sourceId, paint: { 'circle-color': layer.style.color, 'circle-radius': layer.style.radius, 'circle-stroke-color': '#fff', 'circle-stroke-width': 1.5, 'circle-opacity': layer.style.opacity } }); createdLayer = true }
       if (!layer.style.labelTemplate && map.getLayer(`label-${layer.id}`)) map.removeLayer(`label-${layer.id}`)
-      if (layer.style.labelTemplate && !map.getLayer(`label-${layer.id}`)) map.addLayer({ id: `label-${layer.id}`, type: 'symbol', source: sourceId, layout: { 'text-field': labelExpression(layer.style.labelTemplate), 'text-size': layer.style.labelSize, 'text-offset': [0, 1.1] }, paint: { 'text-color': '#12211c', 'text-halo-color': '#fff', 'text-halo-width': 1.5 } })
-      for (const prefix of ['fill', 'line', 'circle', 'label']) {
-        const id = `${prefix}-${layer.id}`; if (!map.getLayer(id)) continue
-        map.setLayoutProperty(id, 'visibility', layer.visible ? 'visible' : 'none')
-        if (prefix === 'fill') { map.setPaintProperty(id, 'fill-color', layer.style.color); map.setPaintProperty(id, 'fill-opacity', layer.style.opacity * .55); map.setPaintProperty(id, 'fill-pattern', pattern ? patternId : null) }
-        if (prefix === 'line') { map.setPaintProperty(id, 'line-color', layer.style.color); map.setPaintProperty(id, 'line-width', layer.style.width); map.setPaintProperty(id, 'line-opacity', layer.style.opacity) }
-        if (prefix === 'circle') { map.setPaintProperty(id, 'circle-color', layer.style.color); map.setPaintProperty(id, 'circle-radius', layer.style.radius); map.setPaintProperty(id, 'circle-opacity', layer.style.opacity) }
-        if (prefix === 'label' && layer.style.labelTemplate) { map.setLayoutProperty(id, 'text-field', labelExpression(layer.style.labelTemplate)); map.setLayoutProperty(id, 'text-size', layer.style.labelSize) }
+      if (layer.style.labelTemplate && !map.getLayer(`label-${layer.id}`)) { map.addLayer({ id: `label-${layer.id}`, type: 'symbol', source: sourceId, layout: { 'text-field': labelExpression(layer.style.labelTemplate), 'text-size': layer.style.labelSize, 'text-offset': [0, 1.1] }, paint: { 'text-color': '#12211c', 'text-halo-color': '#fff', 'text-halo-width': 1.5 } }); createdLayer = true }
+      const signature = JSON.stringify([layer.visible, layer.style])
+      if (newSource || createdLayer || renderSignatureRef.current.get(layer.id) !== signature) {
+        for (const prefix of ['fill', 'line', 'circle', 'label']) {
+          const id = `${prefix}-${layer.id}`; if (!map.getLayer(id)) continue
+          map.setLayoutProperty(id, 'visibility', layer.visible ? 'visible' : 'none')
+          if (prefix === 'fill') { map.setPaintProperty(id, 'fill-color', layer.style.color); map.setPaintProperty(id, 'fill-opacity', layer.style.opacity * .55); map.setPaintProperty(id, 'fill-pattern', pattern ? patternId : null) }
+          if (prefix === 'line') { map.setPaintProperty(id, 'line-color', layer.style.color); map.setPaintProperty(id, 'line-width', layer.style.width); map.setPaintProperty(id, 'line-opacity', layer.style.opacity) }
+          if (prefix === 'circle') { map.setPaintProperty(id, 'circle-color', layer.style.color); map.setPaintProperty(id, 'circle-radius', layer.style.radius); map.setPaintProperty(id, 'circle-opacity', layer.style.opacity) }
+          if (prefix === 'label' && layer.style.labelTemplate) { map.setLayoutProperty(id, 'text-field', labelExpression(layer.style.labelTemplate)); map.setLayoutProperty(id, 'text-size', layer.style.labelSize) }
+        }
+        renderSignatureRef.current.set(layer.id, signature)
       }
     }
     const live = new Set(layers.flatMap((l) => ['fill', 'line', 'circle', 'label'].map((p) => `${p}-${l.id}`)))
     map.getStyle().layers?.filter((l) => /^(fill|line|circle|label)-/.test(l.id) && !live.has(l.id)).forEach((l) => map.removeLayer(l.id))
     Object.keys(map.getStyle().sources).filter((id) => id.startsWith('source-') && !layers.some((l) => `source-${l.id}` === id)).forEach((id) => map.removeSource(id))
+    const liveIds = new Set(layers.map((layer) => layer.id)); for (const id of sourceDataRef.current.keys()) if (!liveIds.has(id)) { sourceDataRef.current.delete(id); renderSignatureRef.current.delete(id) }
   }, [layers])
 
   useEffect(() => {
@@ -96,6 +110,8 @@ function MapCanvas({ onCoordinates, onSelection, onContext }: {
     map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'bottom-right'); map.addControl(new maplibregl.ScaleControl({ unit: 'imperial' }), 'bottom-right'); map.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-right')
     const draw = new MapboxDraw({ displayControlsDefault: false, controls: { polygon: true, line_string: true, point: true, trash: true }, defaultMode: 'simple_select', styles: DRAW_STYLES })
     map.addControl(draw as unknown as maplibregl.IControl, 'top-right'); drawRef.current = draw
+    const reportViewport = () => { const bounds = map.getBounds(); onViewportChange([bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()]) }
+    map.on('load', reportViewport); map.on('moveend', reportViewport)
     map.on('mousemove', (e) => onCoordinates(`${e.lngLat.lat.toFixed(6)}°, ${e.lngLat.lng.toFixed(6)}°`))
     map.on('contextmenu', (e) => { e.preventDefault(); onContext(e.point.x, e.point.y, e.lngLat.lng, e.lngLat.lat) })
     map.on('click', (e) => {
@@ -118,12 +134,12 @@ function MapCanvas({ onCoordinates, onSelection, onContext }: {
     })
     window.addEventListener('terrasketch:locate', locate)
     mapRef.current = map
-    return () => { window.removeEventListener('terrasketch:locate', locate); positionMarker?.remove(); map.remove(); mapRef.current = undefined }
+    return () => { window.removeEventListener('terrasketch:locate', locate); map.off('moveend', reportViewport); positionMarker?.remove(); map.remove(); mapRef.current = undefined }
   // Map is intentionally initialized once; store updates are synced below.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  useEffect(() => { const map = mapRef.current; if (!map || styledBasemap.current === basemap) return; styledBasemap.current = basemap; map.setStyle(rasterStyle(base.tile, base.attribution)); map.once('styledata', () => syncLayers(map)) }, [basemap, base.tile, base.attribution, syncLayers])
+  useEffect(() => { const map = mapRef.current; if (!map || styledBasemap.current === basemap) return; styledBasemap.current = basemap; sourceDataRef.current.clear(); renderSignatureRef.current.clear(); map.setStyle(rasterStyle(base.tile, base.attribution)); map.once('styledata', () => syncLayers(map)) }, [basemap, base.tile, base.attribution, syncLayers])
   useEffect(() => { const map = mapRef.current; if (!map) return; if (map.isStyleLoaded()) syncLayers(map); else map.once('load', () => syncLayers(map)) }, [syncLayers])
   return <div ref={container} className="map-canvas" aria-label="Interactive map" />
 }
@@ -138,7 +154,7 @@ function LayerTree({ onStyle, onTable }: { onStyle: (l: GisLayer) => void; onTab
     <button className="group-title" onClick={() => setClosed((v) => ({ ...v, [group]: !v[group] }))}>{closed[group] ? <ChevronRight/> : <ChevronDown/>}<Folder/> <span>{group}</span><em>{items?.length}</em></button>
     {!closed[group] && items?.map((layer) => <div className={`layer-row ${activeLayerId === layer.id ? 'active' : ''}`} key={layer.id} onClick={() => setActive(layer.id)}>
       <GripVertical className="grip"/><button className="icon-btn" title={layer.visible ? 'Hide layer' : 'Show layer'} onClick={(e) => { e.stopPropagation(); updateLayer(layer.id, { visible: !layer.visible }) }}>{layer.visible ? <Eye/> : <EyeOff/>}</button>
-      <span className="swatch" style={{ background: layer.style.color, opacity: layer.style.opacity }} /><div className="layer-copy"><strong>{layer.name}</strong><span>{layer.data.features.length.toLocaleString()} features</span></div>
+      <span className="swatch" style={{ background: layer.style.color, opacity: layer.style.opacity }} /><div className="layer-copy"><strong>{layer.name}</strong><span className={layer.loadError ? 'load-error' : ''}>{layer.loading ? 'Loading visible area…' : layer.loadError ? `Service error · ${layer.loadError}` : `${layer.data.features.length.toLocaleString()} ${layer.viewportManaged ? 'visible ' : ''}features`}</span></div>
       <div className="row-actions"><button title="Style" onClick={(e) => { e.stopPropagation(); onStyle(layer) }}><Paintbrush/></button><button title="Attribute table" onClick={(e) => { e.stopPropagation(); onTable(layer) }}><Table2/></button><button title="Move up" onClick={(e) => { e.stopPropagation(); reorder(layer.id, 1) }}><MoveUp/></button><button title="Move down" onClick={(e) => { e.stopPropagation(); reorder(layer.id, -1) }}><MoveDown/></button><button title="Delete" onClick={(e) => { e.stopPropagation(); removeLayer(layer.id) }}><Trash2/></button></div>
     </div>)}
   </div>)}</div>
@@ -157,12 +173,14 @@ function StylePanel({ layer, onClose }: { layer: GisLayer; onClose: () => void }
 }
 
 function AttributeTable({ layer, onClose, onDuplicate }: { layer: GisLayer; onClose: () => void; onDuplicate: (features: Feature[]) => void }) {
-  const update = useGisStore((s) => s.updateLayer); const [query, setQuery] = useState(''); const fields = useMemo(() => [...new Set(layer.data.features.flatMap((f) => Object.keys(f.properties ?? {})))].slice(0, 40), [layer])
+  const PAGE_SIZE = 100; const update = useGisStore((s) => s.updateLayer); const [query, setQuery] = useState(''); const deferredQuery = useDeferredValue(query); const [page, setPage] = useState(0); const fields = useMemo(() => [...new Set(layer.data.features.flatMap((f) => Object.keys(f.properties ?? {})))].slice(0, 40), [layer.data])
   const selected = new Set(layer.selectedIds.map(String)); const toggle = (feature: Feature, index: number) => { const id = String(feature.id ?? feature.properties?.OBJECTID ?? index); const next = new Set(selected); if (next.has(id)) next.delete(id); else next.add(id); update(layer.id, { selectedIds: [...next] }) }
   const selectedFeatures = layer.data.features.filter((f, i) => selected.has(String(f.id ?? f.properties?.OBJECTID ?? i)))
-  const rows = layer.data.features.map((feature, index) => ({ feature, index })).filter(({ feature }) => !query || Object.values(feature.properties ?? {}).some((value) => String(value).toLowerCase().includes(query.toLowerCase())))
+  const rows = useMemo(() => { const needle = deferredQuery.trim().toLowerCase(); return layer.data.features.map((feature, index) => ({ feature, index })).filter(({ feature }) => !needle || Object.values(feature.properties ?? {}).some((value) => String(value).toLowerCase().includes(needle))) }, [deferredQuery, layer.data])
+  useEffect(() => setPage(0), [deferredQuery, layer.id]); const pageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE)); const safePage = Math.min(page, pageCount - 1); const start = safePage * PAGE_SIZE; const pageRows = rows.slice(start, start + PAGE_SIZE)
   return <section className="attribute-panel"><header><div><span className="eyebrow">Attribute table</span><h2>{layer.name}</h2></div><div className="table-tools"><div className="attr-search"><Search/><input placeholder="Filter any field" value={query} onChange={(e) => setQuery(e.target.value)}/></div><span>{selected.size} selected · {rows.length} shown</span><button className="soft-btn" disabled={!selected.size} onClick={() => onDuplicate(selectedFeatures)}><Copy/> Duplicate selection</button><button className="icon-btn" onClick={onClose}><X/></button></div></header>
-    <div className="table-wrap"><table><thead><tr><th></th><th>#</th>{fields.map((f) => <th key={f}>{f}</th>)}</tr></thead><tbody>{rows.slice(0, 1000).map(({ feature, index }) => { const id = String(feature.id ?? feature.properties?.OBJECTID ?? index); return <tr key={id} className={selected.has(id) ? 'selected' : ''} onClick={() => toggle(feature, index)}><td><input type="checkbox" readOnly checked={selected.has(id)}/></td><td>{index + 1}</td>{fields.map((f) => <td key={f}>{String(feature.properties?.[f] ?? '')}</td>)}</tr> })}</tbody></table></div>
+    <div className="table-wrap"><table><thead><tr><th></th><th>#</th>{fields.map((f) => <th key={f}>{f}</th>)}</tr></thead><tbody>{pageRows.map(({ feature, index }) => { const id = String(feature.id ?? feature.properties?.OBJECTID ?? index); return <tr key={id} className={selected.has(id) ? 'selected' : ''} onClick={() => toggle(feature, index)}><td><input type="checkbox" readOnly checked={selected.has(id)}/></td><td>{index + 1}</td>{fields.map((f) => <td key={f}>{String(feature.properties?.[f] ?? '')}</td>)}</tr> })}</tbody></table></div>
+    <footer className="table-page"><span>{rows.length ? `${start + 1}–${Math.min(start + PAGE_SIZE, rows.length)} of ${rows.length}` : 'No matching records'}</span><button disabled={safePage === 0} onClick={() => setPage((value) => Math.max(0, value - 1))}>Previous</button><button disabled={safePage >= pageCount - 1} onClick={() => setPage((value) => Math.min(pageCount - 1, value + 1))}>Next</button></footer>
   </section>
 }
 
@@ -187,8 +205,8 @@ function MeasureCard({ feature, onClose }: { feature: Feature; onClose: () => vo
 }
 
 export default function App() {
-  const { layers, addLayer, mapName, setMapName, basemap, setBasemap, hydrate, clear } = useGisStore()
-  const fileInput = useRef<HTMLInputElement>(null); const [leftOpen, setLeftOpen] = useState(true); const [catalog, setCatalog] = useState(false); const [analysis, setAnalysis] = useState(false); const [account, setAccount] = useState(false); const [share, setShare] = useState(false); const [library, setLibrary] = useState(false); const [styleLayer, setStyleLayer] = useState<GisLayer>(); const [tableLayer, setTableLayer] = useState<GisLayer>(); const [coords, setCoords] = useState('31.100000°, -98.700000°'); const [toast, setToast] = useState(''); const [dragging, setDragging] = useState(false); const [selected, setSelected] = useState<Feature>(); const [context, setContext] = useState<{x:number;y:number;lng:number;lat:number}>(); const [baseOpen, setBaseOpen] = useState(false); const [exportOpen, setExportOpen] = useState(false); const [searching, setSearching] = useState(false); const [query, setQuery] = useState(''); const [user, setUser] = useState<User | null>(null); const [cloudMap, setCloudMap] = useState<CloudMap>(); const [syncing, setSyncing] = useState(false)
+  const { layers, addLayer, updateLayer, mapName, setMapName, basemap, setBasemap, hydrate, clear } = useGisStore()
+  const fileInput = useRef<HTMLInputElement>(null); const viewportRequests = useRef(new Map<string, string>()); const viewportAborts = useRef(new Map<string, AbortController>()); const [viewport, setViewport] = useState<BBox>(); const [leftOpen, setLeftOpen] = useState(true); const [catalog, setCatalog] = useState(false); const [analysis, setAnalysis] = useState(false); const [account, setAccount] = useState(false); const [share, setShare] = useState(false); const [library, setLibrary] = useState(false); const [styleLayer, setStyleLayer] = useState<GisLayer>(); const [tableLayer, setTableLayer] = useState<GisLayer>(); const [coords, setCoords] = useState('31.100000°, -98.700000°'); const [toast, setToast] = useState(''); const [dragging, setDragging] = useState(false); const [selected, setSelected] = useState<Feature>(); const [context, setContext] = useState<{x:number;y:number;lng:number;lat:number}>(); const [baseOpen, setBaseOpen] = useState(false); const [exportOpen, setExportOpen] = useState(false); const [searching, setSearching] = useState(false); const [query, setQuery] = useState(''); const [user, setUser] = useState<User | null>(null); const [cloudMap, setCloudMap] = useState<CloudMap>(); const [syncing, setSyncing] = useState(false)
   const liveStyle = styleLayer ? layers.find((l) => l.id === styleLayer.id) : undefined; const liveTable = tableLayer ? layers.find((l) => l.id === tableLayer.id) : undefined
   const notify = (message: string) => { setToast(message); setTimeout(() => setToast(''), 3500) }
   const showDrawer = (drawer?: 'catalog' | 'analysis' | 'account' | 'share' | 'library') => {
@@ -197,10 +215,10 @@ export default function App() {
   const showStyle = (layer: GisLayer) => { showDrawer(); setStyleLayer(layer) }
   const showTable = (layer: GisLayer) => { showDrawer(); setTableLayer(layer) }
   const handleFiles = async (files: FileList | File[]) => { for (const file of Array.from(files)) { try { const data = await importGeoFile(file); addLayer(file.name.replace(/\.[^.]+$/, ''), data); notify(`Added ${data.features.length.toLocaleString()} features from ${file.name}`) } catch (error) { notify(error instanceof Error ? error.message : 'Could not import file') } } }
-  const addRemote = async (name: string, url: string, layerId = 0, color = COLORS[layers.length % COLORS.length], group = 'Web layers') => { try { const data = await fetchGeoData(url, layerId); addLayer(name, data, { group, source: url, style: { color, opacity: .75, width: 2.5, radius: 5, pattern: 'solid', labelTemplate: '', labelSize: 12 } }); notify(`Added ${data.features.length.toLocaleString()} ${name} features`) } catch (e) { notify(`${name}: ${e instanceof Error ? e.message : 'service unavailable'}`) } }
+  const addRemote = async (name: string, url: string, layerId = 0, color = COLORS[layers.length % COLORS.length], group = 'Web layers') => { try { const viewportManaged = isArcGisService(url); const data = await fetchGeoData(url, layerId, viewportManaged ? viewport : undefined); const id = addLayer(name, data, { group, source: url, sourceLayerId: layerId, viewportManaged, loadedBounds: viewportManaged ? viewport : undefined, style: { color, opacity: .75, width: 2.5, radius: 5, pattern: 'solid', labelTemplate: '', labelSize: 12 } }); if (viewportManaged && viewport) viewportRequests.current.set(id, `${url}:${layerId}:${boundsKey(viewport)}`); notify(`Added ${data.features.length.toLocaleString()} ${name} features${viewportManaged ? ' in the visible area' : ''}`) } catch (e) { notify(`${name}: ${e instanceof Error ? e.message : 'service unavailable'}`) } }
   const duplicate = (features: Feature[]) => { if (!liveTable) return; addLayer(`${liveTable.name} — selection`, { type: 'FeatureCollection', features }, { group: 'Selections', style: { ...liveTable.style, color: COLORS[layers.length % COLORS.length] } }); notify('Selection duplicated into a new layer') }
   const searchMap = async (e: React.FormEvent) => { e.preventDefault(); if (!query.trim()) return; setSearching(true); try { const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(query)}`); const result = (await res.json())[0]; if (!result) notify('No matching place found'); else { const marker: Feature = { type: 'Feature', geometry: { type: 'Point', coordinates: [+result.lon, +result.lat] }, properties: { name: result.display_name } }; addLayer(`Search: ${query}`, { type: 'FeatureCollection', features: [marker] }, { group: 'Search results' }); notify(result.display_name) } } catch { notify('Search is temporarily unavailable') } finally { setSearching(false) } }
-  const snapshot = (): MapSnapshot => ({ mapName, basemap, layers })
+  const snapshot = (): MapSnapshot => ({ mapName, basemap, layers: layers.map((layer) => ({ ...layer, loading: false, loadError: undefined })) })
   const saveLocal = (quiet = false) => { localStorage.setItem('terrasketch-project', JSON.stringify(snapshot())); if (!quiet) notify('Map saved in this browser') }
   const saveCurrent = async (forceCloud = false) => {
     saveLocal(true)
@@ -221,16 +239,30 @@ export default function App() {
   }, [])
   const cloudMapId = cloudMap?.id
   useEffect(() => cloudMapId ? subscribeToMap(cloudMapId, (updated) => { setCloudMap(updated); hydrate(updated.snapshot.mapName || updated.title, updated.snapshot.basemap, updated.snapshot.layers ?? []); notify('Live map updated by its owner') }) : undefined, [cloudMapId, hydrate])
+  const viewportKey = viewport ? boundsKey(viewport) : ''
+  useEffect(() => {
+    if (!viewport || !viewportKey) return
+    const timer = window.setTimeout(() => {
+      for (const layer of layers) {
+        if (!layer.visible || !layer.source || !(layer.viewportManaged ?? isArcGisService(layer.source))) continue
+        const key = `${layer.source}:${layer.sourceLayerId ?? 0}:${viewportKey}`; if (viewportRequests.current.get(layer.id) === key) continue
+        viewportRequests.current.set(layer.id, key); viewportAborts.current.get(layer.id)?.abort(); const controller = new AbortController(); viewportAborts.current.set(layer.id, controller); updateLayer(layer.id, { loading: true, loadError: undefined })
+        void fetchGeoData(layer.source, layer.sourceLayerId ?? 0, viewport, controller.signal).then((data) => updateLayer(layer.id, { data, viewportManaged: true, loadedBounds: viewport, loading: false, loadError: undefined })).catch((error) => { if (error instanceof DOMException && error.name === 'AbortError') return; viewportRequests.current.delete(layer.id); updateLayer(layer.id, { loading: false, loadError: error instanceof Error ? error.message : 'Service unavailable' }) })
+      }
+    }, 180)
+    return () => window.clearTimeout(timer)
+  }, [layers, updateLayer, viewport, viewportKey])
+  useEffect(() => () => { for (const controller of viewportAborts.current.values()) controller.abort() }, [])
   // Restore only once on startup; store actions are stable Zustand references.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { const saved = localStorage.getItem('terrasketch-project'); if (!saved) return; try { const parsed = JSON.parse(saved); if (Array.isArray(parsed.layers) && !layers.length) parsed.layers.forEach((l: GisLayer) => addLayer(l.name, l.data, l)); if (parsed.mapName) setMapName(parsed.mapName); if (parsed.basemap) setBasemap(parsed.basemap) } catch { /* ignore old projects */ } }, [])
   useEffect(() => { const handler = (e: KeyboardEvent) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); void saveCurrent() } if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); showDrawer('catalog') } if (e.key === 'Escape') { setContext(undefined); setBaseOpen(false); setExportOpen(false); showDrawer() } }; window.addEventListener('keydown', handler); return () => window.removeEventListener('keydown', handler) })
 
   return <main className="app-shell" onDragEnter={(e) => { e.preventDefault(); setDragging(true) }} onDragOver={(e) => e.preventDefault()} onDragLeave={(e) => { if (e.currentTarget === e.target) setDragging(false) }} onDrop={(e) => { e.preventDefault(); setDragging(false); handleFiles(e.dataTransfer.files) }}>
-    <header className="topbar"><div className="brand"><button className="icon-btn mobile-menu" onClick={() => setLeftOpen(!leftOpen)}><Menu/></button><div className="brand-mark"><MapIcon/></div><span>TerraSketch</span><em>GIS</em></div><div className="crumb"><button className="crumb-link" onClick={() => showDrawer(user ? 'library' : 'account')}>My maps</button><ChevronRight/><input value={mapName} onChange={(e) => setMapName(e.target.value)}/><span className={`saved ${cloudMap ? 'cloud' : ''}`}><span/>{syncing ? 'Syncing…' : cloudMap ? 'Live cloud map' : 'Local draft'}</span></div><div className="top-actions"><button className="ghost-btn"><Undo2/></button><button className="ghost-btn"><Redo2/></button><button className="soft-btn" onClick={() => void saveCurrent()}>{syncing ? <span className="spinner"/> : cloudMap ? <Cloud/> : <Save/>} Save</button><button className="soft-btn share-button" onClick={() => showDrawer('share')}><Share2/> Share</button><div className="export-menu"><button className="primary-btn" disabled={!layers.length} onClick={() => setExportOpen(!exportOpen)}><Download/> Export <ChevronDown/></button>{exportOpen && layers[0] && <div className="export-popover"><small>Export top layer</small><strong>{layers[0].name}</strong><button onClick={() => exportGeoJSON(layers[0].data, layers[0].name)}>GeoJSON <span>.geojson</span></button><button onClick={() => exportKml(layers[0].data, layers[0].name)}>Google Earth <span>.kml</span></button><button onClick={() => exportKml(layers[0].data, layers[0].name, true)}>Google Earth archive <span>.kmz</span></button><button onClick={() => exportShapefile(layers[0].data, layers[0].name)}>ESRI Shapefile <span>.zip</span></button></div>}</div><button className="avatar" title={user?.email ?? 'Sign in'} onClick={() => showDrawer('account')}>{user?.email?.slice(0,2).toUpperCase() ?? 'JG'}</button></div></header>
+    <header className="topbar"><div className="brand"><button className="icon-btn mobile-menu" onClick={() => setLeftOpen(!leftOpen)}><Menu/></button><div className="brand-mark"><MapIcon/></div><span>TerraSketch</span><em>GIS</em></div><div className="crumb"><button className="crumb-link" onClick={() => showDrawer(user ? 'library' : 'account')}>My maps</button><ChevronRight/><input value={mapName} onChange={(e) => setMapName(e.target.value)}/><span className={`saved ${cloudMap ? 'cloud' : ''}`}><span/>{syncing ? 'Syncing…' : cloudMap ? 'Live cloud map' : 'Local draft'}</span></div><div className="top-actions"><button className="ghost-btn"><Undo2/></button><button className="ghost-btn"><Redo2/></button><button className="soft-btn" onClick={() => void saveCurrent()}>{syncing ? <span className="spinner"/> : cloudMap ? <Cloud/> : <Save/>} Save</button><button className="soft-btn share-button" onClick={() => showDrawer('share')}><Share2/> Share</button><div className="export-menu"><button className="primary-btn" disabled={!layers.length} onClick={() => setExportOpen(!exportOpen)}><Download/> Export <ChevronDown/></button>{exportOpen && layers[0] && <div className="export-popover"><small>Export top layer</small><strong>{layers[0].name}</strong><button onClick={() => exportGeoJSON(layers[0].data, layers[0].name)}>GeoJSON <span>.geojson</span></button><button onClick={() => void exportKml(layers[0].data, layers[0].name)}>Google Earth <span>.kml</span></button><button onClick={() => void exportKml(layers[0].data, layers[0].name, true)}>Google Earth archive <span>.kmz</span></button><button onClick={() => void exportShapefile(layers[0].data, layers[0].name)}>ESRI Shapefile <span>.zip</span></button></div>}</div><button className="avatar" title={user?.email ?? 'Sign in'} onClick={() => showDrawer('account')}>{user?.email?.slice(0,2).toUpperCase() ?? 'JG'}</button></div></header>
     <div className="workspace">
       {leftOpen && <aside className="left-panel"><div className="panel-tabs"><button className="active"><Layers3/>Layers</button><button onClick={() => showDrawer('catalog')}><Database/>Data</button><button onClick={() => showDrawer('analysis')}><Zap/>Tools</button></div><div className="panel-head"><div><span className="eyebrow">Map content</span><h2>Layers</h2></div><button className="icon-btn" onClick={() => showDrawer('catalog')}><Plus/></button></div><LayerTree onStyle={showStyle} onTable={showTable}/><div className="panel-bottom"><button className="primary-btn wide" onClick={() => fileInput.current?.click()}><FileUp/> Import data</button><button className="soft-btn wide" onClick={() => showDrawer('catalog')}><Database/> Browse public data</button><button className="soft-btn wide" disabled={!layers.length} onClick={() => showDrawer('analysis')}><Zap/> Spatial analysis</button><input ref={fileInput} hidden type="file" multiple accept=".geojson,.json,.kml,.kmz,.zip,.shp,.gpx,.csv" onChange={(e) => e.target.files && handleFiles(e.target.files)}/>{!layers.length && <button className="sample-link" onClick={loadSample}><Sparkles/> Try an example layer</button>}</div></aside>}
-      <section className="map-stage"><div className="map-search"><form onSubmit={searchMap}><Search/><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search places or coordinates"/><kbd>↵</kbd>{searching && <span className="spinner"/>}</form></div><div className="floating-left"><button onClick={() => setLeftOpen(!leftOpen)}><Layers3/><span>{layers.length}</span></button><button onClick={() => fileInput.current?.click()}><Plus/></button><button title="Find my location" onClick={() => window.dispatchEvent(new Event('terrasketch:locate'))}><MapPin/></button></div><div className="floating-base"><button onClick={() => setBaseOpen(!baseOpen)}><span className={`base-thumb ${basemap}`}/><div><small>Basemap</small><strong>{BASEMAPS.find((b) => b.id === basemap)?.name}</strong></div><ChevronDown/></button>{baseOpen && <div className="base-menu">{BASEMAPS.map((b) => <button className={b.id === basemap ? 'active' : ''} key={b.id} onClick={() => { setBasemap(b.id); setBaseOpen(false) }}><span className={`base-thumb ${b.id}`}/>{b.name}</button>)}</div>}</div><MapCanvas onCoordinates={setCoords} onSelection={(layerId, feature) => { useGisStore.getState().setActive(layerId); setSelected(feature) }} onContext={(x,y,lng,lat) => setContext({x,y,lng,lat})}/><div className="coordinate-bar"><MapPin/>{coords}<span>WGS 84</span></div><div className="map-status"><span><span className="status-dot"/> {cloudMap ? 'Live sync' : 'Online data'}</span><span>{layers.reduce((n,l) => n + l.data.features.length, 0).toLocaleString()} features</span></div>
+      <section className="map-stage"><div className="map-search"><form onSubmit={searchMap}><Search/><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search places or coordinates"/><kbd>↵</kbd>{searching && <span className="spinner"/>}</form></div><div className="floating-left"><button onClick={() => setLeftOpen(!leftOpen)}><Layers3/><span>{layers.length}</span></button><button onClick={() => fileInput.current?.click()}><Plus/></button><button title="Find my location" onClick={() => window.dispatchEvent(new Event('terrasketch:locate'))}><MapPin/></button></div><div className="floating-base"><button onClick={() => setBaseOpen(!baseOpen)}><span className={`base-thumb ${basemap}`}/><div><small>Basemap</small><strong>{BASEMAPS.find((b) => b.id === basemap)?.name}</strong></div><ChevronDown/></button>{baseOpen && <div className="base-menu">{BASEMAPS.map((b) => <button className={b.id === basemap ? 'active' : ''} key={b.id} onClick={() => { setBasemap(b.id); setBaseOpen(false) }}><span className={`base-thumb ${b.id}`}/>{b.name}</button>)}</div>}</div><MapCanvas onCoordinates={setCoords} onViewportChange={setViewport} onSelection={(layerId, feature) => { useGisStore.getState().setActive(layerId); setSelected(feature) }} onContext={(x,y,lng,lat) => setContext({x,y,lng,lat})}/><div className="coordinate-bar"><MapPin/>{coords}<span>WGS 84</span></div><div className="map-status"><span><span className="status-dot"/> {cloudMap ? 'Live sync' : 'Online data'}</span><span>{layers.reduce((n,l) => n + l.data.features.length, 0).toLocaleString()} visible features</span></div>
         {selected && <MeasureCard feature={selected} onClose={() => setSelected(undefined)}/>} {context && <div className="context-menu" style={{ left: context.x, top: context.y }}><div className="context-coord">{context.lat.toFixed(5)}, {context.lng.toFixed(5)}</div><button onClick={() => { navigator.clipboard.writeText(`${context.lat}, ${context.lng}`); setContext(undefined); notify('Coordinates copied') }}><Copy/> Copy coordinates</button><button onClick={() => { const point = turf.point([context.lng, context.lat], { name: 'Dropped pin' }); addLayer('Dropped pin', { type:'FeatureCollection', features:[point] }, { group:'Drawings' }); setContext(undefined) }}><MapPin/> Drop a pin</button><button onClick={() => { showDrawer('catalog'); setContext(undefined) }}><Database/> Find data here</button></div>}
       </section>
       {liveStyle && <StylePanel layer={liveStyle} onClose={() => setStyleLayer(undefined)}/>}
