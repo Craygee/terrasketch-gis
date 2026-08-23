@@ -27,6 +27,33 @@ service. Passwords are handled by the authentication service and are never store
    `.env.local` for local development; it is ignored by Git.
 7. Rebuild and deploy. The sign-in screen will say that projects sync securely across devices.
 
+## Google and Apple sign-in
+
+LandDraft discovers enabled Supabase social providers at runtime. A provider button appears only
+after that provider is configured and enabled, so an incomplete setup never exposes a broken login
+choice.
+
+### Google
+
+1. Create a **Web application** OAuth client in Google Auth Platform.
+2. Use `https://landdraft.net` as an authorized JavaScript origin.
+3. Register `https://txgbeskieqvvptgtjyou.supabase.co/auth/v1/callback` as the authorized redirect
+   URI.
+4. Store the Google client ID and client secret in **Supabase → Authentication → Sign In /
+   Providers → Google**, then enable the provider.
+
+### Apple
+
+1. In an enrolled Apple Developer account, create an App ID with Sign in with Apple, a Services ID
+   for the LandDraft website, and a Sign in with Apple key.
+2. Configure the Services ID for domain `txgbeskieqvvptgtjyou.supabase.co` and return URL
+   `https://txgbeskieqvvptgtjyou.supabase.co/auth/v1/callback`.
+3. Generate the Apple OAuth client secret from the Services ID, Team ID, Key ID, and private `.p8`
+   signing key. Store the secret only in Supabase; never add it or the `.p8` file to GitHub.
+4. Enter the Services ID and generated client secret in **Supabase → Authentication → Sign In /
+   Providers → Apple**, then enable the provider.
+5. Rotate the Apple OAuth client secret before its six-month expiration.
+
 ## Security model
 
 - Row-level security is enabled on every exposed table.

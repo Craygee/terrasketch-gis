@@ -1,14 +1,16 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { Cloud, KeyRound, LockKeyhole, LogIn, MailCheck, UserPlus } from "lucide-react";
+import { Apple, Cloud, KeyRound, LockKeyhole, LogIn, MailCheck, UserPlus } from "lucide-react";
 import { LandDraftMark } from "@/components/brand/LandDraftMark";
 import {
   clearCloudSession,
   cloudAuthRequest,
   cloudConfigured,
+  createCloudOAuthUrl,
   getCloudSession,
   readCloudSession,
   refreshCloudSession,
   storeCloudSession,
+  type CloudOAuthProvider,
   type CloudSessionPayload,
   type CloudUserRecord,
 } from "@/lib/cloud";
@@ -26,13 +28,23 @@ interface StoredAccount extends AppUser {
 }
 
 type SignUpResult = "signed-in" | "confirm-email";
+const supportedSocialProviders = [
+  "google",
+  "apple",
+] as const satisfies readonly CloudOAuthProvider[];
+
+interface CloudAuthSettings {
+  external?: Record<string, boolean>;
+}
 
 interface AuthApi {
   user: AppUser | null;
   ready: boolean;
   cloudEnabled: boolean;
+  socialProviders: readonly CloudOAuthProvider[];
   recoveryMode: boolean;
   signIn(email: string, password: string): Promise<void>;
+  signInWithProvider(provider: CloudOAuthProvider): void;
   signUp(name: string, email: string, password: string): Promise<SignUpResult>;
   requestPasswordReset(email: string): Promise<void>;
   updatePassword(password: string): Promise<void>;
@@ -101,11 +113,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AppUser | null>(null);
   const [ready, setReady] = useState(false);
   const [recoveryMode, setRecoveryMode] = useState(false);
+  const [socialProviders, setSocialProviders] = useState<CloudOAuthProvider[]>([]);
 
   useEffect(() => {
     void (async () => {
       try {
         if (cloudConfigured) {
+          const settings = await cloudAuthRequest<CloudAuthSettings>("/settings").catch(() => null);
+          setSocialProviders(
+            supportedSocialProviders.filter((provider) => settings?.external?.[provider]),
+          );
           const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
           const hashAccessToken = hash.get("access_token");
           const hashRefreshToken = hash.get("refresh_token");
@@ -160,6 +177,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       user,
       ready,
       cloudEnabled: cloudConfigured,
+      socialProviders,
       recoveryMode,
       async signIn(rawEmail, password) {
         const email = rawEmail.trim().toLowerCase();
@@ -177,6 +195,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           throw new Error("Email or password is incorrect");
         window.localStorage.setItem(SESSION_KEY, account.id);
         setUser({ id: account.id, email: account.email, name: account.name });
+      },
+      signInWithProvider(provider) {
+        if (!cloudConfigured)
+          throw new Error("Social sign-in becomes available when cloud accounts are connected");
+        window.location.assign(createCloudOAuthUrl(provider, window.location.origin));
       },
       async signUp(rawName, rawEmail, password) {
         const name = rawName.trim();
@@ -259,7 +282,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(null);
       },
     }),
-    [ready, recoveryMode, user],
+    [ready, recoveryMode, socialProviders, user],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
@@ -324,6 +347,7 @@ function LoginScreen() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const [providerBusy, setProviderBusy] = useState<CloudOAuthProvider | null>(null);
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -359,6 +383,18 @@ function LoginScreen() {
     }
   };
 
+  const useProvider = (provider: CloudOAuthProvider) => {
+    setError("");
+    setMessage("");
+    setProviderBusy(provider);
+    try {
+      auth.signInWithProvider(provider);
+    } catch (caught) {
+      setProviderBusy(null);
+      setError(caught instanceof Error ? caught.message : "Social sign-in failed");
+    }
+  };
+
   return (
     <AuthCard
       title="LandDraft"
@@ -377,6 +413,39 @@ function LoginScreen() {
           </button>
         ))}
       </div>
+      {auth.socialProviders.length > 0 && (
+        <>
+          <div
+            className={`grid gap-2 ${auth.socialProviders.length > 1 ? "grid-cols-2" : "grid-cols-1"}`}
+          >
+            {auth.socialProviders.includes("google") && (
+              <OAuthButton
+                provider="google"
+                label="Google"
+                busy={providerBusy === "google"}
+                disabled={busy || providerBusy !== null}
+                icon={<GoogleMark />}
+                onClick={useProvider}
+              />
+            )}
+            {auth.socialProviders.includes("apple") && (
+              <OAuthButton
+                provider="apple"
+                label="Apple"
+                busy={providerBusy === "apple"}
+                disabled={busy || providerBusy !== null}
+                icon={<Apple className="size-4 fill-current" />}
+                onClick={useProvider}
+              />
+            )}
+          </div>
+          <div className="my-4 flex items-center gap-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+            <span className="h-px flex-1 bg-border" />
+            or use email
+            <span className="h-px flex-1 bg-border" />
+          </div>
+        </>
+      )}
       <form onSubmit={(event) => void submit(event)} className="space-y-3">
         {mode === "signup" && (
           <input
@@ -434,6 +503,58 @@ function LoginScreen() {
         )}
       </p>
     </AuthCard>
+  );
+}
+
+function OAuthButton({
+  provider,
+  label,
+  busy,
+  disabled,
+  icon,
+  onClick,
+}: {
+  provider: CloudOAuthProvider;
+  label: string;
+  busy: boolean;
+  disabled: boolean;
+  icon: ReactNode;
+  onClick: (provider: CloudOAuthProvider) => void;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={() => onClick(provider)}
+      aria-label={`Continue with ${label}`}
+      className="flex items-center justify-center gap-2 rounded-xl border border-border bg-card px-3 py-2.5 text-sm font-semibold transition-colors hover:border-primary/50 hover:bg-secondary/50 disabled:opacity-50"
+    >
+      {icon}
+      {busy ? "Opening…" : label}
+    </button>
+  );
+}
+
+function GoogleMark() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="size-4">
+      <path
+        fill="#4285F4"
+        d="M21.6 12.23c0-.71-.06-1.4-.18-2.06H12v3.9h5.38a4.6 4.6 0 0 1-2 3.02v2.53h3.24c1.9-1.75 2.98-4.33 2.98-7.39Z"
+      />
+      <path
+        fill="#34A853"
+        d="M12 22c2.7 0 4.98-.9 6.63-2.43l-3.24-2.53c-.9.6-2.05.96-3.39.96-2.61 0-4.82-1.76-5.61-4.13H3.04v2.61A10 10 0 0 0 12 22Z"
+      />
+      <path
+        fill="#FBBC05"
+        d="M6.39 13.87A6 6 0 0 1 6.08 12c0-.65.11-1.28.31-1.87V7.52H3.04A10 10 0 0 0 2 12c0 1.61.38 3.14 1.04 4.48l3.35-2.61Z"
+      />
+      <path
+        fill="#EA4335"
+        d="M12 6c1.47 0 2.79.5 3.83 1.5l2.87-2.87A9.61 9.61 0 0 0 12 2a10 10 0 0 0-8.96 5.52l3.35 2.61C7.18 7.76 9.39 6 12 6Z"
+      />
+    </svg>
   );
 }
 

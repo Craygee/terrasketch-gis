@@ -6,6 +6,8 @@ const publishableKey =
 
 export const cloudConfigured = Boolean(cloudUrl && publishableKey);
 
+export type CloudOAuthProvider = "google" | "apple";
+
 export interface CloudUserRecord {
   id: string;
   email?: string;
@@ -98,6 +100,14 @@ export async function cloudAuthRequest<T>(path: string, init: RequestInit = {}):
   if (!response.ok) throw new CloudRequestError(await parseError(response), response.status);
   if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
+}
+
+export function createCloudOAuthUrl(provider: CloudOAuthProvider, redirectTo: string): string {
+  assertConfigured();
+  const authorizeUrl = new URL(`${cloudUrl}/auth/v1/authorize`);
+  authorizeUrl.searchParams.set("provider", provider);
+  authorizeUrl.searchParams.set("redirect_to", redirectTo);
+  return authorizeUrl.toString();
 }
 
 export async function refreshCloudSession(): Promise<CloudSessionPayload> {
