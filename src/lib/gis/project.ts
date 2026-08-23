@@ -27,6 +27,7 @@ export interface StoredProject {
   autosave: boolean;
   state: ProjectState;
   versions: ProjectVersion[];
+  parentProjectId: string | null;
 }
 
 export interface ProjectSummary {
@@ -35,6 +36,7 @@ export interface ProjectSummary {
   updatedAt: number;
   autosave: boolean;
   versionCount: number;
+  parentProjectId: string | null;
 }
 
 const WORKSPACE_KEY = "landdraft.workspace.v2";
@@ -93,6 +95,7 @@ const summary = (project: StoredProject): ProjectSummary => ({
   updatedAt: project.updatedAt,
   autosave: project.autosave,
   versionCount: project.versions.length,
+  parentProjectId: project.parentProjectId ?? project.state.parentProjectId ?? null,
 });
 
 interface CloudProjectRow {
@@ -103,6 +106,7 @@ interface CloudProjectRow {
   updated_at: string;
   autosave: boolean;
   state_path: string;
+  parent_project_id: string | null;
 }
 
 interface CloudVersionRow {
@@ -179,9 +183,11 @@ const storedFromCloud = async (row: CloudProjectRow): Promise<StoredProject> => 
   autosave: row.autosave,
   state: await downloadProjectState(row.state_path),
   versions: await cloudVersions(row.id),
+  parentProjectId: row.parent_project_id,
 });
 
-const cloudProjectSelect = "id,owner_id,name,created_at,updated_at,autosave,state_path";
+const cloudProjectSelect =
+  "id,owner_id,name,created_at,updated_at,autosave,state_path,parent_project_id";
 
 const createCloudProject = async (
   userId: string,
@@ -189,8 +195,9 @@ const createCloudProject = async (
   state: ProjectState,
   id: string = window.crypto.randomUUID(),
   autosave = true,
+  parentProjectId: string | null = null,
 ) => {
-  const cleanState = { ...compactState(state), name };
+  const cleanState = { ...compactState(state), name, parentProjectId };
   const statePath = await uploadProjectState(userId, id, cleanState);
   const rows = await cloudDataRequest<CloudProjectRow[]>("/rest/v1/rpc/create_project", {
     method: "POST",
@@ -203,6 +210,12 @@ const createCloudProject = async (
   });
   const row = rows[0];
   if (!row) throw new Error("Cloud project could not be created");
+  if (parentProjectId)
+    await cloudDataRequest("/rest/v1/rpc/set_project_parent", {
+      method: "POST",
+      body: JSON.stringify({ p_project_id: id, p_parent_project_id: parentProjectId }),
+    });
+  row.parent_project_id = parentProjectId;
   return storedFromCloud(row);
 };
 
@@ -210,8 +223,10 @@ export const workspaceProjectStore = {
   async list(userId: string): Promise<ProjectSummary[]> {
     if (cloudConfigured) {
       const rows = await cloudDataRequest<
-        Pick<CloudProjectRow, "id" | "name" | "updated_at" | "autosave">[]
-      >("/rest/v1/projects?select=id,name,updated_at,autosave&order=updated_at.desc");
+        Pick<CloudProjectRow, "id" | "name" | "updated_at" | "autosave" | "parent_project_id">[]
+      >(
+        "/rest/v1/projects?select=id,name,updated_at,autosave,parent_project_id&order=updated_at.desc",
+      );
       const versionRows = await cloudDataRequest<{ project_id: string }[]>(
         "/rest/v1/project_versions?select=project_id",
       );
@@ -224,6 +239,7 @@ export const workspaceProjectStore = {
         updatedAt: new Date(row.updated_at).getTime(),
         autosave: row.autosave,
         versionCount: counts.get(row.id) ?? 0,
+        parentProjectId: row.parent_project_id,
       }));
     }
     return readProjects()
@@ -232,10 +248,16 @@ export const workspaceProjectStore = {
       .map(summary);
   },
 
-  async create(userId: string, name: string, state: ProjectState): Promise<StoredProject> {
-    if (cloudConfigured) return createCloudProject(userId, name, state);
+  async create(
+    userId: string,
+    name: string,
+    state: ProjectState,
+    parentProjectId: string | null = null,
+  ): Promise<StoredProject> {
+    if (cloudConfigured)
+      return createCloudProject(userId, name, state, undefined, true, parentProjectId);
     const now = Date.now();
-    const cleanState = { ...compactState(state), name };
+    const cleanState = { ...compactState(state), name, parentProjectId };
     const project: StoredProject = {
       id: window.crypto.randomUUID(),
       userId,
@@ -247,6 +269,7 @@ export const workspaceProjectStore = {
       versions: [
         { id: window.crypto.randomUUID(), savedAt: now, reason: "manual", state: cleanState },
       ],
+      parentProjectId,
     };
     writeProjects([...readProjects(), project]);
     window.localStorage.setItem(lastProjectKey(userId), project.id);
@@ -383,6 +406,30 @@ export const workspaceProjectStore = {
     writeProjects(projects);
   },
 
+  async setParent(
+    userId: string,
+    projectId: string,
+    parentProjectId: string | null,
+  ): Promise<void> {
+    if (cloudConfigured) {
+      await cloudDataRequest("/rest/v1/rpc/set_project_parent", {
+        method: "POST",
+        body: JSON.stringify({ p_project_id: projectId, p_parent_project_id: parentProjectId }),
+      });
+      return;
+    }
+    const projects = readProjects();
+    const index = projects.findIndex((item) => item.userId === userId && item.id === projectId);
+    if (index < 0) return;
+    const project = projects[index] as StoredProject;
+    projects[index] = {
+      ...project,
+      parentProjectId,
+      state: { ...project.state, parentProjectId },
+    };
+    writeProjects(projects);
+  },
+
   async remove(userId: string, projectId: string): Promise<void> {
     if (cloudConfigured) {
       await cloudDataRequest(`/rest/v1/projects?id=eq.${encodeURIComponent(projectId)}`, {
@@ -416,7 +463,14 @@ export const workspaceProjectStore = {
       let imported = 0;
       for (const project of localProjects) {
         if (existingIds.has(project.id)) continue;
-        await createCloudProject(userId, project.name, project.state, project.id, project.autosave);
+        await createCloudProject(
+          userId,
+          project.name,
+          project.state,
+          project.id,
+          project.autosave,
+          project.parentProjectId ?? null,
+        );
         imported += 1;
       }
       window.localStorage.setItem(migrationKey(userId), String(imported));

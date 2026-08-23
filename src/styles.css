@@ -211,3 +211,87 @@
   border-top-color: var(--color-panel) !important;
   border-bottom-color: var(--color-panel) !important;
 }
+
+.print-map-marker {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  border: 0;
+  background: transparent;
+  color: #17221a;
+  cursor: grab;
+}
+
+.print-map-marker > span {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  border: 3px solid white;
+  border-radius: 50% 50% 50% 0;
+  background: var(--marker-color);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 35%);
+  transform: rotate(-45deg);
+}
+
+.print-map-marker > b {
+  margin: 0 0 7px 4px;
+  padding: 3px 5px;
+  border-radius: 4px;
+  background: rgb(255 255 255 / 92%);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 20%);
+  font: 600 10px/1.15 var(--font-sans);
+  white-space: nowrap;
+}
+
+.print-map-marker small {
+  display: block;
+  margin-top: 2px;
+  color: #58635b;
+  font: 8px/1.1 var(--font-mono);
+}
+
+@media print {
+  @page {
+    margin: 0;
+  }
+
+  body {
+    background: white !important;
+  }
+
+  body * {
+    visibility: hidden !important;
+  }
+
+  .print-composer,
+  .print-composer * {
+    visibility: visible !important;
+  }
+
+  .print-composer-ui {
+    display: none !important;
+  }
+
+  .print-composer {
+    position: absolute !important;
+    inset: 0 !important;
+    display: block !important;
+    background: white !important;
+  }
+
+  .print-composer > div {
+    display: block !important;
+  }
+
+  .print-composer main {
+    overflow: visible !important;
+    padding: 0 !important;
+  }
+
+  .print-composer-page {
+    width: 100vw !important;
+    height: 100vh !important;
+    box-shadow: none !important;
+    break-inside: avoid;
+  }
+}

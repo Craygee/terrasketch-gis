@@ -1,11 +1,10 @@
-import { Archive, FileDown, FileJson, FileText, Layers3 } from "lucide-react";
+import { Archive, FileDown, FileJson, FileText, Layers3, Printer } from "lucide-react";
 import { toast } from "sonner";
 
 import { useMapRef } from "@/lib/gis/mapRef";
 import { useWorkbench } from "@/lib/gis/store";
 import { downloadProjectFile } from "@/lib/gis/project";
 import { exportLayer, type ExportFormat } from "@/lib/gis/export";
-import { exportMapPdf, type MapPaper } from "@/lib/gis/mapPdf";
 
 const layerFormats: Array<{ id: ExportFormat; label: string }> = [
   { id: "geojson", label: "GeoJSON" },
@@ -16,23 +15,8 @@ const layerFormats: Array<{ id: ExportFormat; label: string }> = [
 
 export function ExportPanel({ onDone }: { onDone?: () => void }) {
   const wb = useWorkbench();
-  const { map } = useMapRef();
+  const { setPrintOpen } = useMapRef();
   const active = wb.activeLayer;
-
-  const pdf = (paper: MapPaper) => {
-    if (!map) {
-      toast.error("The map is still loading");
-      return;
-    }
-    void exportMapPdf(map, wb.projectName, wb.layers, paper)
-      .then(() => {
-        toast.success(`${paper === "a4" ? "A4" : "Letter"} PDF map exported`);
-        onDone?.();
-      })
-      .catch((error: unknown) =>
-        toast.error(error instanceof Error ? error.message : "PDF export failed"),
-      );
-  };
 
   const layer = (format: ExportFormat) => {
     if (!active) return;
@@ -52,10 +36,21 @@ export function ExportPanel({ onDone }: { onDone?: () => void }) {
         <h3 className="mb-1.5 flex items-center gap-1.5 font-semibold">
           <FileText className="size-3.5 text-primary" /> Map layout
         </h3>
-        <div className="grid grid-cols-2 gap-1">
-          <ExportButton label="PDF · Letter" onClick={() => pdf("letter")} />
-          <ExportButton label="PDF · A4" onClick={() => pdf("a4")} />
-        </div>
+        <button
+          onClick={() => {
+            onDone?.();
+            setPrintOpen(true);
+          }}
+          className="flex w-full items-center gap-2 rounded-xl bg-primary px-3 py-2 text-left font-medium text-primary-foreground"
+        >
+          <Printer className="size-4" />
+          <span>
+            Open print composer
+            <span className="block text-[10px] font-normal opacity-80">
+              Titles, legend, page size, annotations and Save as PDF
+            </span>
+          </span>
+        </button>
       </section>
 
       <section className="border-t border-border pt-3">

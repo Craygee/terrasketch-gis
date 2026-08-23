@@ -38,11 +38,11 @@ export function SelectionToolbar({ mobile = false }: { mobile?: boolean }) {
   const selected = useMemo(
     () =>
       wb.selectedFeatures.flatMap((selection) => {
-        const layer = wb.layers.find((item) => item.id === selection.layerId);
+        const layer = wb.displayLayers.find((item) => item.id === selection.layerId);
         const feature = layer?.data.features[selection.index];
         return layer && feature ? [{ selection, layer, feature }] : [];
       }),
-    [wb.layers, wb.selectedFeatures],
+    [wb.displayLayers, wb.selectedFeatures],
   );
   const first = selected[0];
   if (!first) return null;

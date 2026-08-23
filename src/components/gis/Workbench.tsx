@@ -18,6 +18,9 @@ import { AuthGate } from "@/lib/auth";
 const AiAssistant = lazy(() =>
   import("./AiAssistant").then((module) => ({ default: module.AiAssistant })),
 );
+const PrintComposer = lazy(() =>
+  import("./PrintComposer").then((module) => ({ default: module.PrintComposer })),
+);
 
 export default function Workbench() {
   return (
@@ -36,7 +39,7 @@ export default function Workbench() {
 function WorkbenchShell() {
   const [panelOpen, setPanelOpen] = useState(true);
   const wb = useWorkbench();
-  const { assistantOpen } = useMapRef();
+  const { assistantOpen, printOpen } = useMapRef();
 
   useEffect(() => {
     if (window.innerWidth < 768) setPanelOpen(false);
@@ -107,6 +110,11 @@ function WorkbenchShell() {
       </div>
 
       <AttributeTable />
+      {printOpen && (
+        <Suspense fallback={null}>
+          <PrintComposer />
+        </Suspense>
+      )}
     </div>
   );
 }

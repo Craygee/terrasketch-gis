@@ -1,14 +1,19 @@
 import {
   ChevronRight,
   Cloud,
+  Copy,
   Clock3,
+  Eye,
+  EyeOff,
   FolderOpen,
+  FolderPlus,
   LogOut,
   Plus,
   RotateCcw,
   Settings2,
   Trash2,
   UserRound,
+  ArrowUpFromLine,
 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -24,6 +29,11 @@ export function ProjectMenu({ onClose }: { onClose: () => void }) {
   const auth = useAuth();
   const [newName, setNewName] = useState("");
   const [view, setView] = useState<View>("projects");
+  const [subprojectName, setSubprojectName] = useState("");
+
+  const roots = wb.projects.filter((project) => !project.parentProjectId);
+  const childrenOf = (parentId: string) =>
+    wb.projects.filter((project) => project.parentProjectId === parentId);
 
   const createProject = () => {
     if (!newName.trim()) return;
@@ -97,40 +107,100 @@ export function ProjectMenu({ onClose }: { onClose: () => void }) {
               </span>
             </h3>
             <div className="space-y-1">
-              {wb.projects.map((project) => (
-                <div
-                  key={project.id}
-                  className={cn(
-                    "flex items-center gap-1 rounded-xl p-1",
-                    project.id === wb.projectId ? "bg-accent ring-1 ring-primary" : "bg-secondary",
-                  )}
-                >
-                  <button
-                    onClick={() => void wb.openProject(project.id).then(onClose)}
-                    className="min-w-0 flex-1 px-2 py-1.5 text-left"
-                  >
-                    <span className="block truncate font-medium">{project.name}</span>
-                    <span className="block text-[10px] text-muted-foreground">
-                      {project.id === wb.projectId ? "Open now · " : ""}
-                      {new Date(project.updatedAt).toLocaleString()} · {project.versionCount} saves
-                    </span>
-                  </button>
-                  <button
-                    onClick={() => {
-                      if (!window.confirm(`Delete “${project.name}”?`)) return;
+              {roots.map((project) => (
+                <div key={project.id} className="rounded-xl bg-secondary p-1">
+                  <ProjectRow
+                    project={project}
+                    active={project.id === wb.projectId}
+                    onOpen={() => void wb.openProject(project.id).then(onClose)}
+                    onDuplicate={() =>
+                      void wb
+                        .duplicateProject(project.id)
+                        .then(() => toast.success("Project duplicated"))
+                    }
+                    onDelete={() => {
+                      if (!window.confirm(`Delete “${project.name}” and detach its subprojects?`))
+                        return;
                       void wb
                         .deleteProject(project.id)
                         .then(() => toast.success("Project deleted"));
                     }}
-                    className="rounded-lg p-2 text-destructive hover:bg-destructive/10"
-                    aria-label={`Delete ${project.name}`}
-                  >
-                    <Trash2 className="size-3.5" />
-                  </button>
+                  />
+                  {childrenOf(project.id).length > 0 && (
+                    <div className="ml-5 space-y-1 border-l border-border pl-2">
+                      {childrenOf(project.id).map((child) => (
+                        <ProjectRow
+                          key={child.id}
+                          project={child}
+                          active={child.id === wb.projectId}
+                          subproject
+                          overlayEnabled={
+                            wb.projectId === project.id &&
+                            wb.enabledSubprojectIds.includes(child.id)
+                          }
+                          {...(wb.projectId === project.id
+                            ? {
+                                onToggleOverlay: (enabled: boolean) =>
+                                  void wb.toggleSubprojectOverlay(child.id, enabled),
+                              }
+                            : {})}
+                          onOpen={() => void wb.openProject(child.id).then(onClose)}
+                          onDuplicate={() =>
+                            void wb
+                              .duplicateProject(child.id)
+                              .then(() => toast.success("Subproject duplicated"))
+                          }
+                          onPromote={() =>
+                            void wb
+                              .promoteProject(child.id)
+                              .then(() => toast.success("Subproject moved to top level"))
+                          }
+                          onDelete={() => {
+                            if (!window.confirm(`Delete “${child.name}”?`)) return;
+                            void wb
+                              .deleteProject(child.id)
+                              .then(() => toast.success("Subproject deleted"));
+                          }}
+                        />
+                      ))}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
           </section>
+
+          <details className="group mt-3 rounded-xl border border-border">
+            <summary className="flex cursor-pointer list-none items-center gap-1 px-3 py-2.5 font-semibold">
+              <ChevronRight className="size-3.5 transition-transform group-open:rotate-90" />
+              Subprojects
+            </summary>
+            <div className="space-y-2 border-t border-border p-3">
+              <p className="text-[10px] leading-relaxed text-muted-foreground">
+                Create an independent area map from the project you have open. Open its parent later
+                to switch this subproject on as a live overlay.
+              </p>
+              <div className="flex gap-1">
+                <input
+                  value={subprojectName}
+                  onChange={(event) => setSubprojectName(event.target.value)}
+                  placeholder={`${wb.projectName} area`}
+                  className="min-w-0 flex-1 rounded-lg border border-border bg-card px-2 py-1.5"
+                />
+                <button
+                  onClick={() =>
+                    void wb.createSubproject(subprojectName).then(() => {
+                      setSubprojectName("");
+                      toast.success("Subproject created");
+                    })
+                  }
+                  className="flex items-center gap-1 rounded-lg bg-primary px-2 text-primary-foreground"
+                >
+                  <FolderPlus className="size-3.5" /> Add
+                </button>
+              </div>
+            </div>
+          </details>
         </>
       ) : (
         <div className="space-y-3">
@@ -235,6 +305,75 @@ export function ProjectMenu({ onClose }: { onClose: () => void }) {
           "Cloud connection pending; projects currently remain on this device."
         )}
       </p>
+    </div>
+  );
+}
+
+function ProjectRow({
+  project,
+  active,
+  subproject,
+  overlayEnabled,
+  onToggleOverlay,
+  onOpen,
+  onDuplicate,
+  onPromote,
+  onDelete,
+}: {
+  project: ReturnType<typeof useWorkbench>["projects"][number];
+  active: boolean;
+  subproject?: boolean;
+  overlayEnabled?: boolean;
+  onToggleOverlay?: (enabled: boolean) => void;
+  onOpen: () => void;
+  onDuplicate: () => void;
+  onPromote?: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <div
+      className={cn(
+        "flex items-center gap-0.5 rounded-lg p-0.5",
+        active && "bg-accent ring-1 ring-primary",
+      )}
+    >
+      {onToggleOverlay && (
+        <button
+          onClick={() => onToggleOverlay(!overlayEnabled)}
+          className="rounded-lg p-1.5 text-primary hover:bg-card"
+          aria-label={`${overlayEnabled ? "Hide" : "Show"} ${project.name} on parent`}
+          title="Toggle live overlay on the open parent"
+        >
+          {overlayEnabled ? <Eye className="size-3.5" /> : <EyeOff className="size-3.5" />}
+        </button>
+      )}
+      <button onClick={onOpen} className="min-w-0 flex-1 px-2 py-1.5 text-left">
+        <span className="block truncate font-medium">{project.name}</span>
+        <span className="block text-[10px] text-muted-foreground">
+          {active ? "Open now · " : ""}
+          {subproject ? "Subproject · " : ""}
+          {project.versionCount} saves
+        </span>
+      </button>
+      <button onClick={onDuplicate} className="rounded-lg p-1.5 hover:bg-card" title="Duplicate">
+        <Copy className="size-3.5" />
+      </button>
+      {onPromote && (
+        <button
+          onClick={onPromote}
+          className="rounded-lg p-1.5 hover:bg-card"
+          title="Move to top level"
+        >
+          <ArrowUpFromLine className="size-3.5" />
+        </button>
+      )}
+      <button
+        onClick={onDelete}
+        className="rounded-lg p-1.5 text-destructive hover:bg-destructive/10"
+        aria-label={`Delete ${project.name}`}
+      >
+        <Trash2 className="size-3.5" />
+      </button>
     </div>
   );
 }

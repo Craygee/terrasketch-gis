@@ -1,5 +1,14 @@
 import { lazy, Suspense, useState } from "react";
-import { Database, FileDown, FolderOpen, Layers3, PencilRuler, Sparkles, X } from "lucide-react";
+import {
+  Database,
+  FileDown,
+  FolderOpen,
+  Layers3,
+  PencilRuler,
+  Printer,
+  Sparkles,
+  X,
+} from "lucide-react";
 import { Toaster } from "@/components/ui/sonner";
 import { WorkbenchProvider, useWorkbench } from "@/lib/gis/store";
 import { MapRefProvider, useMapRef } from "@/lib/gis/mapRef";
@@ -21,6 +30,9 @@ import { LandDraftMark } from "@/components/brand/LandDraftMark";
 const AiAssistant = lazy(() =>
   import("./AiAssistant").then((module) => ({ default: module.AiAssistant })),
 );
+const PrintComposer = lazy(() =>
+  import("./PrintComposer").then((module) => ({ default: module.PrintComposer })),
+);
 
 export default function MobileWorkbench() {
   return (
@@ -41,7 +53,8 @@ type Sheet = "layers" | "draw" | "export" | "projects" | null;
 function MobileShell() {
   const [sheet, setSheet] = useState<Sheet>(null);
   const wb = useWorkbench();
-  const { setDrawerOpen, tableOpen, assistantOpen, setAssistantOpen } = useMapRef();
+  const { setDrawerOpen, tableOpen, assistantOpen, setAssistantOpen, printOpen, setPrintOpen } =
+    useMapRef();
 
   if (!wb.projectReady)
     return (
@@ -149,6 +162,11 @@ function MobileShell() {
           <AiAssistant />
         </Suspense>
       )}
+      {printOpen && (
+        <Suspense fallback={null}>
+          <PrintComposer />
+        </Suspense>
+      )}
 
       <nav className="panel-surface absolute inset-x-2 bottom-[max(.5rem,env(safe-area-inset-bottom))] z-30 grid h-14 grid-cols-5 rounded-2xl p-1">
         <NavButton
@@ -181,9 +199,14 @@ function MobileShell() {
         />
         <NavButton
           active={sheet === "export"}
-          icon={<FileDown className="size-5" />}
-          label="Export"
-          onClick={() => setSheet(sheet === "export" ? null : "export")}
+          icon={
+            sheet === "export" ? <FileDown className="size-5" /> : <Printer className="size-5" />
+          }
+          label="Print / export"
+          onClick={() => {
+            if (sheet === "export") setPrintOpen(true);
+            else setSheet("export");
+          }}
         />
       </nav>
     </div>

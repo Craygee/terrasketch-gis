@@ -17,6 +17,7 @@ import {
   type LayerSource,
   type ProjectState,
   type AreaUnitsPref,
+  type PrintComposition,
 } from "./types";
 import {
   workspaceProjectStore,
@@ -56,6 +57,10 @@ interface WorkbenchState {
   snapEnabled: boolean;
   selectedStates: string[];
   derivedLayerGroupId: string;
+  parentProjectId: string | null;
+  enabledSubprojectIds: string[];
+  subprojectOverlays: Array<{ projectId: string; projectName: string; layers: GisLayer[] }>;
+  printComposition: PrintComposition | undefined;
 }
 
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -86,6 +91,10 @@ const initialState = (): WorkbenchState => ({
   snapEnabled: true,
   selectedStates: ["TX"],
   derivedLayerGroupId: "working",
+  parentProjectId: null,
+  enabledSubprojectIds: [],
+  subprojectOverlays: [],
+  printComposition: undefined,
 });
 
 const blankProjectState = (name: string): ProjectState => ({
@@ -102,6 +111,8 @@ const blankProjectState = (name: string): ProjectState => ({
   units: { area: "acres", length: "miles" },
   selectedStates: ["TX"],
   derivedLayerGroupId: "working",
+  parentProjectId: null,
+  enabledSubprojectIds: [],
 });
 
 const normalizedLayer = (layer: GisLayer, index: number): GisLayer => {
@@ -160,6 +171,11 @@ const normalizedProject = (project: StoredProject, projects: ProjectSummary[]) =
     derivedLayerGroupId: groups.some((group) => group.id === stored.derivedLayerGroupId)
       ? (stored.derivedLayerGroupId as string)
       : "working",
+    parentProjectId:
+      "parentProjectId" in project ? project.parentProjectId : (stored.parentProjectId ?? null),
+    enabledSubprojectIds: stored.enabledSubprojectIds ?? [],
+    subprojectOverlays: [],
+    printComposition: stored.printComposition,
   };
 };
 
@@ -172,6 +188,9 @@ const stateToProject = (state: WorkbenchState): ProjectState => ({
   units: state.units,
   selectedStates: state.selectedStates,
   derivedLayerGroupId: state.derivedLayerGroupId,
+  parentProjectId: state.parentProjectId,
+  enabledSubprojectIds: state.enabledSubprojectIds,
+  ...(state.printComposition ? { printComposition: state.printComposition } : {}),
 });
 
 export interface WorkbenchApi extends WorkbenchState {
@@ -183,6 +202,7 @@ export interface WorkbenchApi extends WorkbenchState {
     style?: Partial<LayerStyle>;
   }) => GisLayer;
   updateLayer: (id: string, patch: Partial<Omit<GisLayer, "id">>) => void;
+  updateDisplayLayer: (id: string, patch: Partial<Omit<GisLayer, "id">>) => void;
   updateStyle: (id: string, patch: Partial<LayerStyle>) => void;
   removeLayers: (ids: string[]) => void;
   duplicateLayer: (id: string, targetGroupId?: string) => void;
@@ -214,13 +234,19 @@ export interface WorkbenchApi extends WorkbenchState {
   ) => void;
   saveProject: (reason?: SaveReason) => Promise<void>;
   createProject: (name: string) => Promise<void>;
+  createSubproject: (name: string, parentProjectId?: string) => Promise<void>;
+  duplicateProject: (id: string) => Promise<void>;
+  promoteProject: (id: string) => Promise<void>;
+  toggleSubprojectOverlay: (id: string, enabled: boolean) => Promise<void>;
   openProject: (id: string) => Promise<void>;
   deleteProject: (id: string) => Promise<void>;
   restoreVersion: (versionId: string) => Promise<void>;
   setAutosave: (enabled: boolean) => Promise<void>;
+  setPrintComposition: (composition: PrintComposition) => void;
   toProjectState: () => ProjectState;
   layersInGroup: (groupId: string) => GisLayer[];
   activeLayer: GisLayer | null;
+  displayLayers: GisLayer[];
 }
 
 const WorkbenchContext = createContext<WorkbenchApi | null>(null);
@@ -287,6 +313,36 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
 
   const patch = useCallback((p: Partial<WorkbenchState>) => setState((s) => ({ ...s, ...p })), []);
 
+  const hydrateSubprojectOverlays = useCallback(async (userId: string, project: StoredProject) => {
+    const enabledIds = project.state.enabledSubprojectIds ?? [];
+    const overlays = await Promise.all(
+      enabledIds.map(async (projectId) => {
+        const child = await workspaceProjectStore.load(userId, projectId);
+        if (!child || child.parentProjectId !== project.id) return null;
+        return {
+          projectId,
+          projectName: child.name,
+          layers: child.state.layers.map((layer, index) => ({
+            ...normalizedLayer(layer, index),
+            id: `subproject:${projectId}:${layer.id}`,
+            name: `${child.name} · ${layer.name}`,
+            source:
+              layer.source.kind === "derived"
+                ? {
+                    ...layer.source,
+                    sourceLayerId: `subproject:${projectId}:${layer.source.sourceLayerId}`,
+                  }
+                : layer.source,
+          })),
+        };
+      }),
+    );
+    setState((current) => ({
+      ...current,
+      subprojectOverlays: overlays.filter((item) => item !== null),
+    }));
+  }, []);
+
   const addLayer = useCallback<WorkbenchApi["addLayer"]>((input) => {
     const existing = stateRef.current.layers;
     const style =
@@ -316,6 +372,17 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
     setState((s) => ({
       ...s,
       layers: s.layers.map((l) => (l.id === id ? { ...l, ...p } : l)),
+    }));
+  }, []);
+
+  const updateDisplayLayer = useCallback<WorkbenchApi["updateDisplayLayer"]>((id, p) => {
+    setState((s) => ({
+      ...s,
+      layers: s.layers.map((layer) => (layer.id === id ? { ...layer, ...p } : layer)),
+      subprojectOverlays: s.subprojectOverlays.map((overlay) => ({
+        ...overlay,
+        layers: overlay.layers.map((layer) => (layer.id === id ? { ...layer, ...p } : layer)),
+      })),
     }));
   }, []);
 
@@ -538,6 +605,109 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
     [auth.user?.id],
   );
 
+  const createSubproject = useCallback<WorkbenchApi["createSubproject"]>(
+    async (rawName, requestedParentId) => {
+      const userId = auth.user?.id;
+      if (!userId) return;
+      const parentId = requestedParentId ?? stateRef.current.projectId;
+      const name = rawName.trim() || `${stateRef.current.projectName} area`;
+      const { printComposition: _printComposition, ...sourceState } = stateToProject(
+        stateRef.current,
+      );
+      const startingState: ProjectState = {
+        ...sourceState,
+        name,
+        parentProjectId: parentId,
+        enabledSubprojectIds: [],
+      };
+      const project = await workspaceProjectStore.create(userId, name, startingState, parentId);
+      const projects = await workspaceProjectStore.list(userId);
+      skipNextAutosave.current = true;
+      setState((current) => ({ ...current, ...normalizedProject(project, projects) }));
+    },
+    [auth.user?.id],
+  );
+
+  const duplicateProject = useCallback<WorkbenchApi["duplicateProject"]>(
+    async (id) => {
+      const userId = auth.user?.id;
+      if (!userId) return;
+      const source = await workspaceProjectStore.load(userId, id);
+      if (!source) throw new Error("Project was not found");
+      const name = `${source.name} copy`;
+      const stateCopy: ProjectState = {
+        ...source.state,
+        name,
+        enabledSubprojectIds: [],
+      };
+      const project = await workspaceProjectStore.create(
+        userId,
+        name,
+        stateCopy,
+        source.parentProjectId,
+      );
+      const projects = await workspaceProjectStore.list(userId);
+      skipNextAutosave.current = true;
+      setState((current) => ({ ...current, ...normalizedProject(project, projects) }));
+    },
+    [auth.user?.id],
+  );
+
+  const promoteProject = useCallback<WorkbenchApi["promoteProject"]>(
+    async (id) => {
+      const userId = auth.user?.id;
+      if (!userId) return;
+      await workspaceProjectStore.setParent(userId, id, null);
+      const projects = await workspaceProjectStore.list(userId);
+      setState((current) => ({
+        ...current,
+        projects,
+        ...(current.projectId === id ? { parentProjectId: null } : {}),
+      }));
+    },
+    [auth.user?.id],
+  );
+
+  const toggleSubprojectOverlay = useCallback<WorkbenchApi["toggleSubprojectOverlay"]>(
+    async (id, enabled) => {
+      const userId = auth.user?.id;
+      const current = stateRef.current;
+      if (!userId) return;
+      const enabledSubprojectIds = enabled
+        ? Array.from(new Set([...current.enabledSubprojectIds, id]))
+        : current.enabledSubprojectIds.filter((projectId) => projectId !== id);
+      setState((value) => ({
+        ...value,
+        enabledSubprojectIds,
+        subprojectOverlays: enabled
+          ? value.subprojectOverlays
+          : value.subprojectOverlays.filter((overlay) => overlay.projectId !== id),
+      }));
+      if (enabled) {
+        const child = await workspaceProjectStore.load(userId, id);
+        if (child) {
+          const overlay = {
+            projectId: id,
+            projectName: child.name,
+            layers: child.state.layers.map((layer, index) => ({
+              ...normalizedLayer(layer, index),
+              id: `subproject:${id}:${layer.id}`,
+              name: `${child.name} · ${layer.name}`,
+            })),
+          };
+          setState((value) => ({
+            ...value,
+            subprojectOverlays: [
+              overlay,
+              ...value.subprojectOverlays.filter((item) => item.projectId !== id),
+            ],
+          }));
+        }
+      }
+    },
+    [auth.user?.id],
+  );
+
   const openProject = useCallback<WorkbenchApi["openProject"]>(
     async (id) => {
       const userId = auth.user?.id;
@@ -547,8 +717,9 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       const projects = await workspaceProjectStore.list(userId);
       skipNextAutosave.current = true;
       setState((current) => ({ ...current, ...normalizedProject(project, projects) }));
+      void hydrateSubprojectOverlays(userId, project);
     },
-    [auth.user?.id],
+    [auth.user?.id, hydrateSubprojectOverlays],
   );
 
   const deleteProject = useCallback<WorkbenchApi["deleteProject"]>(
@@ -617,6 +788,11 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
     [auth.user?.id],
   );
 
+  const setPrintComposition = useCallback<WorkbenchApi["setPrintComposition"]>(
+    (composition) => patch({ printComposition: composition }),
+    [patch],
+  );
+
   useEffect(() => {
     const userId = auth.user?.id;
     if (!userId || bootUserId.current === userId) return;
@@ -633,6 +809,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
         const projects = await workspaceProjectStore.list(userId);
         skipNextAutosave.current = true;
         setState((current) => ({ ...current, ...normalizedProject(project, projects) }));
+        void hydrateSubprojectOverlays(userId, project);
       } catch (error) {
         setState((current) => ({
           ...current,
@@ -641,7 +818,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
         }));
       }
     })();
-  }, [auth.user?.email, auth.user?.id]);
+  }, [auth.user?.email, auth.user?.id, hydrateSubprojectOverlays]);
 
   useEffect(() => {
     if (!state.projectReady || !state.autosave || !auth.user) return;
@@ -666,6 +843,9 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
     state.projectReady,
     state.selectedStates,
     state.derivedLayerGroupId,
+    state.enabledSubprojectIds,
+    state.parentProjectId,
+    state.printComposition,
     state.units,
   ]);
 
@@ -674,6 +854,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       ...state,
       addLayer,
       updateLayer,
+      updateDisplayLayer,
       updateStyle,
       removeLayers,
       duplicateLayer,
@@ -703,18 +884,28 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       updateFeatureProperties,
       saveProject,
       createProject,
+      createSubproject,
+      duplicateProject,
+      promoteProject,
+      toggleSubprojectOverlay,
       openProject,
       deleteProject,
       restoreVersion,
       setAutosave,
+      setPrintComposition,
       toProjectState,
       layersInGroup: (groupId) => state.layers.filter((l) => l.groupId === groupId),
       activeLayer: state.layers.find((l) => l.id === state.activeLayerId) ?? null,
+      displayLayers: [
+        ...state.layers,
+        ...state.subprojectOverlays.flatMap((overlay) => overlay.layers),
+      ],
     }),
     [
       state,
       addLayer,
       updateLayer,
+      updateDisplayLayer,
       updateStyle,
       removeLayers,
       duplicateLayer,
@@ -732,10 +923,15 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       updateFeatureProperties,
       saveProject,
       createProject,
+      createSubproject,
+      duplicateProject,
+      promoteProject,
+      toggleSubprojectOverlay,
       openProject,
       deleteProject,
       restoreVersion,
       setAutosave,
+      setPrintComposition,
       toProjectState,
       patch,
     ],

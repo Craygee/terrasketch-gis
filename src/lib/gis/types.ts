@@ -62,6 +62,56 @@ export interface LayerGroup {
   parentId?: string | null;
 }
 
+export type PrintAnnotation =
+  | {
+      id: string;
+      type: "text";
+      x: number;
+      y: number;
+      text: string;
+      textColor: string;
+      backgroundColor: string | null;
+      font: "Inter" | "Arial" | "Georgia" | "Courier New";
+      fontSize: number;
+    }
+  | {
+      id: string;
+      type: "line" | "arrow";
+      x: number;
+      y: number;
+      x2: number;
+      y2: number;
+      color: string;
+      width: number;
+    }
+  | {
+      id: string;
+      type: "marker";
+      lng: number;
+      lat: number;
+      label: string;
+      color: string;
+      showCoordinates: boolean;
+    };
+
+export interface PrintComposition {
+  title: string;
+  subtitle: string;
+  paper: "letter" | "a4" | "legal";
+  orientation: "landscape" | "portrait";
+  showTitle: boolean;
+  showLegend: boolean;
+  showCompass: boolean;
+  showScale: boolean;
+  showDate: boolean;
+  showAttribution: boolean;
+  frameBorder: boolean;
+  frame: { x: number; y: number; width: number; height: number };
+  includedLayerIds: string[];
+  annotations: PrintAnnotation[];
+  mapView?: { center: [number, number]; zoom: number; bearing: number; pitch: number };
+}
+
 export interface ProjectState {
   version: 1;
   name: string;
@@ -71,6 +121,9 @@ export interface ProjectState {
   units: AreaUnitsPref;
   selectedStates?: string[];
   derivedLayerGroupId?: string;
+  parentProjectId?: string | null;
+  enabledSubprojectIds?: string[];
+  printComposition?: PrintComposition;
   savedAt?: number;
 }
 

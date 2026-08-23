@@ -8,6 +8,7 @@ import {
   Info,
   FileDown,
   Sparkles,
+  Printer,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -28,7 +29,8 @@ export function TopBar({
 }) {
   const wb = useWorkbench();
   const auth = useAuth();
-  const { setDrawerOpen, setTableOpen, tableOpen, assistantOpen, setAssistantOpen } = useMapRef();
+  const { setDrawerOpen, setTableOpen, tableOpen, assistantOpen, setAssistantOpen, setPrintOpen } =
+    useMapRef();
   const [showAbout, setShowAbout] = useState(false);
   const [showProjects, setShowProjects] = useState(false);
   const [showExport, setShowExport] = useState(false);
@@ -97,6 +99,11 @@ export function TopBar({
           onClick={() => setTableOpen(!tableOpen)}
         />
         <BarBtn icon={<Save className="size-4" />} label="Save" onClick={() => void save()} />
+        <BarBtn
+          icon={<Printer className="size-4" />}
+          label="Print map"
+          onClick={() => setPrintOpen(true)}
+        />
         <BarBtn
           icon={<FolderOpen className="size-4" />}
           label="Projects"

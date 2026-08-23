@@ -76,7 +76,6 @@ export function MapCanvas() {
   const { setMap, setDrawerOpen, setPendingCatalogQuery, setLastPoint } = useMapRef();
 
   const [cursor, setCursor] = useState<{ lng: number; lat: number } | null>(null);
-  const [zoom, setZoom] = useState(6);
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [draft, setDraft] = useState<Position[]>([]);
   const [ready, setReady] = useState(false);
@@ -127,7 +126,6 @@ export function MapCanvas() {
     map.on("error", (e) => console.error("[map]", e.error ?? e));
     const observer = new ResizeObserver(() => map.resize());
     observer.observe(containerRef.current);
-    map.on("zoom", () => setZoom(map.getZoom()));
     map.on("mousemove", (e) => setCursor({ lng: e.lngLat.lng, lat: e.lngLat.lat }));
     map.on("mouseout", () => setCursor(null));
     return () => {
@@ -151,8 +149,10 @@ export function MapCanvas() {
   /* ---------------- layer sync ---------------- */
   const prepared = useMemo(() => {
     const ordered = [
-      ...wb.groups.flatMap((group) => wb.layers.filter((layer) => layer.groupId === group.id)),
-      ...wb.layers.filter((layer) => !wb.groups.some((group) => group.id === layer.groupId)),
+      ...wb.groups.flatMap((group) =>
+        wb.displayLayers.filter((layer) => layer.groupId === group.id),
+      ),
+      ...wb.displayLayers.filter((layer) => !wb.groups.some((group) => group.id === layer.groupId)),
     ];
     const nextCache = new Map<string, PreparedCacheEntry>();
     const result = ordered.map((layer) => {
@@ -178,7 +178,7 @@ export function MapCanvas() {
     });
     preparedCacheRef.current = nextCache;
     return result;
-  }, [wb.groups, wb.layers]);
+  }, [wb.groups, wb.displayLayers]);
 
   useEffect(() => {
     const map = mapObj.current;
@@ -238,7 +238,7 @@ export function MapCanvas() {
               map.setLayoutProperty(id, "visibility", layer.visible ? "visible" : "none");
         }
 
-        // Reorder: first item in wb.layers is topmost.
+        // Reorder: first item in the composed project/subproject stack is topmost.
         const orderSignature = prepared.map(({ layer }) => layer.id).join("|");
         if (rebuiltLayers || orderSignatureRef.current !== orderSignature) {
           for (const { layer } of [...prepared].reverse()) {
@@ -403,7 +403,7 @@ export function MapCanvas() {
           boxDidSelectRef.current = false;
           return;
         }
-        const ids = wb.layers
+        const ids = wb.displayLayers
           .filter((l) => l.visible)
           .flatMap((l) => allLayerIds(l.id))
           .filter((id) => map.getLayer(id));
@@ -498,7 +498,7 @@ export function MapCanvas() {
       const width = Math.abs(e.point.x - box.startX);
       const height = Math.abs(e.point.y - box.startY);
       if (width < 4 && height < 4) return;
-      const ids = wb.layers
+      const ids = wb.displayLayers
         .filter((layer) => layer.visible)
         .flatMap((layer) => allLayerIds(layer.id))
         .filter((id) => map.getLayer(id));
@@ -697,7 +697,6 @@ export function MapCanvas() {
           <span className="hidden text-muted-foreground sm:inline">
             {cursor ? `${toDms(cursor.lat, true)} ${toDms(cursor.lng, false)}` : ""}
           </span>
-          <span className="text-muted-foreground">Zoom {zoom.toFixed(1)}×</span>
         </div>
       </div>
 

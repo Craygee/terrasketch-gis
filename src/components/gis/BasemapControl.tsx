@@ -23,14 +23,7 @@ export function BasemapControl() {
   }, [map]);
 
   return (
-    <div className="relative flex items-center gap-2">
-      <span
-        className="num float-surface whitespace-nowrap rounded-xl px-2.5 py-2 text-xs font-semibold"
-        aria-label={`Current map zoom ${zoom.toFixed(1)}`}
-        title="Current map zoom level"
-      >
-        {zoom.toFixed(1)}× zoom
-      </span>
+    <div className="relative flex flex-col items-end gap-1">
       <button
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
@@ -40,6 +33,13 @@ export function BasemapControl() {
         <Layers2 className="size-4 text-primary" />
         <span className="hidden sm:inline">{active?.label ?? "Basemap"}</span>
       </button>
+      <span
+        className="num float-surface whitespace-nowrap rounded-lg px-2 py-1 text-[10px] font-semibold"
+        aria-label={`Current map zoom ${zoom.toFixed(1)}`}
+        title="Current map zoom level"
+      >
+        Zoom {zoom.toFixed(1)}×
+      </span>
       {open && (
         <div className="float-surface absolute bottom-full right-0 mb-2 w-56 overflow-hidden rounded-2xl p-1">
           {basemaps.map((b) => (

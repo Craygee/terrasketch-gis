@@ -33,13 +33,13 @@ const queryTuning = (zoom: number, latitude: number) => {
 export function RemoteLayerManager() {
   const { map } = useMapRef();
   const wb = useWorkbench();
-  const layersRef = useRef(wb.layers);
-  const updateRef = useRef(wb.updateLayer);
+  const layersRef = useRef(wb.displayLayers);
+  const updateRef = useRef(wb.updateDisplayLayer);
   const activeRequests = useRef(new Map<string, AbortController>());
   const coverage = useRef(new Map<string, Coverage>());
-  layersRef.current = wb.layers;
-  updateRef.current = wb.updateLayer;
-  const remoteSignature = wb.layers
+  layersRef.current = wb.displayLayers;
+  updateRef.current = wb.updateDisplayLayer;
+  const remoteSignature = wb.displayLayers
     .filter((layer) => layer.source.kind === "remote")
     .map((layer) =>
       layer.source.kind === "remote"
