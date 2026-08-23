@@ -92,6 +92,20 @@ export type PrintAnnotation =
       label: string;
       color: string;
       showCoordinates: boolean;
+      gpsOnly?: boolean;
+    }
+  | {
+      id: string;
+      type: "callout";
+      lng: number;
+      lat: number;
+      x: number;
+      y: number;
+      text: string;
+      color: string;
+      backgroundColor: string;
+      textColor: string;
+      contentMode: "label" | "label-gps" | "gps";
     };
 
 export interface PrintComposition {
@@ -108,6 +122,7 @@ export interface PrintComposition {
   frameBorder: boolean;
   frame: { x: number; y: number; width: number; height: number };
   includedLayerIds: string[];
+  legendItems: Record<string, { visible: boolean; name: string }>;
   annotations: PrintAnnotation[];
   mapView?: { center: [number, number]; zoom: number; bearing: number; pitch: number };
 }

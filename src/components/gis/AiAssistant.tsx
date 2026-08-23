@@ -193,7 +193,7 @@ export function AiAssistant() {
   };
 
   return (
-    <div className="absolute inset-0 z-40 flex">
+    <div className="pointer-events-auto fixed inset-0 z-[90] flex" role="dialog" aria-modal="true">
       <button
         className="flex-1 bg-foreground/20 backdrop-blur-[2px]"
         aria-label="Close AI"
@@ -371,9 +371,11 @@ export function AiAssistant() {
         >
           <div className="flex items-end gap-2 rounded-2xl border border-border bg-card p-2 focus-within:border-primary">
             <textarea
+              autoFocus
               value={prompt}
               onChange={(event) => setPrompt(event.target.value)}
               onKeyDown={(event) => {
+                event.stopPropagation();
                 if (event.key === "Enter" && !event.shiftKey) {
                   event.preventDefault();
                   void run(prompt);
@@ -381,7 +383,7 @@ export function AiAssistant() {
               }}
               placeholder="Ask about this map or tell me what to do…"
               rows={2}
-              className="min-h-10 flex-1 resize-none bg-transparent px-1 text-xs outline-none"
+              className="pointer-events-auto relative z-10 min-h-10 flex-1 resize-none bg-transparent px-1 text-xs outline-none"
             />
             <button
               type="submit"
