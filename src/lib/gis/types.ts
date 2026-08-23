@@ -36,6 +36,7 @@ export type LayerSource =
       catalogId?: string;
       attribution?: string;
       where?: string;
+      outFields?: string[];
       requiresViewport?: boolean;
       minZoom?: number;
       refreshMinutes?: number;
@@ -58,6 +59,7 @@ export interface LayerGroup {
   id: string;
   name: string;
   collapsed: boolean;
+  parentId?: string | null;
 }
 
 export interface ProjectState {

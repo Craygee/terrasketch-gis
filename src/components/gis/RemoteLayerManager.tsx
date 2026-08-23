@@ -48,6 +48,7 @@ export function RemoteLayerManager() {
             layer.visible,
             layer.source.url,
             layer.source.where ?? "",
+            layer.source.outFields?.join(",") ?? "*",
             layer.source.minZoom ?? 0,
           ].join(":")
         : "",
@@ -107,6 +108,7 @@ export function RemoteLayerManager() {
               const data = await fetchRemoteGeoJSON(source.url, {
                 bbox: queryBbox,
                 where: source.where,
+                outFields: source.outFields,
                 maxFeatures: 2000,
                 maxAllowableOffset: tuning.maxAllowableOffset,
                 geometryPrecision: tuning.geometryPrecision,

@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { Toaster } from "@/components/ui/sonner";
 import { WorkbenchProvider, useWorkbench } from "@/lib/gis/store";
-import { MapRefProvider } from "@/lib/gis/mapRef";
+import { MapRefProvider, useMapRef } from "@/lib/gis/mapRef";
 import { MapCanvas } from "./MapCanvas";
 import { LayerPanel } from "./LayerPanel";
 import { TopBar } from "./TopBar";
@@ -14,6 +14,10 @@ import { cn } from "@/lib/utils";
 import { RemoteLayerManager } from "./RemoteLayerManager";
 import { SelectionToolbar } from "./SelectionToolbar";
 import { AuthGate } from "@/lib/auth";
+
+const AiAssistant = lazy(() =>
+  import("./AiAssistant").then((module) => ({ default: module.AiAssistant })),
+);
 
 export default function Workbench() {
   return (
@@ -32,6 +36,7 @@ export default function Workbench() {
 function WorkbenchShell() {
   const [panelOpen, setPanelOpen] = useState(true);
   const wb = useWorkbench();
+  const { assistantOpen } = useMapRef();
 
   useEffect(() => {
     if (window.innerWidth < 768) setPanelOpen(false);
@@ -93,6 +98,11 @@ function WorkbenchShell() {
           </div>
 
           <DataDrawer />
+          {assistantOpen && (
+            <Suspense fallback={null}>
+              <AiAssistant />
+            </Suspense>
+          )}
         </main>
       </div>
 

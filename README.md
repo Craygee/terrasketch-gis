@@ -6,8 +6,10 @@ LandDraft is a browser-based GIS workbench for public data, field files, sketchi
 
 - Street, satellite, topographic, dark, and open-map basemaps.
 - GeoJSON, KML, KMZ, zipped Shapefile, GPX, and latitude/longitude CSV import.
-- Live public-data connectors for transportation, boundaries, energy, land, demographics, and water.
-- Grouped layers with visibility, ordering, duplication, deletion, styling, labels, and attribute tables.
+- Live public-data connectors for transportation, boundaries, energy, land, demographics, and water, plus searchable federal and all-state repository discovery.
+- Selective ArcGIS attribute import, geographic filtering, and viewport-only streaming for responsive large datasets.
+- Nested layer groups and subgroups with inherited visibility and styling, ordering, duplication, labels, and attribute tables.
+- LandDraft AI-assisted attribute queries, feature selection, derived-layer creation, contextual help, public-data discovery, and map-based PDF reports.
 - Polygon, line, and point drawing with area, distance, and coordinate measurements.
 - GeoJSON, KML, KMZ, and zipped Shapefile export.
 - Secure cloud accounts, cross-device projects, autosave, and 25 restore points.

@@ -191,7 +191,10 @@ export interface WorkbenchApi extends WorkbenchState {
   reorderLayer: (id: string, targetGroupId: string, beforeLayerId?: string) => void;
   setLayerGroup: (id: string, groupId: string) => void;
   addGroup: (name: string) => void;
+  addSubgroup: (parentId: string, name: string) => void;
   toggleGroup: (id: string) => void;
+  setGroupVisible: (id: string, visible: boolean) => void;
+  applyStyleToGroup: (id: string, patch: Partial<LayerStyle>) => void;
   setActiveLayer: (id: string | null) => void;
   toggleLayerSelection: (id: string, additive: boolean) => void;
   setSelectedFeature: (sel: SelectedFeature | null) => void;
@@ -222,6 +225,57 @@ export interface WorkbenchApi extends WorkbenchState {
 
 const WorkbenchContext = createContext<WorkbenchApi | null>(null);
 
+const palette = ["#2f7d4f", "#c9832c", "#3b6ea5", "#8e4a86", "#b0453a", "#3f7f7a"];
+
+const colorSeed = (value: string) =>
+  Array.from(value).reduce((total, character) => (total * 31 + character.charCodeAt(0)) >>> 0, 0);
+
+const sourceFamily = (sourceId: string, layers: GisLayer[]): GisLayer | undefined => {
+  let current = layers.find((layer) => layer.id === sourceId);
+  const visited = new Set<string>();
+  while (current?.source.kind === "derived" && !visited.has(current.id)) {
+    visited.add(current.id);
+    const sourceLayerId = current.source.sourceLayerId;
+    current = layers.find((layer) => layer.id === sourceLayerId);
+  }
+  return current;
+};
+
+const derivedStyle = (
+  sourceId: string,
+  layers: GisLayer[],
+  requested: Partial<LayerStyle> = {},
+): LayerStyle => {
+  const source = sourceFamily(sourceId, layers) ?? layers.find((layer) => layer.id === sourceId);
+  const familyId = source?.id ?? sourceId;
+  let index = colorSeed(`${familyId}:derived`) % palette.length;
+  if (palette[index]?.toLowerCase() === source?.style.fillColor.toLowerCase())
+    index = (index + 1) % palette.length;
+  const color = palette[index] ?? "#3b6ea5";
+  return {
+    ...(source?.style ?? defaultStyle(index)),
+    ...requested,
+    fillColor: color,
+    strokeColor: color,
+    fillOpacity: 0.5,
+  };
+};
+
+const descendantGroupIds = (groupId: string, groups: LayerGroup[]): Set<string> => {
+  const ids = new Set([groupId]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const group of groups) {
+      if (group.parentId && ids.has(group.parentId) && !ids.has(group.id)) {
+        ids.add(group.id);
+        changed = true;
+      }
+    }
+  }
+  return ids;
+};
+
 export function WorkbenchProvider({ children }: { children: ReactNode }) {
   const auth = useAuth();
   const [state, setState] = useState<WorkbenchState>(initialState);
@@ -234,13 +288,18 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
   const patch = useCallback((p: Partial<WorkbenchState>) => setState((s) => ({ ...s, ...p })), []);
 
   const addLayer = useCallback<WorkbenchApi["addLayer"]>((input) => {
+    const existing = stateRef.current.layers;
+    const style =
+      input.source.kind === "derived"
+        ? derivedStyle(input.source.sourceLayerId, existing, input.style)
+        : { ...defaultStyle(Math.floor(Math.random() * 6)), ...input.style };
     const layer: GisLayer = {
       id: uid(),
       name: input.name,
       groupId: input.groupId,
       visible: true,
       data: input.data,
-      style: { ...defaultStyle(Math.floor(Math.random() * 6)), ...input.style },
+      style,
       source: input.source,
       createdAt: Date.now(),
     };
@@ -289,6 +348,8 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
         name: `${source.name} copy`,
         groupId: targetGroupId ?? source.groupId,
         data: JSON.parse(JSON.stringify(source.data)) as FeatureCollection,
+        source: { kind: "derived", sourceLayerId: source.id, query: "Duplicated layer" },
+        style: derivedStyle(source.id, s.layers),
         createdAt: Date.now(),
       };
       const index = s.layers.findIndex((l) => l.id === id);
@@ -352,11 +413,44 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
     setState((s) => ({ ...s, groups: [...s.groups, { id: uid(), name, collapsed: false }] }));
   }, []);
 
+  const addSubgroup = useCallback<WorkbenchApi["addSubgroup"]>((parentId, name) => {
+    setState((s) => ({
+      ...s,
+      groups: [...s.groups, { id: uid(), name, collapsed: false, parentId }],
+    }));
+  }, []);
+
   const toggleGroup = useCallback<WorkbenchApi["toggleGroup"]>((id) => {
     setState((s) => ({
       ...s,
       groups: s.groups.map((g) => (g.id === id ? { ...g, collapsed: !g.collapsed } : g)),
     }));
+  }, []);
+
+  const setGroupVisible = useCallback<WorkbenchApi["setGroupVisible"]>((id, visible) => {
+    setState((s) => {
+      const groupIds = descendantGroupIds(id, s.groups);
+      return {
+        ...s,
+        layers: s.layers.map((layer) =>
+          groupIds.has(layer.groupId) ? { ...layer, visible } : layer,
+        ),
+      };
+    });
+  }, []);
+
+  const applyStyleToGroup = useCallback<WorkbenchApi["applyStyleToGroup"]>((id, stylePatch) => {
+    setState((s) => {
+      const groupIds = descendantGroupIds(id, s.groups);
+      return {
+        ...s,
+        layers: s.layers.map((layer) =>
+          groupIds.has(layer.groupId)
+            ? { ...layer, style: { ...layer.style, ...stylePatch } }
+            : layer,
+        ),
+      };
+    });
   }, []);
 
   const toggleLayerSelection = useCallback<WorkbenchApi["toggleLayerSelection"]>((id, additive) => {
@@ -588,7 +682,10 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       reorderLayer,
       setLayerGroup,
       addGroup,
+      addSubgroup,
       toggleGroup,
+      setGroupVisible,
+      applyStyleToGroup,
       setActiveLayer: (id) => patch({ activeLayerId: id }),
       toggleLayerSelection,
       setSelectedFeature: (sel) =>
@@ -626,7 +723,10 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       reorderLayer,
       setLayerGroup,
       addGroup,
+      addSubgroup,
       toggleGroup,
+      setGroupVisible,
+      applyStyleToGroup,
       toggleLayerSelection,
       appendFeature,
       updateFeatureProperties,

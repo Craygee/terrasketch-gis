@@ -34,6 +34,7 @@ export interface RemoteQueryOptions {
   geometryPrecision?: number | undefined;
   cacheHint?: boolean | undefined;
   where?: string | undefined;
+  outFields?: string[] | undefined;
   signal?: AbortSignal | undefined;
 }
 
@@ -41,7 +42,7 @@ export function buildArcgisQueryUrl(layerUrl: string, opts: RemoteQueryOptions =
   const base = normalizeArcgisLayerUrl(layerUrl);
   const params = new URLSearchParams({
     where: opts.where && opts.where.length > 0 ? opts.where : "1=1",
-    outFields: "*",
+    outFields: opts.outFields?.length ? opts.outFields.join(",") : "*",
     outSR: "4326",
     f: "geojson",
     returnGeometry: "true",
@@ -58,6 +59,37 @@ export function buildArcgisQueryUrl(layerUrl: string, opts: RemoteQueryOptions =
     params.set("spatialRel", "esriSpatialRelIntersects");
   }
   return `${base}/query?${params.toString()}`;
+}
+
+export interface ArcgisField {
+  name: string;
+  alias: string;
+  type: string;
+}
+
+export async function fetchArcgisFields(
+  layerUrl: string,
+  signal?: AbortSignal,
+): Promise<ArcgisField[]> {
+  if (classifyUrl(layerUrl) !== "arcgis") return [];
+  const response = await fetch(`${normalizeArcgisLayerUrl(layerUrl)}?f=json`, {
+    signal: signal ?? null,
+  });
+  if (!response.ok) throw new Error(`Layer details failed (${response.status})`);
+  const json = (await response.json()) as {
+    fields?: Array<{ name?: string; alias?: string; type?: string }>;
+    error?: { message?: string };
+  };
+  if (json.error) throw new Error(json.error.message ?? "Service returned an error");
+  return (json.fields ?? [])
+    .filter((field): field is { name: string; alias?: string; type?: string } =>
+      Boolean(field.name),
+    )
+    .map((field) => ({
+      name: field.name,
+      alias: field.alias || field.name,
+      type: field.type || "",
+    }));
 }
 
 function sanitize(fc: FeatureCollection): FeatureCollection {

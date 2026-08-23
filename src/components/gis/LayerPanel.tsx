@@ -25,7 +25,7 @@ import { useMapRef } from "@/lib/gis/mapRef";
 import { importFiles, SUPPORTED_EXTENSIONS } from "@/lib/gis/import";
 import { exportLayer, type ExportFormat } from "@/lib/gis/export";
 import { squareMeters, formatArea } from "@/lib/gis/measure";
-import type { FillPattern, GisLayer, StrokePattern } from "@/lib/gis/types";
+import type { FillPattern, GisLayer, LayerGroup, StrokePattern } from "@/lib/gis/types";
 import { StyleEditor } from "./StyleEditor";
 import { cn } from "@/lib/utils";
 import type { LayerSource } from "@/lib/gis/types";
@@ -51,6 +51,8 @@ export function LayerPanel() {
   const draggedLayerRef = useRef<string | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [duplicateTargets, setDuplicateTargets] = useState<Record<string, string>>({});
+  const [groupStyleFor, setGroupStyleFor] = useState<string | null>(null);
+  const visibleGroups = flattenVisibleGroups(wb.groups);
 
   const toggleLayerExpanded = (id: string) => {
     setExpandedLayers((current) => {
@@ -168,11 +170,17 @@ export function LayerPanel() {
       </div>
 
       <div className="flex-1 overflow-y-auto px-2 pb-6">
-        {wb.groups.map((group) => {
+        {visibleGroups.map(({ group, depth }) => {
           const layers = wb.layers.filter((l) => l.groupId === group.id);
+          const childGroups = wb.groups.filter((item) => item.parentId === group.id);
+          const groupedLayerIds = nestedGroupIds(group.id, wb.groups);
+          const groupedLayers = wb.layers.filter((layer) => groupedLayerIds.has(layer.groupId));
+          const allVisible =
+            groupedLayers.length > 0 && groupedLayers.every((layer) => layer.visible);
           return (
             <div
               key={group.id}
+              style={{ marginLeft: depth * 12 }}
               className={cn(
                 "mb-2 rounded-xl transition-colors",
                 dropTarget === `group:${group.id}` && "bg-accent/70 ring-2 ring-primary/60",
@@ -195,21 +203,59 @@ export function LayerPanel() {
                 toast.success(`Layer moved to ${group.name}`);
               }}
             >
-              <button
-                onClick={() => wb.toggleGroup(group.id)}
-                className="flex w-full items-center gap-1 rounded-lg px-2 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground hover:bg-sidebar-accent"
-              >
-                {group.collapsed ? (
-                  <ChevronRight className="size-3.5" />
-                ) : (
-                  <ChevronDown className="size-3.5" />
-                )}
-                {group.name}
-                <span className="num ml-auto text-[10px]">{layers.length}</span>
-              </button>
+              <div className="flex items-center rounded-lg text-muted-foreground hover:bg-sidebar-accent">
+                <button
+                  onClick={() => wb.toggleGroup(group.id)}
+                  className="flex min-w-0 flex-1 items-center gap-1 px-2 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wide"
+                >
+                  {group.collapsed ? (
+                    <ChevronRight className="size-3.5 shrink-0" />
+                  ) : (
+                    <ChevronDown className="size-3.5 shrink-0" />
+                  )}
+                  <span className="truncate">{group.name}</span>
+                  <span className="num ml-auto text-[10px]">{groupedLayers.length}</span>
+                </button>
+                <button
+                  onClick={() => wb.setGroupVisible(group.id, !allVisible)}
+                  aria-label={allVisible ? `Hide ${group.name}` : `Show ${group.name}`}
+                  title={allVisible ? "Hide group" : "Show group"}
+                  className="rounded p-1 hover:bg-accent hover:text-foreground"
+                >
+                  {allVisible ? <Eye className="size-3.5" /> : <EyeOff className="size-3.5" />}
+                </button>
+                <button
+                  onClick={() => setGroupStyleFor(groupStyleFor === group.id ? null : group.id)}
+                  aria-label={`Style ${group.name}`}
+                  title="Style every layer in group"
+                  className={cn(
+                    "rounded p-1 hover:bg-accent hover:text-foreground",
+                    groupStyleFor === group.id && "bg-primary text-primary-foreground",
+                  )}
+                >
+                  <Palette className="size-3.5" />
+                </button>
+                <button
+                  onClick={() => {
+                    const name = window.prompt(
+                      `Name a subgroup inside ${group.name}`,
+                      "New subgroup",
+                    );
+                    if (name) wb.addSubgroup(group.id, name);
+                  }}
+                  aria-label={`Add subgroup inside ${group.name}`}
+                  title="Add subgroup"
+                  className="mr-1 rounded p-1 hover:bg-accent hover:text-foreground"
+                >
+                  <FolderPlus className="size-3.5" />
+                </button>
+              </div>
+              {groupStyleFor === group.id && (
+                <GroupStyleEditor group={group} layers={groupedLayers} />
+              )}
               {!group.collapsed && (
                 <div className="space-y-1 pl-1">
-                  {layers.length === 0 && (
+                  {layers.length === 0 && childGroups.length === 0 && (
                     <p className="px-2 py-1 text-[11px] text-muted-foreground">Nothing here yet</p>
                   )}
                   {layers.map((layer) => {
@@ -505,6 +551,108 @@ export function LayerPanel() {
           Sketches and measurements are for planning only. They are not a survey and do not
           establish legal boundaries or ownership.
         </p>
+      </div>
+    </div>
+  );
+}
+
+function nestedGroupIds(groupId: string, groups: LayerGroup[]): Set<string> {
+  const ids = new Set([groupId]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    groups.forEach((group) => {
+      if (group.parentId && ids.has(group.parentId) && !ids.has(group.id)) {
+        ids.add(group.id);
+        changed = true;
+      }
+    });
+  }
+  return ids;
+}
+
+function flattenVisibleGroups(groups: LayerGroup[]): Array<{ group: LayerGroup; depth: number }> {
+  const result: Array<{ group: LayerGroup; depth: number }> = [];
+  const visited = new Set<string>();
+  const visit = (group: LayerGroup, depth: number) => {
+    if (visited.has(group.id)) return;
+    visited.add(group.id);
+    result.push({ group, depth });
+    if (!group.collapsed)
+      groups.filter((item) => item.parentId === group.id).forEach((item) => visit(item, depth + 1));
+  };
+  groups
+    .filter((group) => !group.parentId || !groups.some((item) => item.id === group.parentId))
+    .forEach((group) => visit(group, 0));
+  groups.filter((group) => !visited.has(group.id)).forEach((group) => visit(group, 0));
+  return result;
+}
+
+function GroupStyleEditor({ group, layers }: { group: LayerGroup; layers: GisLayer[] }) {
+  const wb = useWorkbench();
+  const style = layers[0]?.style;
+  if (!style)
+    return (
+      <p className="mx-2 mb-1 rounded-lg bg-secondary px-2 py-1.5 text-[10px] text-muted-foreground">
+        Add a layer to this group before applying a shared style.
+      </p>
+    );
+  return (
+    <div className="mx-2 mb-2 space-y-2 rounded-xl border border-border bg-secondary/60 p-2">
+      <p className="text-[10px] font-semibold">
+        Apply to {layers.length} layer{layers.length === 1 ? "" : "s"}
+      </p>
+      <div className="grid grid-cols-2 gap-2">
+        <label className="text-[10px] text-muted-foreground">
+          Fill
+          <input
+            type="color"
+            value={style.fillColor}
+            onChange={(event) => wb.applyStyleToGroup(group.id, { fillColor: event.target.value })}
+            className="mt-0.5 h-7 w-full rounded border border-border bg-card"
+          />
+        </label>
+        <label className="text-[10px] text-muted-foreground">
+          Stroke
+          <input
+            type="color"
+            value={style.strokeColor}
+            onChange={(event) =>
+              wb.applyStyleToGroup(group.id, { strokeColor: event.target.value })
+            }
+            className="mt-0.5 h-7 w-full rounded border border-border bg-card"
+          />
+        </label>
+      </div>
+      <label className="block text-[10px] text-muted-foreground">
+        Fill opacity {Math.round(style.fillOpacity * 100)}%
+        <input
+          type="range"
+          min={0}
+          max={1}
+          step={0.05}
+          value={style.fillOpacity}
+          onChange={(event) =>
+            wb.applyStyleToGroup(group.id, { fillOpacity: Number(event.target.value) })
+          }
+          className="w-full accent-primary"
+        />
+      </label>
+      <div className="grid grid-cols-3 gap-1">
+        {(["solid", "dashed", "dotted"] as StrokePattern[]).map((pattern) => (
+          <button
+            key={pattern}
+            onClick={() => wb.applyStyleToGroup(group.id, { strokePattern: pattern })}
+            className={cn(
+              "rounded border px-1 py-1 text-[10px] capitalize",
+              style.strokePattern === pattern
+                ? "border-primary bg-primary text-primary-foreground"
+                : "border-border bg-card",
+            )}
+          >
+            {pattern}
+          </button>
+        ))}
       </div>
     </div>
   );

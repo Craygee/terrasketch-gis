@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Database, FileDown, FolderOpen, Layers3, PencilRuler, X } from "lucide-react";
+import { lazy, Suspense, useState } from "react";
+import { Database, FileDown, FolderOpen, Layers3, PencilRuler, Sparkles, X } from "lucide-react";
 import { Toaster } from "@/components/ui/sonner";
 import { WorkbenchProvider, useWorkbench } from "@/lib/gis/store";
 import { MapRefProvider, useMapRef } from "@/lib/gis/mapRef";
@@ -17,6 +17,10 @@ import { ProjectMenu } from "./ProjectMenu";
 import { AuthGate } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 import { LandDraftMark } from "@/components/brand/LandDraftMark";
+
+const AiAssistant = lazy(() =>
+  import("./AiAssistant").then((module) => ({ default: module.AiAssistant })),
+);
 
 export default function MobileWorkbench() {
   return (
@@ -37,7 +41,7 @@ type Sheet = "layers" | "draw" | "export" | "projects" | null;
 function MobileShell() {
   const [sheet, setSheet] = useState<Sheet>(null);
   const wb = useWorkbench();
-  const { setDrawerOpen, tableOpen } = useMapRef();
+  const { setDrawerOpen, tableOpen, assistantOpen, setAssistantOpen } = useMapRef();
 
   if (!wb.projectReady)
     return (
@@ -140,8 +144,13 @@ function MobileShell() {
         </div>
       )}
       <DataDrawer />
+      {assistantOpen && (
+        <Suspense fallback={null}>
+          <AiAssistant />
+        </Suspense>
+      )}
 
-      <nav className="panel-surface absolute inset-x-2 bottom-[max(.5rem,env(safe-area-inset-bottom))] z-30 grid h-14 grid-cols-4 rounded-2xl p-1">
+      <nav className="panel-surface absolute inset-x-2 bottom-[max(.5rem,env(safe-area-inset-bottom))] z-30 grid h-14 grid-cols-5 rounded-2xl p-1">
         <NavButton
           active={sheet === "layers"}
           icon={<Layers3 className="size-5" />}
@@ -161,6 +170,14 @@ function MobileShell() {
           icon={<PencilRuler className="size-5" />}
           label="Draw"
           onClick={() => setSheet(sheet === "draw" ? null : "draw")}
+        />
+        <NavButton
+          icon={<Sparkles className="size-5" />}
+          label="AI"
+          onClick={() => {
+            setSheet(null);
+            setAssistantOpen(true);
+          }}
         />
         <NavButton
           active={sheet === "export"}

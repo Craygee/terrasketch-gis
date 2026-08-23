@@ -1,5 +1,14 @@
 import { useState } from "react";
-import { Save, FolderOpen, Database, Table2, PanelLeft, Info, FileDown } from "lucide-react";
+import {
+  Save,
+  FolderOpen,
+  Database,
+  Table2,
+  PanelLeft,
+  Info,
+  FileDown,
+  Sparkles,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { useWorkbench } from "@/lib/gis/store";
@@ -19,7 +28,7 @@ export function TopBar({
 }) {
   const wb = useWorkbench();
   const auth = useAuth();
-  const { setDrawerOpen, setTableOpen, tableOpen } = useMapRef();
+  const { setDrawerOpen, setTableOpen, tableOpen, assistantOpen, setAssistantOpen } = useMapRef();
   const [showAbout, setShowAbout] = useState(false);
   const [showProjects, setShowProjects] = useState(false);
   const [showExport, setShowExport] = useState(false);
@@ -72,10 +81,15 @@ export function TopBar({
 
       <div className="ml-auto flex items-center gap-1">
         <BarBtn
+          icon={<Sparkles className="size-4" />}
+          label="AI"
+          onClick={() => setAssistantOpen(!assistantOpen)}
+          primary
+        />
+        <BarBtn
           icon={<Database className="size-4" />}
           label="Public data"
           onClick={() => setDrawerOpen(true)}
-          primary
         />
         <BarBtn
           icon={<Table2 className="size-4" />}
