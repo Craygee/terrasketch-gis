@@ -57,6 +57,9 @@ choice.
 ## Security model
 
 - Row-level security is enabled on every exposed table.
+- New projects are created through a guarded database function that derives `owner_id` from the
+  authenticated JWT and validates that the snapshot belongs to that same user and project. Direct
+  browser inserts into the projects table are revoked.
 - Users can create, update, and delete only projects they own. Explicit project memberships provide
   the foundation for read-only or editor sharing.
 - The private `project-assets` bucket restricts every path to the signed-in user's UUID.

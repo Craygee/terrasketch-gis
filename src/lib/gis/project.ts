@@ -192,10 +192,14 @@ const createCloudProject = async (
 ) => {
   const cleanState = { ...compactState(state), name };
   const statePath = await uploadProjectState(userId, id, cleanState);
-  const rows = await cloudDataRequest<CloudProjectRow[]>("/rest/v1/projects", {
+  const rows = await cloudDataRequest<CloudProjectRow[]>("/rest/v1/rpc/create_project", {
     method: "POST",
-    headers: { Prefer: "return=representation" },
-    body: JSON.stringify({ id, owner_id: userId, name, autosave, state_path: statePath }),
+    body: JSON.stringify({
+      p_id: id,
+      p_name: name,
+      p_autosave: autosave,
+      p_state_path: statePath,
+    }),
   });
   const row = rows[0];
   if (!row) throw new Error("Cloud project could not be created");
