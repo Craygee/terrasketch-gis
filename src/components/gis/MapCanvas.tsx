@@ -408,7 +408,11 @@ export function MapCanvas() {
           .flatMap((l) => allLayerIds(l.id))
           .filter((id) => map.getLayer(id));
         const hits = ids.length > 0 ? map.queryRenderedFeatures(e.point, { layers: ids }) : [];
-        const hit = hits[0];
+        const hit = wb.activeLayerId
+          ? (hits.find(
+              (candidate) => renderedLayerId(String(candidate.layer.id)) === wb.activeLayerId,
+            ) ?? hits[0])
+          : hits[0];
         const additive =
           e.originalEvent.shiftKey || e.originalEvent.ctrlKey || e.originalEvent.metaKey;
         if (!hit) {
