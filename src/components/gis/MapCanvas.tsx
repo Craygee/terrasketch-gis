@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Map as MlMap,
+  Marker,
   NavigationControl,
   ScaleControl,
   GeolocateControl,
@@ -105,7 +106,7 @@ export function MapCanvas() {
   const [zoomLocked, setZoomLocked] = useState(false);
   const selectionBoxRef = useRef<SelectionBoxState | null>(null);
   const boxDidSelectRef = useRef(false);
-  const draggedVertexRef = useRef<number | null>(null);
+  const editMarkerRefs = useRef<Marker[]>([]);
   const styledBasemapRef = useRef(wb.basemapId);
   const preparedCacheRef = useRef(new Map<string, PreparedCacheEntry>());
   const sourcePayloadRef = useRef(new Map<string, FeatureCollection>());
@@ -425,6 +426,36 @@ export function MapCanvas() {
     [editableFeature, wb],
   );
 
+  useEffect(() => {
+    const map = mapObj.current;
+    editMarkerRefs.current.forEach((marker) => marker.remove());
+    editMarkerRefs.current = [];
+    if (!map || !ready || !editableFeature) return;
+
+    editMarkerRefs.current = editableVertices(editableFeature).map((coordinate, vertexIndex) => {
+      const element = document.createElement("button");
+      element.type = "button";
+      element.className = "feature-edit-marker";
+      element.title = `Drag vertex ${vertexIndex + 1}`;
+      element.setAttribute("aria-label", `Drag vertex ${vertexIndex + 1}`);
+      element.addEventListener("click", (event) => event.stopPropagation());
+
+      const marker = new Marker({ element, draggable: true, anchor: "center" })
+        .setLngLat([Number(coordinate[0]), Number(coordinate[1])])
+        .addTo(map);
+      marker.on("dragend", () => {
+        const next = marker.getLngLat();
+        changeEditableGeometry([next.lng, next.lat], vertexIndex);
+      });
+      return marker;
+    });
+
+    return () => {
+      editMarkerRefs.current.forEach((marker) => marker.remove());
+      editMarkerRefs.current = [];
+    };
+  }, [changeEditableGeometry, editableFeature, ready]);
+
   /* ---------------- interactions ---------------- */
   const finishDraft = useCallback(() => {
     const coords = draftRef.current;
@@ -579,17 +610,6 @@ export function MapCanvas() {
     };
 
     const onMouseDown = (e: MapMouseEvent) => {
-      if (editEnabled && drawModeRef.current === "none" && map.getLayer("feature-edit-vertex")) {
-        const hit = map.queryRenderedFeatures(e.point, { layers: ["feature-edit-vertex"] })[0];
-        const vertexIndex = Number(hit?.properties?.["vertexIndex"] ?? -1);
-        if (vertexIndex >= 0) {
-          e.preventDefault();
-          draggedVertexRef.current = vertexIndex;
-          map.dragPan.disable();
-          map.getCanvas().style.cursor = "grabbing";
-          return;
-        }
-      }
       if (drawModeRef.current !== "select-box") return;
       e.preventDefault();
       const box = {
@@ -603,10 +623,6 @@ export function MapCanvas() {
     };
 
     const onMouseMove = (e: MapMouseEvent) => {
-      if (draggedVertexRef.current !== null) {
-        changeEditableGeometry([e.lngLat.lng, e.lngLat.lat], draggedVertexRef.current, false);
-        return;
-      }
       const box = selectionBoxRef.current;
       if (!box || drawModeRef.current !== "select-box") return;
       const next = { ...box, currentX: e.point.x, currentY: e.point.y };
@@ -615,12 +631,6 @@ export function MapCanvas() {
     };
 
     const onMouseUp = (e: MapMouseEvent) => {
-      if (draggedVertexRef.current !== null) {
-        draggedVertexRef.current = null;
-        if (!panLocked) map.dragPan.enable();
-        map.getCanvas().style.cursor = "";
-        return;
-      }
       const box = selectionBoxRef.current;
       if (!box || drawModeRef.current !== "select-box") return;
       selectionBoxRef.current = null;
@@ -672,15 +682,7 @@ export function MapCanvas() {
       map.off("mousemove", onMouseMove);
       map.off("mouseup", onMouseUp);
     };
-  }, [
-    ready,
-    wb,
-    finishDraft,
-    setPendingFeatureSave,
-    editEnabled,
-    changeEditableGeometry,
-    panLocked,
-  ]);
+  }, [ready, wb, finishDraft, setPendingFeatureSave, editEnabled, changeEditableGeometry]);
 
   useEffect(() => {
     const map = mapObj.current;
@@ -986,10 +988,24 @@ function MenuItem({
 
 function nearestVisibleVertex(map: MlMap, x: number, y: number): Position | null {
   const tolerance = 12;
-  const hits = map.queryRenderedFeatures([
-    [x - tolerance, y - tolerance],
-    [x + tolerance, y + tolerance],
-  ]);
+  const appLayerIds = (map.getStyle().layers ?? [])
+    .filter(
+      (layer) =>
+        "source" in layer &&
+        typeof layer.source === "string" &&
+        layer.source.startsWith("src-") &&
+        map.getLayer(layer.id),
+    )
+    .map((layer) => layer.id);
+  const hits = appLayerIds.length
+    ? map.queryRenderedFeatures(
+        [
+          [x - tolerance, y - tolerance],
+          [x + tolerance, y + tolerance],
+        ],
+        { layers: appLayerIds },
+      )
+    : [];
   let bestCoordinate: Position | null = null;
   let bestDistance = Number.POSITIVE_INFINITY;
   const visit = (value: unknown) => {
@@ -1056,14 +1072,8 @@ function emptyFeatureCollection(): FeatureCollection {
 
 function editFeatureCollection(feature: Feature): FeatureCollection {
   const features: Feature[] = [];
-  let vertices: Position[] = [];
-  let closed = false;
-  if (feature.geometry.type === "Point") vertices = [feature.geometry.coordinates];
-  if (feature.geometry.type === "LineString") vertices = feature.geometry.coordinates;
-  if (feature.geometry.type === "Polygon") {
-    vertices = (feature.geometry.coordinates[0] ?? []).slice(0, -1);
-    closed = true;
-  }
+  const vertices = editableVertices(feature);
+  const closed = feature.geometry.type === "Polygon";
   vertices.forEach((coordinate, vertexIndex) =>
     features.push({
       type: "Feature",
@@ -1083,6 +1093,14 @@ function editFeatureCollection(feature: Feature): FeatureCollection {
     });
   }
   return { type: "FeatureCollection", features };
+}
+
+function editableVertices(feature: Feature): Position[] {
+  if (feature.geometry.type === "Point") return [feature.geometry.coordinates];
+  if (feature.geometry.type === "LineString") return feature.geometry.coordinates;
+  if (feature.geometry.type === "Polygon")
+    return (feature.geometry.coordinates[0] ?? []).slice(0, -1);
+  return [];
 }
 
 function ensureEditLayers(map: MlMap) {
