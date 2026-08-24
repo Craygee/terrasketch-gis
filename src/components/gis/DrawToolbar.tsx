@@ -8,6 +8,7 @@ import {
   Magnet,
   LocateFixed,
   ScanSearch,
+  ListChecks,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useWorkbench, type DrawMode } from "@/lib/gis/store";
@@ -17,6 +18,11 @@ import { AREA_UNITS, LENGTH_UNITS, type AreaUnit, type LengthUnit } from "@/lib/
 
 const tools: Array<{ mode: DrawMode; label: string; icon: React.ReactNode }> = [
   { mode: "none", label: "Select", icon: <MousePointer2 className="size-4" /> },
+  {
+    mode: "select-multiple",
+    label: "Select multiple features",
+    icon: <ListChecks className="size-4" />,
+  },
   {
     mode: "select-box",
     label: "Select by dragging a box",

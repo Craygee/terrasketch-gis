@@ -29,7 +29,14 @@ import {
 import { useAuth } from "@/lib/auth";
 
 export type DrawMode =
-  "none" | "select-box" | "polygon" | "line" | "point" | "measure-area" | "measure-line";
+  | "none"
+  | "select-multiple"
+  | "select-box"
+  | "polygon"
+  | "line"
+  | "point"
+  | "measure-area"
+  | "measure-line";
 
 export interface SelectedFeature {
   layerId: string;

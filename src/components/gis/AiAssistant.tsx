@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUp, CheckSquare, Database, FileText, Layers3, Sparkles, X } from "lucide-react";
 import { toast } from "sonner";
 
@@ -39,6 +39,8 @@ export function AiAssistant() {
   const [builderField, setBuilderField] = useState("");
   const [builderOperator, setBuilderOperator] = useState<Operator>("contains");
   const [builderValue, setBuilderValue] = useState("");
+  const [running, setRunning] = useState(false);
+  const latestMessageRef = useRef<HTMLDivElement>(null);
 
   const builderLayer = wb.layers.find((layer) => layer.id === builderLayerId) ?? wb.activeLayer;
   const builderFields = useMemo(
@@ -48,6 +50,10 @@ export function AiAssistant() {
       ),
     [builderLayer],
   );
+
+  useEffect(() => {
+    latestMessageRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [messages, running]);
 
   if (!assistantOpen) return null;
 
@@ -115,11 +121,13 @@ export function AiAssistant() {
 
   const run = async (raw: string) => {
     const text = raw.trim();
-    if (!text) return;
+    if (!text || running) return;
+    setRunning(true);
     setPrompt("");
     setMessages((current) => [...current, { role: "user", text }]);
     const lower = text.toLowerCase();
     try {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       if (/\b(report|pdf|brief)\b/.test(lower)) {
         const reportLayer = findMentionedLayer(text, wb.layers, wb.activeLayer);
         const reportCondition = reportLayer ? parseCondition(text, reportLayer) : null;
@@ -193,6 +201,8 @@ export function AiAssistant() {
       const message = error instanceof Error ? error.message : "The request could not be completed";
       answer(message);
       toast.error("AI action could not finish", { description: message });
+    } finally {
+      setRunning(false);
     }
   };
 
@@ -228,10 +238,11 @@ export function AiAssistant() {
           </button>
         </div>
 
-        <div className="flex-1 space-y-3 overflow-y-auto p-4">
+        <div className="flex-1 space-y-3 overflow-y-auto p-4" aria-live="polite">
           {messages.map((message, index) => (
             <div
               key={index}
+              ref={index === messages.length - 1 && !running ? latestMessageRef : undefined}
               className={
                 message.role === "user"
                   ? "ml-10 rounded-2xl rounded-tr-sm bg-primary px-3 py-2 text-xs text-primary-foreground"
@@ -241,12 +252,22 @@ export function AiAssistant() {
               {message.text}
             </div>
           ))}
+          {running && (
+            <div
+              ref={latestMessageRef}
+              className="mr-6 flex items-center gap-2 rounded-2xl rounded-tl-sm bg-secondary px-3 py-2 text-xs text-muted-foreground"
+            >
+              <span className="size-1.5 animate-pulse rounded-full bg-primary" />
+              Working on your map request…
+            </div>
+          )}
           <div className="flex flex-wrap gap-1">
             {starters.map((starter) => (
               <button
                 key={starter}
+                disabled={running}
                 onClick={() => void run(starter)}
-                className="rounded-full border border-border bg-card px-2.5 py-1 text-[10px] hover:border-primary"
+                className="rounded-full border border-border bg-card px-2.5 py-1 text-[10px] hover:border-primary disabled:opacity-50"
               >
                 {starter}
               </button>
@@ -378,11 +399,12 @@ export function AiAssistant() {
           <div className="flex items-end gap-2 rounded-2xl border border-border bg-card p-2 focus-within:border-primary">
             <textarea
               autoFocus
+              aria-label="Ask LandDraft AI"
               value={prompt}
               onChange={(event) => setPrompt(event.target.value)}
               onKeyDown={(event) => {
                 event.stopPropagation();
-                if (event.key === "Enter" && !event.shiftKey) {
+                if (event.key === "Enter" && !event.shiftKey && !running) {
                   event.preventDefault();
                   void run(prompt);
                 }
@@ -393,7 +415,7 @@ export function AiAssistant() {
             />
             <button
               type="submit"
-              disabled={!prompt.trim()}
+              disabled={!prompt.trim() || running}
               aria-label="Send request"
               title="Send this request to LandDraft AI"
               className="flex size-8 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground disabled:opacity-40"

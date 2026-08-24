@@ -460,7 +460,7 @@ export function MapCanvas() {
   const finishDraft = useCallback(() => {
     const coords = draftRef.current;
     const mode = drawModeRef.current;
-    if (mode === "none" || mode === "select-box") return;
+    if (mode === "none" || mode === "select-multiple" || mode === "select-box") return;
     const isMeasure = mode === "measure-area" || mode === "measure-line";
     const wantsPolygon = mode === "polygon" || mode === "measure-area";
     if (!isMeasure) {
@@ -511,7 +511,7 @@ export function MapCanvas() {
     const onClick = (e: MapMouseEvent) => {
       setMenu(null);
       const mode = drawModeRef.current;
-      if (mode === "none") {
+      if (mode === "none" || mode === "select-multiple") {
         if (editEnabled && map.getLayer("feature-edit-vertex")) {
           const vertexHit = map.queryRenderedFeatures(e.point, {
             layers: ["feature-edit-vertex"],
@@ -542,7 +542,10 @@ export function MapCanvas() {
             ) ?? hits[0])
           : hits[0];
         const additive =
-          e.originalEvent.shiftKey || e.originalEvent.ctrlKey || e.originalEvent.metaKey;
+          mode === "select-multiple" ||
+          e.originalEvent.shiftKey ||
+          e.originalEvent.ctrlKey ||
+          e.originalEvent.metaKey;
         if (!hit) {
           if (!additive) wb.setSelectedFeature(null);
           return;
@@ -599,7 +602,12 @@ export function MapCanvas() {
     };
 
     const onDblClick = (e: MapMouseEvent) => {
-      if (drawModeRef.current === "none") return;
+      if (
+        drawModeRef.current === "none" ||
+        drawModeRef.current === "select-multiple" ||
+        drawModeRef.current === "select-box"
+      )
+        return;
       e.preventDefault();
       finishDraft();
     };
@@ -687,7 +695,8 @@ export function MapCanvas() {
   useEffect(() => {
     const map = mapObj.current;
     if (!map) return;
-    map.getCanvas().style.cursor = wb.drawMode === "none" ? "" : "crosshair";
+    map.getCanvas().style.cursor =
+      wb.drawMode === "none" || wb.drawMode === "select-multiple" ? "" : "crosshair";
     if (wb.drawMode !== "select-box") boxDidSelectRef.current = false;
     if (wb.drawMode === "select-box" || panLocked) map.dragPan.disable();
     else map.dragPan.enable();
@@ -778,7 +787,7 @@ export function MapCanvas() {
     <div className="relative h-full w-full">
       <div ref={containerRef} className="h-full w-full" />
 
-      <div className="pointer-events-auto absolute bottom-28 right-2 z-20 flex flex-col gap-1">
+      <div className="pointer-events-auto absolute bottom-48 right-2 z-20 flex flex-col gap-1">
         <button
           onClick={() => setPanLocked((locked) => !locked)}
           className={cn(
@@ -831,11 +840,13 @@ export function MapCanvas() {
             <span className="font-medium">
               {wb.drawMode === "none"
                 ? "Measurement"
-                : wb.drawMode === "select-box"
-                  ? "Drag a box across features to select them"
-                  : wb.drawMode === "point"
-                    ? "Click the map to drop points"
-                    : "Click to add points, double-click or Enter to finish"}
+                : wb.drawMode === "select-multiple"
+                  ? "Click features to add or remove them · New layer saves the selection"
+                  : wb.drawMode === "select-box"
+                    ? "Drag a box across features to select them"
+                    : wb.drawMode === "point"
+                      ? "Click the map to drop points"
+                      : "Click to add points, double-click or Enter to finish"}
             </span>
             {readout && (
               <span className="num rounded-full bg-accent px-2 py-0.5 text-accent-foreground">

@@ -198,7 +198,11 @@ export function SelectionToolbar({ mobile = false }: { mobile?: boolean }) {
             setTableOpen(true);
           }}
         />
-        <Action icon={<CopyPlus />} label="New layer" onClick={createCombinedLayer} />
+        <Action
+          icon={<CopyPlus />}
+          label={selected.length > 1 ? "New layer from selection" : "New layer"}
+          onClick={createCombinedLayer}
+        />
         {selected.length === 1 && first.layer.source.kind !== "remote" && (
           <Action
             icon={<Pencil />}
