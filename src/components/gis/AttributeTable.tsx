@@ -11,7 +11,7 @@ const PAGE_SIZE = 100;
 
 export function AttributeTable() {
   const wb = useWorkbench();
-  const { tableOpen, setTableOpen, map } = useMapRef();
+  const { tableOpen, setTableOpen, map, setPendingFeatureSave } = useMapRef();
   const [query, setQuery] = useState("");
   const [field, setField] = useState("");
   const [operator, setOperator] = useState("contains");
@@ -79,15 +79,15 @@ export function AttributeTable() {
 
   const createFromResults = () => {
     if (!layer || rows.length === 0) return;
-    wb.addLayer({
-      name: `${layer.name} · selection`,
-      groupId: wb.derivedLayerGroupId,
+    setPendingFeatureSave({
+      features: rows.map(({ f }) => structuredClone(f)),
+      suggestedLayerName: `${layer.name} · selection`,
+      defaultGroupId: wb.derivedLayerGroupId,
       source: {
         kind: "derived",
         sourceLayerId: layer.id,
         query: [field, operator, value].filter(Boolean).join(" ") || query,
       },
-      data: { type: "FeatureCollection", features: rows.map(({ f }) => structuredClone(f)) },
       style: layer.style,
     });
   };

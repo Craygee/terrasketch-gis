@@ -14,6 +14,7 @@ import { cn } from "@/lib/utils";
 import { RemoteLayerManager } from "./RemoteLayerManager";
 import { SelectionToolbar } from "./SelectionToolbar";
 import { AuthGate } from "@/lib/auth";
+import { FeatureDestinationDialog } from "./FeatureDestinationDialog";
 
 const AiAssistant = lazy(() =>
   import("./AiAssistant").then((module) => ({ default: module.AiAssistant })),
@@ -29,6 +30,7 @@ export default function Workbench() {
         <MapRefProvider>
           <WorkbenchShell />
           <RemoteLayerManager />
+          <FeatureDestinationDialog />
           <Toaster />
         </MapRefProvider>
       </WorkbenchProvider>

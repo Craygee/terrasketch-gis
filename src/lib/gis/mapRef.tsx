@@ -1,5 +1,17 @@
 import { createContext, useContext, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Map as MlMap } from "maplibre-gl";
+import type { Feature } from "geojson";
+import type { LayerSource, LayerStyle } from "./types";
+
+export interface PendingFeatureSave {
+  features: Feature[];
+  suggestedLayerName: string;
+  suggestedFeatureName?: string;
+  defaultGroupId: string;
+  source: LayerSource;
+  style?: Partial<LayerStyle>;
+  separate?: boolean;
+}
 
 interface MapRefApi {
   map: MlMap | null;
@@ -16,6 +28,10 @@ interface MapRefApi {
   setPendingCatalogQuery: (q: string) => void;
   lastPoint: { lng: number; lat: number } | null;
   setLastPoint: (p: { lng: number; lat: number } | null) => void;
+  pendingFeatureSave: PendingFeatureSave | null;
+  setPendingFeatureSave: (pending: PendingFeatureSave | null) => void;
+  editEnabled: boolean;
+  setEditEnabled: (enabled: boolean) => void;
 }
 
 const MapRefContext = createContext<MapRefApi | null>(null);
@@ -29,6 +45,8 @@ export function MapRefProvider({ children }: { children: ReactNode }) {
   const [printOpen, setPrintOpen] = useState(false);
   const [pendingCatalogQuery, setPendingCatalogQuery] = useState("");
   const [lastPoint, setLastPoint] = useState<{ lng: number; lat: number } | null>(null);
+  const [pendingFeatureSave, setPendingFeatureSave] = useState<PendingFeatureSave | null>(null);
+  const [editEnabled, setEditEnabled] = useState(false);
 
   const value = useMemo<MapRefApi>(
     () => ({
@@ -49,8 +67,22 @@ export function MapRefProvider({ children }: { children: ReactNode }) {
       setPendingCatalogQuery,
       lastPoint,
       setLastPoint,
+      pendingFeatureSave,
+      setPendingFeatureSave,
+      editEnabled,
+      setEditEnabled,
     }),
-    [map, drawerOpen, tableOpen, assistantOpen, printOpen, pendingCatalogQuery, lastPoint],
+    [
+      map,
+      drawerOpen,
+      tableOpen,
+      assistantOpen,
+      printOpen,
+      pendingCatalogQuery,
+      lastPoint,
+      pendingFeatureSave,
+      editEnabled,
+    ],
   );
 
   return <MapRefContext.Provider value={value}>{children}</MapRefContext.Provider>;

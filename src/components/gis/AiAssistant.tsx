@@ -20,8 +20,14 @@ const starters = [
 
 export function AiAssistant() {
   const wb = useWorkbench();
-  const { assistantOpen, setAssistantOpen, setDrawerOpen, setPendingCatalogQuery, map } =
-    useMapRef();
+  const {
+    assistantOpen,
+    setAssistantOpen,
+    setDrawerOpen,
+    setPendingCatalogQuery,
+    setPendingFeatureSave,
+    map,
+  } = useMapRef();
   const [prompt, setPrompt] = useState("");
   const [messages, setMessages] = useState<Message[]>([
     {
@@ -60,23 +66,21 @@ export function AiAssistant() {
       .filter(({ feature }) => compare((feature.properties ?? {})[field], operator, value));
     wb.setSelectedFeatures(matches.map(({ index }) => ({ layerId: layer.id, index })));
     if (createLayer && matches.length) {
-      const created = wb.addLayer({
-        name: `${layer.name} · ${field} ${operatorLabel(operator)} ${value}`,
-        groupId: wb.derivedLayerGroupId,
+      const suggestedLayerName = `${layer.name} · ${field} ${operatorLabel(operator)} ${value}`;
+      setPendingFeatureSave({
+        features: matches.map(({ feature }) => structuredClone(feature)),
+        suggestedLayerName,
+        defaultGroupId: wb.derivedLayerGroupId,
         source: {
           kind: "derived",
           sourceLayerId: layer.id,
           query: `${field} ${operator} ${value}`,
         },
-        data: {
-          type: "FeatureCollection",
-          features: matches.map(({ feature }) => structuredClone(feature)),
-        },
         style: layer.style,
       });
       return {
         count: matches.length,
-        created: created.name,
+        created: suggestedLayerName,
         features: matches.map(({ feature }) => feature),
       };
     }
@@ -170,7 +174,7 @@ export function AiAssistant() {
         );
         answer(
           result.created
-            ? `Found ${result.count.toLocaleString()} matches and created “${result.created}” in the default derived-layer group with a consistent alternate color and 50% fill opacity.`
+            ? `Found ${result.count.toLocaleString()} matches. Choose where to save “${result.created}” in the open layer dialog.`
             : `Selected ${result.count.toLocaleString()} matching feature${result.count === 1 ? "" : "s"} in “${layer.name}”. You can now inspect the table, create a layer, or ask me for a report.`,
         );
         return;
@@ -333,7 +337,7 @@ export function AiAssistant() {
                     );
                     answer(
                       result.created
-                        ? `Created “${result.created}” with ${result.count.toLocaleString()} features.`
+                        ? `Found ${result.count.toLocaleString()} features. Choose where to save “${result.created}” in the open layer dialog.`
                         : "No matching features were found.",
                     );
                   }}

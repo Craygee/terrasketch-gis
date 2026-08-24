@@ -26,6 +26,7 @@ import { ProjectMenu } from "./ProjectMenu";
 import { AuthGate } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 import { LandDraftMark } from "@/components/brand/LandDraftMark";
+import { FeatureDestinationDialog } from "./FeatureDestinationDialog";
 
 const AiAssistant = lazy(() =>
   import("./AiAssistant").then((module) => ({ default: module.AiAssistant })),
@@ -41,6 +42,7 @@ export default function MobileWorkbench() {
         <MapRefProvider>
           <MobileShell />
           <RemoteLayerManager />
+          <FeatureDestinationDialog />
           <Toaster />
         </MapRefProvider>
       </WorkbenchProvider>

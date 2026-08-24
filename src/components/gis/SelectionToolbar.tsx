@@ -8,6 +8,7 @@ import {
   MapPinPlus,
   Minus,
   Pentagon,
+  Pencil,
   Table2,
   X,
 } from "lucide-react";
@@ -16,8 +17,6 @@ import { toast } from "sonner";
 import { useMapRef } from "@/lib/gis/mapRef";
 import { useWorkbench } from "@/lib/gis/store";
 import { cn } from "@/lib/utils";
-
-const EMPTY_FC = { type: "FeatureCollection" as const, features: [] };
 
 function featureName(properties: Record<string, unknown>, fallback: string): string {
   for (const key of ["NAME", "name", "OWNER_NAME", "owner_name", "Prop_ID", "GEO_ID"]) {
@@ -29,7 +28,14 @@ function featureName(properties: Record<string, unknown>, fallback: string): str
 
 export function SelectionToolbar({ mobile = false }: { mobile?: boolean }) {
   const wb = useWorkbench();
-  const { setTableOpen, setDrawerOpen, setPendingCatalogQuery } = useMapRef();
+  const {
+    setTableOpen,
+    setDrawerOpen,
+    setPendingCatalogQuery,
+    setPendingFeatureSave,
+    editEnabled,
+    setEditEnabled,
+  } = useMapRef();
   const [showField, setShowField] = useState(false);
   const [fieldName, setFieldName] = useState("");
   const [fieldValue, setFieldValue] = useState("");
@@ -52,22 +58,26 @@ export function SelectionToolbar({ mobile = false }: { mobile?: boolean }) {
     .slice(0, 4);
 
   const createCombinedLayer = () => {
-    const layer = wb.addLayer({
-      name: `${first.layer.name} · ${selected.length} selected`,
-      groupId: wb.derivedLayerGroupId,
+    setPendingFeatureSave({
+      features: selected.map(({ feature }) => structuredClone(feature)),
+      suggestedLayerName: `${first.layer.name} · ${selected.length} selected`,
+      ...(selected.length === 1
+        ? {
+            suggestedFeatureName: featureName(
+              (first.feature.properties ?? {}) as Record<string, unknown>,
+              "Selected feature",
+            ),
+          }
+        : {}),
+      defaultGroupId: wb.derivedLayerGroupId,
       source: {
         kind: "derived",
         sourceLayerId: first.layer.id,
         query: `${selected.length} selected features`,
       },
-      data: {
-        ...EMPTY_FC,
-        features: selected.map(({ feature }) => structuredClone(feature)),
-      },
       style: first.layer.style,
     });
     wb.setSelectedFeatures([]);
-    toast.success(`${layer.name} created`);
   };
 
   const createSeparateLayers = () => {
@@ -75,18 +85,25 @@ export function SelectionToolbar({ mobile = false }: { mobile?: boolean }) {
       toast.error("Select 25 or fewer features to create one layer per feature");
       return;
     }
-    selected.forEach(({ layer, feature }, index) => {
-      const properties = (feature.properties ?? {}) as Record<string, unknown>;
-      wb.addLayer({
-        name: featureName(properties, `${layer.name} · feature ${index + 1}`),
-        groupId: wb.derivedLayerGroupId,
-        source: { kind: "derived", sourceLayerId: layer.id, query: "Selected feature" },
-        data: { ...EMPTY_FC, features: [structuredClone(feature)] },
-        style: layer.style,
-      });
+    setPendingFeatureSave({
+      features: selected.map(({ feature }, index) => {
+        const copy = structuredClone(feature);
+        copy.properties = {
+          ...(copy.properties ?? {}),
+          NAME: featureName(
+            (copy.properties ?? {}) as Record<string, unknown>,
+            `${first.layer.name} · feature ${index + 1}`,
+          ),
+        };
+        return copy;
+      }),
+      suggestedLayerName: first.layer.name,
+      defaultGroupId: wb.derivedLayerGroupId,
+      source: { kind: "derived", sourceLayerId: first.layer.id, query: "Selected feature" },
+      style: first.layer.style,
+      separate: true,
     });
     wb.setSelectedFeatures([]);
-    toast.success(`${selected.length} separate layer${selected.length === 1 ? "" : "s"} created`);
   };
 
   const addField = () => {
@@ -182,6 +199,17 @@ export function SelectionToolbar({ mobile = false }: { mobile?: boolean }) {
           }}
         />
         <Action icon={<CopyPlus />} label="New layer" onClick={createCombinedLayer} />
+        {selected.length === 1 && first.layer.source.kind !== "remote" && (
+          <Action
+            icon={<Pencil />}
+            label={editEnabled ? "Finish editing" : "Edit vertices"}
+            onClick={() => {
+              wb.setDrawMode("none");
+              setEditEnabled(!editEnabled);
+            }}
+            active={editEnabled}
+          />
+        )}
         {selected.length > 1 && (
           <Action icon={<GitBranchPlus />} label="Split layers" onClick={createSeparateLayers} />
         )}
@@ -243,18 +271,21 @@ function Action({
   icon,
   label,
   onClick,
+  active,
 }: {
   icon: React.ReactNode;
   label: string;
   onClick: () => void;
+  active?: boolean;
 }) {
   return (
     <button
       onClick={onClick}
       className="flex shrink-0 items-center gap-1 rounded-xl bg-secondary px-2.5 py-1.5 text-[11px] font-medium hover:bg-accent"
+      aria-pressed={active}
       title={label}
     >
-      <span className="[&>svg]:size-3.5">{icon}</span>
+      <span className={cn("[&>svg]:size-3.5", active && "text-primary")}>{icon}</span>
       {label}
     </button>
   );

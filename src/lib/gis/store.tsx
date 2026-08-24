@@ -8,7 +8,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import type { FeatureCollection } from "geojson";
+import type { FeatureCollection, Geometry } from "geojson";
 import {
   defaultStyle,
   type GisLayer,
@@ -210,7 +210,7 @@ export interface WorkbenchApi extends WorkbenchState {
   moveLayer: (id: string, direction: -1 | 1) => void;
   reorderLayer: (id: string, targetGroupId: string, beforeLayerId?: string) => void;
   setLayerGroup: (id: string, groupId: string) => void;
-  addGroup: (name: string) => void;
+  addGroup: (name: string) => string;
   addSubgroup: (parentId: string, name: string) => void;
   toggleGroup: (id: string) => void;
   setGroupVisible: (id: string, visible: boolean) => void;
@@ -232,6 +232,7 @@ export interface WorkbenchApi extends WorkbenchState {
     index: number,
     properties: Record<string, unknown>,
   ) => void;
+  updateFeatureGeometry: (layerId: string, index: number, geometry: Geometry) => void;
   saveProject: (reason?: SaveReason) => Promise<void>;
   createProject: (name: string) => Promise<void>;
   createSubproject: (name: string, parentProjectId?: string) => Promise<void>;
@@ -477,7 +478,9 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
   );
 
   const addGroup = useCallback<WorkbenchApi["addGroup"]>((name) => {
-    setState((s) => ({ ...s, groups: [...s.groups, { id: uid(), name, collapsed: false }] }));
+    const id = uid();
+    setState((s) => ({ ...s, groups: [...s.groups, { id, name, collapsed: false }] }));
+    return id;
   }, []);
 
   const addSubgroup = useCallback<WorkbenchApi["addSubgroup"]>((parentId, name) => {
@@ -560,6 +563,28 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
             },
           };
         }),
+      }));
+    },
+    [],
+  );
+
+  const updateFeatureGeometry = useCallback<WorkbenchApi["updateFeatureGeometry"]>(
+    (layerId, index, geometry) => {
+      setState((s) => ({
+        ...s,
+        layers: s.layers.map((layer) =>
+          layer.id === layerId
+            ? {
+                ...layer,
+                data: {
+                  type: "FeatureCollection",
+                  features: layer.data.features.map((feature, featureIndex) =>
+                    featureIndex === index ? { ...feature, geometry } : feature,
+                  ),
+                },
+              }
+            : layer,
+        ),
       }));
     },
     [],
@@ -882,6 +907,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       setProjectName: (name) => patch({ projectName: name }),
       appendFeature,
       updateFeatureProperties,
+      updateFeatureGeometry,
       saveProject,
       createProject,
       createSubproject,
@@ -921,6 +947,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       toggleLayerSelection,
       appendFeature,
       updateFeatureProperties,
+      updateFeatureGeometry,
       saveProject,
       createProject,
       createSubproject,

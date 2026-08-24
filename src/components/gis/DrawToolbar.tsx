@@ -31,7 +31,7 @@ const tools: Array<{ mode: DrawMode; label: string; icon: React.ReactNode }> = [
 
 export function DrawToolbar() {
   const wb = useWorkbench();
-  const { map } = useMapRef();
+  const { map, setPendingFeatureSave } = useMapRef();
   const addGpsPoint = () => {
     if (!navigator.geolocation) {
       toast.error("Location is not available in this browser");
@@ -50,20 +50,18 @@ export function DrawToolbar() {
             CAPTURED: new Date().toISOString(),
           },
         };
-        const existing = wb.layers.find((layer) => layer.source.kind === "draw");
-        if (existing) wb.appendFeature(existing.id, feature);
-        else
-          wb.addLayer({
-            name: "My sketch",
-            data: { type: "FeatureCollection", features: [feature] },
-            groupId: "sketch",
-            source: { kind: "draw" },
-          });
+        setPendingFeatureSave({
+          features: [feature],
+          suggestedLayerName: "GPS points",
+          suggestedFeatureName: "GPS location",
+          defaultGroupId: "sketch",
+          source: { kind: "draw" },
+        });
         map?.easeTo({
           center: [coords.longitude, coords.latitude],
           zoom: Math.max(map.getZoom(), 16),
         });
-        toast.success(`GPS point added · ±${Math.round(coords.accuracy)} m`);
+        toast.success(`GPS captured · ±${Math.round(coords.accuracy)} m`);
       },
       (error) => toast.error("Could not read your location", { description: error.message }),
       { enableHighAccuracy: true, timeout: 15000 },
