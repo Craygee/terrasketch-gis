@@ -688,6 +688,7 @@ export function MapCanvas() {
     const map = mapObj.current;
     if (!map) return;
     map.getCanvas().style.cursor = wb.drawMode === "none" ? "" : "crosshair";
+    if (wb.drawMode !== "select-box") boxDidSelectRef.current = false;
     if (wb.drawMode === "select-box" || panLocked) map.dragPan.disable();
     else map.dragPan.enable();
   }, [wb.drawMode, panLocked]);
