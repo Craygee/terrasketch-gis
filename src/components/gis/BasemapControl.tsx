@@ -28,6 +28,7 @@ export function BasemapControl() {
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
         aria-label={`Choose basemap. Current basemap: ${active?.label ?? "Basemap"}`}
+        title="Choose the background map"
         className="float-surface flex items-center gap-2 rounded-2xl px-3 py-2 text-sm font-medium"
       >
         <Layers2 className="size-4 text-primary" />

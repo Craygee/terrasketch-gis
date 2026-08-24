@@ -45,6 +45,7 @@ export function TopBar({
       <button
         onClick={onTogglePanel}
         aria-label="Toggle layer panel"
+        title={panelOpen ? "Hide the layer panel" : "Show the layer panel"}
         className={cn(
           "rounded-xl p-2 transition-colors hover:bg-accent",
           panelOpen && "bg-secondary",
@@ -85,28 +86,38 @@ export function TopBar({
         <BarBtn
           icon={<Sparkles className="size-4" />}
           label="AI"
+          help="Ask LandDraft AI to search, select, explain, or report"
           onClick={() => setAssistantOpen(!assistantOpen)}
           primary
         />
         <BarBtn
           icon={<Database className="size-4" />}
           label="Public data"
+          help="Find and add official public datasets"
           onClick={() => setDrawerOpen(true)}
         />
         <BarBtn
           icon={<Table2 className="size-4" />}
           label="Table"
+          help="Search and edit layer attribute tables"
           onClick={() => setTableOpen(!tableOpen)}
         />
-        <BarBtn icon={<Save className="size-4" />} label="Save" onClick={() => void save()} />
+        <BarBtn
+          icon={<Save className="size-4" />}
+          label="Save"
+          help="Save this project and add a restore point"
+          onClick={() => void save()}
+        />
         <BarBtn
           icon={<Printer className="size-4" />}
           label="Print map"
+          help="Open the printable map composer"
           onClick={() => setPrintOpen(true)}
         />
         <BarBtn
           icon={<FolderOpen className="size-4" />}
           label="Projects"
+          help="Switch, duplicate, or organize projects"
           onClick={() => {
             setShowProjects((value) => !value);
             setShowExport(false);
@@ -115,6 +126,7 @@ export function TopBar({
         <BarBtn
           icon={<FileDown className="size-4" />}
           label="Export"
+          help="Export map data to GIS file formats"
           onClick={() => {
             setShowExport((value) => !value);
             setShowProjects(false);
@@ -123,6 +135,7 @@ export function TopBar({
         <button
           onClick={() => setShowAbout((s) => !s)}
           aria-label="About and disclaimers"
+          title="About LandDraft and mapping disclaimers"
           className="rounded-xl p-2 text-muted-foreground transition-colors hover:bg-accent"
         >
           <Info className="size-4" />
@@ -176,15 +189,19 @@ function BarBtn({
   label,
   onClick,
   primary,
+  help,
 }: {
   icon: React.ReactNode;
   label: string;
   onClick: () => void;
   primary?: boolean;
+  help?: string;
 }) {
   return (
     <button
       onClick={onClick}
+      title={help ?? label}
+      aria-label={label}
       className={cn(
         "flex items-center gap-1.5 rounded-xl px-2.5 py-2 text-xs font-medium transition-colors",
         primary

@@ -6,19 +6,14 @@ import {
   MapPin,
   MessageSquareText,
   Minus,
+  Move,
   Printer,
   RotateCcw,
   Trash2,
   Type,
   X,
 } from "lucide-react";
-import {
-  Map as MlMap,
-  Marker,
-  NavigationControl,
-  ScaleControl,
-  type GeoJSONSource,
-} from "maplibre-gl";
+import { Map as MlMap, Marker, NavigationControl, type GeoJSONSource } from "maplibre-gl";
 import type { Feature, FeatureCollection } from "geojson";
 
 import { useWorkbench } from "@/lib/gis/store";
@@ -26,7 +21,13 @@ import { useMapRef } from "@/lib/gis/mapRef";
 import { getBasemap } from "@/lib/gis/basemaps";
 import { allLayerIds, buildLayerSpecs, sourceId } from "@/lib/gis/mapStyle";
 import { composeLabel } from "@/lib/gis/labels";
-import type { GisLayer, PrintAnnotation, PrintComposition } from "@/lib/gis/types";
+import type {
+  GisLayer,
+  PrintAnnotation,
+  PrintComposition,
+  PrintFurnitureCorner,
+  PrintFurnitureKey,
+} from "@/lib/gis/types";
 import { cn } from "@/lib/utils";
 
 const uid = () => window.crypto.randomUUID();
@@ -48,6 +49,12 @@ const defaultComposition = (
   showAttribution: true,
   frameBorder: true,
   frame: { x: 5, y: 14, width: 90, height: 78 },
+  furniture: {
+    legend: { corner: "bottom-right", x: 82, y: 72 },
+    compass: { corner: "top-right", x: 91, y: 11 },
+    scale: { corner: "bottom-left", x: 14, y: 91 },
+    attribution: { corner: "bottom-left", x: 28, y: 96 },
+  },
   includedLayerIds: layers.filter((layer) => layer.visible).map((layer) => layer.id),
   legendItems: Object.fromEntries(
     layers.map((layer) => [layer.id, { visible: layer.visible, name: layer.name }]),
@@ -80,6 +87,10 @@ export function PrintComposer() {
     return {
       ...defaultComposition(wb.projectName, wb.displayLayers, liveView),
       ...base,
+      furniture: {
+        ...defaultComposition(wb.projectName, wb.displayLayers, liveView).furniture,
+        ...(base.furniture ?? {}),
+      },
       ...((liveView ?? base.mapView) ? { mapView: liveView ?? base.mapView } : {}),
       includedLayerIds:
         included.length > 0
@@ -93,10 +104,10 @@ export function PrintComposer() {
     null | { kind: "line" | "arrow"; start?: { x: number; y: number } } | { kind: "callout" }
   >(null);
   const pageRef = useRef<HTMLDivElement>(null);
+  const mapFrameRef = useRef<HTMLDivElement>(null);
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const printMapRef = useRef<MlMap | null>(null);
   const markerRefs = useRef<Marker[]>([]);
-  const scaleRef = useRef<ScaleControl | null>(null);
   const [mapReady, setMapReady] = useState(false);
   const [mapBearing, setMapBearing] = useState(liveView?.bearing ?? 0);
   const [mapRevision, setMapRevision] = useState(0);
@@ -111,7 +122,14 @@ export function PrintComposer() {
     () => wb.displayLayers.filter((layer) => composition.legendItems[layer.id]?.visible),
     [composition.legendItems, wb.displayLayers],
   );
-  const hasCallouts = composition.annotations.some((item) => item.type === "callout");
+  const furnitureScale = Math.max(
+    0.55,
+    Math.min(1.12, Math.min(composition.frame.width / 90, composition.frame.height / 78)),
+  );
+  const scaleBar = useMemo(() => {
+    void mapRevision;
+    return mapReady && printMapRef.current ? measureScaleBar(printMapRef.current) : null;
+  }, [mapReady, mapRevision]);
 
   const update = useCallback((patch: Partial<PrintComposition>) => {
     setComposition((current) => ({ ...current, ...patch }));
@@ -144,7 +162,7 @@ export function PrintComposer() {
       attributionControl: false,
       canvasContextAttributes: { preserveDrawingBuffer: true },
     });
-    map.addControl(new NavigationControl({ visualizePitch: false }), "bottom-right");
+    map.addControl(new NavigationControl({ visualizePitch: false }), "top-left");
     map.on("load", () => setMapReady(true));
     map.on("moveend", () => {
       const center = map.getCenter();
@@ -223,18 +241,6 @@ export function PrintComposer() {
   useEffect(() => {
     const map = printMapRef.current;
     if (!map || !mapReady) return;
-    if (composition.showScale && !scaleRef.current) {
-      scaleRef.current = new ScaleControl({ unit: "imperial", maxWidth: 110 });
-      map.addControl(scaleRef.current, "bottom-left");
-    } else if (!composition.showScale && scaleRef.current) {
-      map.removeControl(scaleRef.current);
-      scaleRef.current = null;
-    }
-  }, [composition.showScale, mapReady]);
-
-  useEffect(() => {
-    const map = printMapRef.current;
-    if (!map || !mapReady) return;
     for (const marker of markerRefs.current) marker.remove();
     markerRefs.current = composition.annotations
       .filter(
@@ -245,7 +251,8 @@ export function PrintComposer() {
         element.className = "print-map-marker";
         element.style.setProperty("--marker-color", item.color);
         element.title = item.label;
-        const coordinates = `${item.lat.toFixed(6)}, ${item.lng.toFixed(6)}`;
+        const coordinates =
+          item.coordinateFormat === "dms" ? formatDmsGps(item) : formatDecimalGps(item);
         element.innerHTML = `<span></span><b>${item.gpsOnly ? coordinates : escapeHtml(item.label)}${
           item.showCoordinates && !item.gpsOnly ? `<small>${coordinates}</small>` : ""
         }</b>`;
@@ -301,6 +308,48 @@ export function PrintComposer() {
       x: Math.max(0, Math.min(100, ((clientX - rect.left) / rect.width) * 100)),
       y: Math.max(0, Math.min(100, ((clientY - rect.top) / rect.height) * 100)),
     };
+  };
+
+  const pointOnMapFrame = (clientX: number, clientY: number) => {
+    const frame = mapFrameRef.current;
+    if (!frame) return null;
+    const rect = frame.getBoundingClientRect();
+    return {
+      x: Math.max(8, Math.min(92, ((clientX - rect.left) / rect.width) * 100)),
+      y: Math.max(6, Math.min(94, ((clientY - rect.top) / rect.height) * 100)),
+    };
+  };
+
+  const setFurnitureCorner = (key: PrintFurnitureKey, corner: PrintFurnitureCorner) => {
+    update({
+      furniture: {
+        ...composition.furniture,
+        [key]: { ...composition.furniture[key], corner },
+      },
+    });
+  };
+
+  const startFurnitureDrag = (event: React.PointerEvent, key: PrintFurnitureKey) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const move = (pointerEvent: PointerEvent) => {
+      const point = pointOnMapFrame(pointerEvent.clientX, pointerEvent.clientY);
+      if (!point) return;
+      setComposition((current) => ({
+        ...current,
+        furniture: {
+          ...current.furniture,
+          [key]: { corner: "custom", x: point.x, y: point.y },
+        },
+      }));
+    };
+    move(event.nativeEvent);
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up, { once: true });
   };
 
   const startPointDrag = (
@@ -469,7 +518,11 @@ export function PrintComposer() {
     }, 120);
   };
 
-  const addMarker = (point?: { lng: number; lat: number } | null, gpsOnly = false) => {
+  const addMarker = (
+    point?: { lng: number; lat: number } | null,
+    gpsOnly = false,
+    coordinateFormat: "decimal" | "dms" = "decimal",
+  ) => {
     const center = printMapRef.current?.getCenter();
     const location = point ?? (center ? { lng: center.lng, lat: center.lat } : null);
     if (!location) return;
@@ -482,6 +535,7 @@ export function PrintComposer() {
       color: "#c9832c",
       showCoordinates: Boolean(point),
       gpsOnly,
+      coordinateFormat,
     };
     update({ annotations: [...composition.annotations, item] });
     setSelectedId(item.id);
@@ -509,6 +563,61 @@ export function PrintComposer() {
   };
 
   const pageRatio = pageAspect(composition.paper, composition.orientation);
+  const furnitureKeys: PrintFurnitureKey[] = ["legend", "compass", "scale", "attribution"];
+  const furnitureVisible = (key: PrintFurnitureKey) =>
+    key === "legend"
+      ? composition.showLegend
+      : key === "compass"
+        ? composition.showCompass
+        : key === "scale"
+          ? composition.showScale && Boolean(scaleBar)
+          : composition.showAttribution;
+
+  const furnitureContent = (key: PrintFurnitureKey) => {
+    if (key === "legend")
+      return (
+        <div
+          className="overflow-hidden rounded-md border border-slate-300 bg-white/95 shadow"
+          style={{
+            width: `${Math.round(176 * furnitureScale)}px`,
+            maxHeight: `${Math.round(240 * furnitureScale)}px`,
+            padding: `${Math.max(5, Math.round(8 * furnitureScale))}px`,
+            fontSize: `${Math.max(7, 10 * furnitureScale)}px`,
+          }}
+        >
+          <strong>Legend</strong>
+          <div className="mt-1 space-y-1">
+            {legendLayers.map((layer) => (
+              <div key={layer.id} className="flex items-center gap-1.5">
+                <span
+                  className="shrink-0 rounded-sm border"
+                  style={{
+                    width: `${Math.max(7, 10 * furnitureScale)}px`,
+                    height: `${Math.max(7, 10 * furnitureScale)}px`,
+                    backgroundColor: layer.style.fillColor,
+                    opacity: Math.max(layer.style.fillOpacity, 0.35),
+                    borderColor: layer.style.strokeColor,
+                  }}
+                />
+                <span className="truncate">
+                  {composition.legendItems[layer.id]?.name || layer.name}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    if (key === "compass") return <Compass bearing={mapBearing} scale={furnitureScale} />;
+    if (key === "scale" && scaleBar) return <PrintScaleBar {...scaleBar} scale={furnitureScale} />;
+    return (
+      <div
+        className="max-w-[52cqw] rounded bg-white/85 px-1.5 py-1 leading-tight text-slate-600 shadow-sm"
+        style={{ fontSize: `${Math.max(6, 8 * furnitureScale)}px` }}
+      >
+        {getBasemap(wb.basemapId).blurb}
+      </div>
+    );
+  };
 
   return (
     <div className="print-composer fixed inset-0 z-[100] flex flex-col bg-[#e9e8e2] text-foreground">
@@ -554,6 +663,15 @@ export function PrintComposer() {
               const center = printMapRef.current?.getCenter();
               const point = lastPoint ?? (center ? { lng: center.lng, lat: center.lat } : null);
               addMarker(point, true);
+            }}
+          />
+          <ComposerButton
+            icon={<LocateFixed />}
+            label="DMS GPS"
+            onClick={() => {
+              const center = printMapRef.current?.getCenter();
+              const point = lastPoint ?? (center ? { lng: center.lng, lat: center.lat } : null);
+              addMarker(point, true, "dms");
             }}
           />
           <ComposerButton icon={<RotateCcw />} label="Project view" onClick={resetView} />
@@ -606,6 +724,38 @@ export function PrintComposer() {
               />
             ))}
           </div>
+
+          <details className="group mt-3 rounded-xl border border-border">
+            <summary className="cursor-pointer list-none px-3 py-2 font-semibold">
+              Map item placement
+            </summary>
+            <div className="space-y-2 border-t border-border p-3">
+              <p className="text-[9px] leading-relaxed text-muted-foreground">
+                Choose a corner or drag an item directly on the map. Items assigned to the same
+                corner stack automatically.
+              </p>
+              <FurniturePlacementControl
+                label="Legend"
+                value={composition.furniture.legend.corner}
+                onChange={(corner) => setFurnitureCorner("legend", corner)}
+              />
+              <FurniturePlacementControl
+                label="Compass"
+                value={composition.furniture.compass.corner}
+                onChange={(corner) => setFurnitureCorner("compass", corner)}
+              />
+              <FurniturePlacementControl
+                label="Scale bar"
+                value={composition.furniture.scale.corner}
+                onChange={(corner) => setFurnitureCorner("scale", corner)}
+              />
+              <FurniturePlacementControl
+                label="Source credit"
+                value={composition.furniture.attribution.corner}
+                onChange={(corner) => setFurnitureCorner("attribution", corner)}
+              />
+            </div>
+          </details>
 
           <details className="group mt-3 rounded-xl border border-border">
             <summary className="cursor-pointer list-none px-3 py-2 font-semibold">
@@ -800,8 +950,9 @@ export function PrintComposer() {
               </div>
             )}
             <div
+              ref={mapFrameRef}
               className={cn(
-                "absolute overflow-hidden bg-slate-100",
+                "absolute overflow-hidden bg-slate-100 [container-type:inline-size]",
                 composition.frameBorder && "ring-1 ring-slate-700",
               )}
               style={{
@@ -812,42 +963,56 @@ export function PrintComposer() {
               }}
             >
               <div ref={mapContainerRef} className="h-full w-full" />
+              {(["top-left", "top-right", "bottom-left", "bottom-right"] as const).map((corner) => {
+                const keys = furnitureKeys.filter(
+                  (key) => furnitureVisible(key) && composition.furniture[key].corner === corner,
+                );
+                if (keys.length === 0) return null;
+                return (
+                  <div
+                    key={corner}
+                    className={cn(
+                      "pointer-events-none absolute z-20 flex gap-1.5",
+                      corner.startsWith("top") ? "flex-col" : "flex-col-reverse",
+                      corner.endsWith("left") ? "items-start" : "items-end",
+                      corner === "top-left" && "left-2 top-12",
+                      corner === "top-right" && "right-2 top-2",
+                      corner === "bottom-left" && "bottom-2 left-2",
+                      corner === "bottom-right" && "bottom-2 right-2",
+                    )}
+                  >
+                    {keys.map((key) => (
+                      <div
+                        key={key}
+                        className="pointer-events-auto cursor-move touch-none"
+                        onPointerDown={(event) => startFurnitureDrag(event, key)}
+                        title={`Drag ${furnitureLabel(key)} to place it anywhere`}
+                      >
+                        {furnitureContent(key)}
+                      </div>
+                    ))}
+                  </div>
+                );
+              })}
+              {furnitureKeys
+                .filter(
+                  (key) => furnitureVisible(key) && composition.furniture[key].corner === "custom",
+                )
+                .map((key) => (
+                  <div
+                    key={key}
+                    className="pointer-events-auto absolute z-20 -translate-x-1/2 -translate-y-1/2 cursor-move touch-none"
+                    style={{
+                      left: `${composition.furniture[key].x}%`,
+                      top: `${composition.furniture[key].y}%`,
+                    }}
+                    onPointerDown={(event) => startFurnitureDrag(event, key)}
+                    title={`Drag ${furnitureLabel(key)} to reposition it`}
+                  >
+                    {furnitureContent(key)}
+                  </div>
+                ))}
             </div>
-
-            {composition.showLegend && (
-              <div
-                className="absolute z-20 max-h-[38%] min-w-32 overflow-hidden rounded-md border border-slate-300 bg-white/95 p-2 text-[clamp(7px,.75vw,11px)] shadow"
-                style={
-                  hasCallouts
-                    ? {
-                        left: `${composition.frame.x + 2}%`,
-                        bottom: `${Math.max(3, 100 - composition.frame.y - composition.frame.height + 2)}%`,
-                      }
-                    : { right: "7%", bottom: "9%" }
-                }
-              >
-                <strong>Legend</strong>
-                <div className="mt-1 space-y-1">
-                  {legendLayers.map((layer) => (
-                    <div key={layer.id} className="flex items-center gap-1.5">
-                      <span
-                        className="size-2.5 shrink-0 rounded-sm border"
-                        style={{
-                          backgroundColor: layer.style.fillColor,
-                          opacity: Math.max(layer.style.fillOpacity, 0.35),
-                          borderColor: layer.style.strokeColor,
-                        }}
-                      />
-                      <span className="max-w-40 truncate">
-                        {composition.legendItems[layer.id]?.name || layer.name}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {composition.showCompass && <Compass bearing={mapBearing} />}
 
             <svg className="pointer-events-none absolute inset-0 z-30 h-full w-full overflow-visible">
               <defs>
@@ -986,19 +1151,24 @@ export function PrintComposer() {
                   }}
                 >
                   <span className="block text-[clamp(7px,.75vw,11px)] font-semibold leading-tight">
-                    {item.contentMode === "gps" ? formatDecimalGps(item) : item.text}
+                    {item.contentMode === "gps"
+                      ? formatDecimalGps(item)
+                      : item.contentMode === "dms"
+                        ? formatDmsGps(item)
+                        : item.text}
                   </span>
-                  {item.contentMode === "label-gps" && (
+                  {(item.contentMode === "label-gps" || item.contentMode === "label-dms") && (
                     <span className="num mt-1 block text-[clamp(6px,.6vw,9px)] opacity-75">
-                      {formatDecimalGps(item)}
+                      {item.contentMode === "label-dms"
+                        ? formatDmsGps(item)
+                        : formatDecimalGps(item)}
                     </span>
                   )}
                 </button>
               ))}
-            {(composition.showDate || composition.showAttribution) && (
-              <div className="absolute inset-x-[5%] bottom-[2%] flex justify-between text-[clamp(6px,.65vw,9px)] text-slate-500">
-                <span>{composition.showAttribution ? getBasemap(wb.basemapId).blurb : ""}</span>
-                <span>{composition.showDate ? new Date().toLocaleDateString() : ""}</span>
+            {composition.showDate && (
+              <div className="absolute bottom-[2%] right-[5%] text-[clamp(6px,.65vw,9px)] text-slate-500">
+                {new Date().toLocaleDateString()}
               </div>
             )}
             {placementMode && (
@@ -1104,7 +1274,7 @@ export function PrintComposer() {
                 />
                 <CheckOption
                   checked={selected.gpsOnly ?? false}
-                  label="GPS only (decimal)"
+                  label="GPS only"
                   onChange={(gpsOnly) =>
                     updateAnnotation(selected.id, {
                       gpsOnly,
@@ -1112,8 +1282,27 @@ export function PrintComposer() {
                     })
                   }
                 />
+                <label className="mt-2 block">
+                  <span className="mb-1 block text-[10px] font-medium text-muted-foreground">
+                    Coordinate format
+                  </span>
+                  <select
+                    value={selected.coordinateFormat ?? "decimal"}
+                    onChange={(event) =>
+                      updateAnnotation(selected.id, {
+                        coordinateFormat: event.target.value as "decimal" | "dms",
+                      })
+                    }
+                    className="w-full rounded-lg border border-border bg-card px-2 py-1.5"
+                  >
+                    <option value="decimal">Decimal degrees</option>
+                    <option value="dms">Degrees · minutes · seconds</option>
+                  </select>
+                </label>
                 <p className="num mt-2 text-[10px] text-muted-foreground">
-                  {selected.lat.toFixed(6)}, {selected.lng.toFixed(6)}
+                  {(selected.coordinateFormat ?? "decimal") === "dms"
+                    ? formatDmsGps(selected)
+                    : formatDecimalGps(selected)}
                 </p>
               </>
             )}
@@ -1143,6 +1332,8 @@ export function PrintComposer() {
                     <option value="label">Label</option>
                     <option value="label-gps">Label + decimal GPS</option>
                     <option value="gps">Decimal GPS only</option>
+                    <option value="label-dms">Label + GPS (DMS)</option>
+                    <option value="dms">GPS only (DMS)</option>
                   </select>
                 </label>
                 <Color
@@ -1218,6 +1409,8 @@ function ComposerButton({
   return (
     <button
       onClick={onClick}
+      title={label}
+      aria-label={label}
       className={cn(
         "flex shrink-0 items-center gap-1 rounded-xl px-2.5 py-2 text-[10px] font-medium hover:bg-accent",
         active ? "bg-primary text-primary-foreground" : "bg-secondary",
@@ -1229,21 +1422,83 @@ function ComposerButton({
   );
 }
 
-function Compass({ bearing }: { bearing: number }) {
+function Compass({ bearing, scale }: { bearing: number; scale: number }) {
+  const size = Math.round(54 * scale);
   return (
-    <div className="absolute right-[8%] top-[17%] z-20 flex size-14 items-center justify-center rounded-full border border-slate-400 bg-white/90 text-[8px] font-bold shadow">
+    <div
+      className="relative flex items-center justify-center rounded-full border border-slate-400 bg-white/90 font-bold shadow"
+      style={{ width: `${size}px`, height: `${size}px`, fontSize: `${Math.max(6, 8 * scale)}px` }}
+    >
       <span className="absolute top-1">N</span>
       <span className="absolute bottom-1">S</span>
       <span className="absolute left-1">W</span>
       <span className="absolute right-1">E</span>
       <div
-        className="relative h-8 w-3 transition-transform"
-        style={{ transform: `rotate(${-bearing}deg)` }}
+        className="relative transition-transform"
+        style={{
+          width: `${Math.max(8, 12 * scale)}px`,
+          height: `${Math.max(22, 32 * scale)}px`,
+          transform: `rotate(${-bearing}deg)`,
+        }}
       >
-        <div className="absolute left-1 top-0 h-4 w-0 border-x-[4px] border-b-[16px] border-x-transparent border-b-red-600" />
-        <div className="absolute bottom-0 left-1 h-4 w-0 rotate-180 border-x-[4px] border-b-[16px] border-x-transparent border-b-slate-700" />
+        <div className="absolute inset-x-0 top-0 h-1/2 bg-red-600 [clip-path:polygon(50%_0,100%_100%,50%_78%,0_100%)]" />
+        <div className="absolute inset-x-0 bottom-0 h-1/2 rotate-180 bg-slate-700 [clip-path:polygon(50%_0,100%_100%,50%_78%,0_100%)]" />
       </div>
     </div>
+  );
+}
+
+function PrintScaleBar({
+  label,
+  widthPercent,
+  scale,
+}: {
+  label: string;
+  widthPercent: number;
+  scale: number;
+}) {
+  return (
+    <div
+      className="rounded bg-white/90 px-1.5 py-1 text-slate-800 shadow-sm"
+      style={{
+        width: `clamp(54px, ${widthPercent}cqw, 126px)`,
+        fontSize: `${Math.max(6, 9 * scale)}px`,
+      }}
+    >
+      <div className="mb-0.5 text-center font-semibold leading-none">{label}</div>
+      <div className="h-1.5 w-full border-x-2 border-b-2 border-slate-900" />
+    </div>
+  );
+}
+
+function FurniturePlacementControl({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: PrintFurnitureCorner;
+  onChange: (corner: PrintFurnitureCorner) => void;
+}) {
+  return (
+    <label className="grid grid-cols-[1fr_7rem] items-center gap-2">
+      <span className="flex items-center gap-1.5 text-[10px] font-medium">
+        <Move className="size-3 text-muted-foreground" /> {label}
+      </span>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value as PrintFurnitureCorner)}
+        className="rounded-lg border border-border bg-card px-2 py-1.5 text-[10px]"
+        aria-label={`${label} position`}
+        title={`Set the ${label.toLowerCase()} position or drag it on the map`}
+      >
+        <option value="top-left">Top left</option>
+        <option value="top-right">Top right</option>
+        <option value="bottom-left">Bottom left</option>
+        <option value="bottom-right">Bottom right</option>
+        {value === "custom" && <option value="custom">Custom</option>}
+      </select>
+    </label>
   );
 }
 
@@ -1386,4 +1641,67 @@ function escapeHtml(value: string) {
 
 function formatDecimalGps(point: { lat: number; lng: number }) {
   return `${point.lat.toFixed(6)}, ${point.lng.toFixed(6)}`;
+}
+
+function formatDmsGps(point: { lat: number; lng: number }) {
+  return `${toDms(point.lat, true)}  ${toDms(point.lng, false)}`;
+}
+
+function toDms(value: number, latitude: boolean) {
+  const absolute = Math.abs(value);
+  const degrees = Math.floor(absolute);
+  const minutesFloat = (absolute - degrees) * 60;
+  const minutes = Math.floor(minutesFloat);
+  const seconds = (minutesFloat - minutes) * 60;
+  const direction = latitude ? (value >= 0 ? "N" : "S") : value >= 0 ? "E" : "W";
+  return `${degrees}°${String(minutes).padStart(2, "0")}′${seconds.toFixed(2).padStart(5, "0")}″${direction}`;
+}
+
+function furnitureLabel(key: PrintFurnitureKey) {
+  return key === "attribution" ? "source credit" : key === "scale" ? "scale bar" : key;
+}
+
+function measureScaleBar(map: MlMap) {
+  const container = map.getContainer();
+  const width = container.clientWidth;
+  const height = container.clientHeight;
+  if (!width || !height) return null;
+  const targetPixels = Math.max(52, Math.min(112, width * 0.22));
+  const a = map.unproject([width / 2 - targetPixels / 2, height / 2]);
+  const b = map.unproject([width / 2 + targetPixels / 2, height / 2]);
+  const availableMeters = haversineMeters(a.lat, a.lng, b.lat, b.lng);
+  const availableMiles = availableMeters / 1609.344;
+  const useMiles = availableMiles >= 0.2;
+  const available = useMiles ? availableMiles : availableMeters * 3.28084;
+  const distance = niceDistance(available);
+  const actualPixels = targetPixels * (distance / available);
+  return {
+    label: useMiles ? `${formatScaleNumber(distance)} mi` : `${formatScaleNumber(distance)} ft`,
+    widthPercent: Math.max(8, Math.min(34, (actualPixels / width) * 100)),
+  };
+}
+
+function niceDistance(maximum: number) {
+  if (!Number.isFinite(maximum) || maximum <= 0) return 1;
+  const power = 10 ** Math.floor(Math.log10(maximum));
+  const normalized = maximum / power;
+  const step = normalized >= 5 ? 5 : normalized >= 2 ? 2 : 1;
+  return step * power;
+}
+
+function formatScaleNumber(value: number) {
+  if (value >= 10) return Math.round(value).toLocaleString();
+  if (value >= 1) return Number(value.toFixed(1)).toString();
+  return Number(value.toFixed(2)).toString();
+}
+
+function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: number) {
+  const radians = (degrees: number) => (degrees * Math.PI) / 180;
+  const earthRadius = 6_371_008.8;
+  const deltaLat = radians(lat2 - lat1);
+  const deltaLng = radians(lng2 - lng1);
+  const a =
+    Math.sin(deltaLat / 2) ** 2 +
+    Math.cos(radians(lat1)) * Math.cos(radians(lat2)) * Math.sin(deltaLng / 2) ** 2;
+  return 2 * earthRadius * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }

@@ -658,6 +658,7 @@ export function MapCanvas() {
                 onClick={() => setDraft((d) => d.slice(0, -1))}
                 className="rounded-full p-1 hover:bg-muted"
                 aria-label="Undo last point"
+                title="Remove the last point"
               >
                 <Undo2 className="size-3.5" />
               </button>
@@ -677,6 +678,7 @@ export function MapCanvas() {
               }}
               className="rounded-full p-1 hover:bg-muted"
               aria-label="Cancel"
+              title="Cancel the current drawing"
             >
               <X className="size-3.5" />
             </button>
@@ -706,6 +708,7 @@ export function MapCanvas() {
           <button
             className="absolute inset-0 z-30 cursor-default"
             aria-label="Close menu"
+            title="Close map menu"
             onClick={() => setMenu(null)}
             onContextMenu={(e) => {
               e.preventDefault();

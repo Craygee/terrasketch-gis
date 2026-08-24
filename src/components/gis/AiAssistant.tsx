@@ -197,6 +197,7 @@ export function AiAssistant() {
       <button
         className="flex-1 bg-foreground/20 backdrop-blur-[2px]"
         aria-label="Close AI"
+        title="Close the AI assistant"
         onClick={() => setAssistantOpen(false)}
       />
       <aside
@@ -216,6 +217,7 @@ export function AiAssistant() {
           <button
             onClick={() => setAssistantOpen(false)}
             aria-label="Close AI"
+            title="Close the AI assistant"
             className="ml-auto rounded-lg p-1.5 hover:bg-accent"
           >
             <X className="size-4" />
@@ -389,6 +391,7 @@ export function AiAssistant() {
               type="submit"
               disabled={!prompt.trim()}
               aria-label="Send request"
+              title="Send this request to LandDraft AI"
               className="flex size-8 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground disabled:opacity-40"
             >
               <ArrowUp className="size-4" />

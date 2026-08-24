@@ -93,6 +93,7 @@ export type PrintAnnotation =
       color: string;
       showCoordinates: boolean;
       gpsOnly?: boolean;
+      coordinateFormat?: "decimal" | "dms";
     }
   | {
       id: string;
@@ -105,8 +106,20 @@ export type PrintAnnotation =
       color: string;
       backgroundColor: string;
       textColor: string;
-      contentMode: "label" | "label-gps" | "gps";
+      contentMode: "label" | "label-gps" | "gps" | "label-dms" | "dms";
     };
+
+export type PrintFurnitureCorner =
+  "top-left" | "top-right" | "bottom-left" | "bottom-right" | "custom";
+
+export interface PrintFurniturePosition {
+  corner: PrintFurnitureCorner;
+  /** Position within the map frame, as percentages. Used after dragging. */
+  x: number;
+  y: number;
+}
+
+export type PrintFurnitureKey = "legend" | "compass" | "scale" | "attribution";
 
 export interface PrintComposition {
   title: string;
@@ -121,6 +134,7 @@ export interface PrintComposition {
   showAttribution: boolean;
   frameBorder: boolean;
   frame: { x: number; y: number; width: number; height: number };
+  furniture: Record<PrintFurnitureKey, PrintFurniturePosition>;
   includedLayerIds: string[];
   legendItems: Record<string, { visible: boolean; name: string }>;
   annotations: PrintAnnotation[];

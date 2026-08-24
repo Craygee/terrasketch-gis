@@ -294,4 +294,8 @@
     box-shadow: none !important;
     break-inside: avoid;
   }
+
+  .print-composer-page .maplibregl-ctrl-top-left {
+    display: none !important;
+  }
 }

@@ -139,6 +139,7 @@ export function AttributeTable() {
           <button
             onClick={() => setTableOpen(false)}
             aria-label="Close table"
+            title="Close the attribute table"
             className="rounded-lg p-1 hover:bg-accent"
           >
             <X className="size-4" />
@@ -269,6 +270,7 @@ export function AttributeTable() {
                           }
                         }}
                         aria-label="Zoom to feature"
+                        title="Zoom the map to this feature"
                         className="rounded p-1 text-primary hover:bg-accent"
                       >
                         <Crosshair className="size-3.5" />

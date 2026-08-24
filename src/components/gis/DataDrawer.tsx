@@ -178,6 +178,7 @@ export function DataDrawer() {
       <button
         className="flex-1 bg-foreground/20 backdrop-blur-[2px]"
         aria-label="Close data drawer"
+        title="Close the public data library"
         onClick={() => setDrawerOpen(false)}
       />
       <aside className="panel-surface flex h-full w-full max-w-md flex-col overflow-hidden md:rounded-l-2xl">
@@ -187,6 +188,7 @@ export function DataDrawer() {
           <button
             onClick={() => setDrawerOpen(false)}
             aria-label="Close"
+            title="Close the public data library"
             className="ml-auto rounded-lg p-1 hover:bg-accent"
           >
             <X className="size-4" />

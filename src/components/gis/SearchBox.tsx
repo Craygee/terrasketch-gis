@@ -76,7 +76,7 @@ export function SearchBox() {
         />
         {loading && <Loader2 className="size-4 animate-spin text-primary" />}
         {query && !loading && (
-          <button onClick={() => setQuery("")} aria-label="Clear search">
+          <button onClick={() => setQuery("")} aria-label="Clear search" title="Clear search">
             <X className="size-4 text-muted-foreground" />
           </button>
         )}

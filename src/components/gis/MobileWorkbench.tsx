@@ -105,6 +105,7 @@ function MobileShell() {
         <button
           onClick={() => setSheet(sheet === "projects" ? null : "projects")}
           aria-label="Projects and account"
+          title="Open projects and account settings"
           className="float-surface pointer-events-auto rounded-2xl p-3"
         >
           <FolderOpen className="size-4" />
@@ -130,6 +131,7 @@ function MobileShell() {
             <button
               onClick={() => setSheet(null)}
               aria-label="Close"
+              title="Close this panel"
               className="ml-auto rounded-xl p-2 hover:bg-accent"
             >
               <X className="size-4" />
@@ -227,6 +229,8 @@ function NavButton({
   return (
     <button
       onClick={onClick}
+      title={label}
+      aria-label={label}
       className={cn(
         "flex flex-col items-center justify-center gap-0.5 rounded-xl text-[10px] font-medium",
         active ? "bg-primary text-primary-foreground" : "hover:bg-accent",
