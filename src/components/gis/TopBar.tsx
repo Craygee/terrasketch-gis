@@ -9,6 +9,8 @@ import {
   FileDown,
   Sparkles,
   Printer,
+  Beaker,
+  PlayCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -19,6 +21,7 @@ import { cn } from "@/lib/utils";
 import { ExportPanel } from "./ExportMenu";
 import { ProjectMenu } from "./ProjectMenu";
 import { LandDraftMark } from "@/components/brand/LandDraftMark";
+import { useTours } from "./TourProvider";
 
 export function TopBar({
   onTogglePanel,
@@ -29,8 +32,17 @@ export function TopBar({
 }) {
   const wb = useWorkbench();
   const auth = useAuth();
-  const { setDrawerOpen, setTableOpen, tableOpen, assistantOpen, setAssistantOpen, setPrintOpen } =
-    useMapRef();
+  const {
+    setDrawerOpen,
+    setTableOpen,
+    tableOpen,
+    assistantOpen,
+    setAssistantOpen,
+    setPrintOpen,
+    analysisOpen,
+    setAnalysisOpen,
+  } = useMapRef();
+  const { startTour, featureTips, setFeatureTips } = useTours();
   const [showAbout, setShowAbout] = useState(false);
   const [showProjects, setShowProjects] = useState(false);
   const [showExport, setShowExport] = useState(false);
@@ -89,18 +101,28 @@ export function TopBar({
           help="Ask LandDraft AI to search, select, explain, or report"
           onClick={() => setAssistantOpen(!assistantOpen)}
           primary
+          tourId="top-ai"
         />
         <BarBtn
           icon={<Database className="size-4" />}
           label="Public data"
           help="Find and add official public datasets"
           onClick={() => setDrawerOpen(true)}
+          tourId="top-public-data"
+        />
+        <BarBtn
+          icon={<Beaker className="size-4" />}
+          label="Analysis"
+          help="Create buffers, centroids, intersections and other derived layers"
+          onClick={() => setAnalysisOpen(!analysisOpen)}
+          tourId="top-analysis"
         />
         <BarBtn
           icon={<Table2 className="size-4" />}
           label="Table"
           help="Search and edit layer attribute tables"
           onClick={() => setTableOpen(!tableOpen)}
+          tourId="top-table"
         />
         <BarBtn
           icon={<Save className="size-4" />}
@@ -113,6 +135,7 @@ export function TopBar({
           label="Print map"
           help="Open the printable map composer"
           onClick={() => setPrintOpen(true)}
+          tourId="top-print"
         />
         <BarBtn
           icon={<FolderOpen className="size-4" />}
@@ -122,6 +145,7 @@ export function TopBar({
             setShowProjects((value) => !value);
             setShowExport(false);
           }}
+          tourId="top-projects"
         />
         <BarBtn
           icon={<FileDown className="size-4" />}
@@ -131,11 +155,13 @@ export function TopBar({
             setShowExport((value) => !value);
             setShowProjects(false);
           }}
+          tourId="top-export"
         />
         <button
           onClick={() => setShowAbout((s) => !s)}
           aria-label="About and disclaimers"
           title="About LandDraft and mapping disclaimers"
+          data-tour="top-info"
           className="rounded-xl p-2 text-muted-foreground transition-colors hover:bg-accent"
         >
           <Info className="size-4" />
@@ -162,7 +188,57 @@ export function TopBar({
 
       {showAbout && (
         <div className="float-surface absolute right-2 top-14 w-80 rounded-2xl p-4 text-xs leading-relaxed">
-          <h2 className="mb-1 text-sm font-semibold">About LandDraft</h2>
+          <h2 className="text-sm font-semibold">Help & tours</h2>
+          <p className="mt-1 text-muted-foreground">
+            Replay a walkthrough at any time. Tours point to the controls on the real screen.
+          </p>
+          <div className="mt-3 grid grid-cols-2 gap-1.5">
+            <button
+              onClick={() => {
+                setShowAbout(false);
+                startTour("basic");
+              }}
+              className="flex items-center gap-1.5 rounded-xl bg-primary px-3 py-2 font-semibold text-primary-foreground"
+            >
+              <PlayCircle className="size-3.5" /> Quick tour
+            </button>
+            <button
+              onClick={() => {
+                setShowAbout(false);
+                startTour("advanced");
+              }}
+              className="rounded-xl bg-secondary px-3 py-2 font-semibold hover:bg-accent"
+            >
+              Advanced tour
+            </button>
+            <button
+              onClick={() => {
+                setShowAbout(false);
+                startTour("print");
+              }}
+              className="col-span-2 rounded-xl bg-secondary px-3 py-2 font-semibold hover:bg-accent"
+            >
+              Print map tour
+            </button>
+          </div>
+          <label className="mt-3 flex items-center gap-2 rounded-xl border border-border px-3 py-2">
+            <input
+              type="checkbox"
+              checked={featureTips}
+              onChange={(event) => setFeatureTips(event.target.checked)}
+              className="accent-primary"
+            />
+            <span>
+              <strong className="block font-semibold">Offer tours for major new features</strong>
+              <span className="text-[10px] text-muted-foreground">
+                You can turn this back on even if you skipped the welcome tour.
+              </span>
+            </span>
+          </label>
+
+          <h3 className="mb-1 mt-4 border-t border-border pt-3 text-sm font-semibold">
+            About LandDraft
+          </h3>
           <p className="text-muted-foreground">
             A friendly browser workbench for maps: bring your own files, stream official public
             datasets, draw, measure, label and organize multiple projects.
@@ -190,18 +266,21 @@ function BarBtn({
   onClick,
   primary,
   help,
+  tourId,
 }: {
   icon: React.ReactNode;
   label: string;
   onClick: () => void;
   primary?: boolean;
   help?: string;
+  tourId?: string;
 }) {
   return (
     <button
       onClick={onClick}
       title={help ?? label}
       aria-label={label}
+      data-tour={tourId}
       className={cn(
         "flex items-center gap-1.5 rounded-xl px-2.5 py-2 text-xs font-medium transition-colors",
         primary

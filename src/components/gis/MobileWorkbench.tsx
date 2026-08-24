@@ -8,6 +8,9 @@ import {
   Printer,
   Sparkles,
   X,
+  Beaker,
+  Info,
+  PlayCircle,
 } from "lucide-react";
 import { Toaster } from "@/components/ui/sonner";
 import { WorkbenchProvider, useWorkbench } from "@/lib/gis/store";
@@ -27,6 +30,7 @@ import { AuthGate } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 import { LandDraftMark } from "@/components/brand/LandDraftMark";
 import { FeatureDestinationDialog } from "./FeatureDestinationDialog";
+import { TourProvider, useTours } from "./TourProvider";
 
 const AiAssistant = lazy(() =>
   import("./AiAssistant").then((module) => ({ default: module.AiAssistant })),
@@ -34,29 +38,42 @@ const AiAssistant = lazy(() =>
 const PrintComposer = lazy(() =>
   import("./PrintComposer").then((module) => ({ default: module.PrintComposer })),
 );
+const SpatialAnalysisPanel = lazy(() =>
+  import("./SpatialAnalysisPanel").then((module) => ({ default: module.SpatialAnalysisPanel })),
+);
 
 export default function MobileWorkbench() {
   return (
     <AuthGate>
       <WorkbenchProvider>
         <MapRefProvider>
-          <MobileShell />
-          <RemoteLayerManager />
-          <FeatureDestinationDialog />
-          <Toaster />
+          <TourProvider>
+            <MobileShell />
+            <RemoteLayerManager />
+            <FeatureDestinationDialog />
+            <Toaster />
+          </TourProvider>
         </MapRefProvider>
       </WorkbenchProvider>
     </AuthGate>
   );
 }
 
-type Sheet = "layers" | "draw" | "export" | "projects" | null;
+type Sheet = "layers" | "data" | "draw" | "export" | "projects" | "help" | null;
 
 function MobileShell() {
   const [sheet, setSheet] = useState<Sheet>(null);
   const wb = useWorkbench();
-  const { setDrawerOpen, tableOpen, assistantOpen, setAssistantOpen, printOpen, setPrintOpen } =
-    useMapRef();
+  const {
+    setDrawerOpen,
+    tableOpen,
+    assistantOpen,
+    setAssistantOpen,
+    printOpen,
+    setPrintOpen,
+    analysisOpen,
+    setAnalysisOpen,
+  } = useMapRef();
 
   if (!wb.projectReady)
     return (
@@ -101,20 +118,32 @@ function MobileShell() {
             ))}
           </select>
         </div>
-        <div className="pointer-events-auto ml-auto">
+        <div data-tour="map-search" className="pointer-events-auto ml-auto">
           <SearchBox />
         </div>
+        <button
+          onClick={() => setSheet(sheet === "help" ? null : "help")}
+          aria-label="Help and tours"
+          title="Help and tours"
+          className="float-surface pointer-events-auto rounded-2xl p-3"
+        >
+          <Info className="size-4" />
+        </button>
         <button
           onClick={() => setSheet(sheet === "projects" ? null : "projects")}
           aria-label="Projects and account"
           title="Open projects and account settings"
           className="float-surface pointer-events-auto rounded-2xl p-3"
+          data-tour="top-projects"
         >
           <FolderOpen className="size-4" />
         </button>
       </header>
 
-      <div className="pointer-events-auto absolute bottom-20 right-14 z-20">
+      <div
+        data-tour="basemap-control"
+        className="pointer-events-auto absolute bottom-20 right-14 z-20"
+      >
         <BasemapControl />
       </div>
 
@@ -124,11 +153,15 @@ function MobileShell() {
             <h2 className="text-sm font-semibold">
               {sheet === "layers"
                 ? "Layers"
-                : sheet === "draw"
-                  ? "Draw and measure"
-                  : sheet === "projects"
-                    ? "Projects and settings"
-                    : "Export"}
+                : sheet === "data"
+                  ? "Data & analysis"
+                  : sheet === "draw"
+                    ? "Draw and measure"
+                    : sheet === "help"
+                      ? "Help & tours"
+                      : sheet === "projects"
+                        ? "Projects and settings"
+                        : "Export"}
             </h2>
             <button
               onClick={() => setSheet(null)}
@@ -140,13 +173,48 @@ function MobileShell() {
             </button>
           </div>
           {sheet === "layers" ? (
-            <div className="h-[54dvh]">
+            <div data-tour="layer-panel" className="h-[54dvh]">
               <LayerPanel />
+            </div>
+          ) : sheet === "data" ? (
+            <div className="grid gap-2 p-4">
+              <button
+                onClick={() => {
+                  setSheet(null);
+                  setDrawerOpen(true);
+                }}
+                className="flex items-center gap-3 rounded-2xl bg-secondary p-4 text-left"
+              >
+                <Database className="size-5 text-primary" />
+                <span>
+                  <strong className="block text-sm">Public data</strong>
+                  <span className="text-[10px] text-muted-foreground">
+                    Search official datasets and add visible-area layers.
+                  </span>
+                </span>
+              </button>
+              <button
+                onClick={() => {
+                  setSheet(null);
+                  setAnalysisOpen(true);
+                }}
+                className="flex items-center gap-3 rounded-2xl bg-secondary p-4 text-left"
+              >
+                <Beaker className="size-5 text-primary" />
+                <span>
+                  <strong className="block text-sm">Spatial analysis</strong>
+                  <span className="text-[10px] text-muted-foreground">
+                    Buffer, merge, intersect, erase, find centers and hulls.
+                  </span>
+                </span>
+              </button>
             </div>
           ) : sheet === "draw" ? (
             <div className="overflow-x-auto p-3">
               <DrawToolbar />
             </div>
+          ) : sheet === "help" ? (
+            <MobileTourMenu onDone={() => setSheet(null)} />
           ) : sheet === "projects" ? (
             <ProjectMenu onClose={() => setSheet(null)} />
           ) : (
@@ -161,6 +229,11 @@ function MobileShell() {
         </div>
       )}
       <DataDrawer />
+      {analysisOpen && (
+        <Suspense fallback={null}>
+          <SpatialAnalysisPanel />
+        </Suspense>
+      )}
       {assistantOpen && (
         <Suspense fallback={null}>
           <AiAssistant />
@@ -177,25 +250,27 @@ function MobileShell() {
           active={sheet === "layers"}
           icon={<Layers3 className="size-5" />}
           label="Layers"
+          tourId="layer-panel-button"
           onClick={() => setSheet(sheet === "layers" ? null : "layers")}
         />
         <NavButton
           icon={<Database className="size-5" />}
           label="Data"
-          onClick={() => {
-            setSheet(null);
-            setDrawerOpen(true);
-          }}
+          active={sheet === "data"}
+          tourId="top-public-data"
+          onClick={() => setSheet(sheet === "data" ? null : "data")}
         />
         <NavButton
           active={sheet === "draw"}
           icon={<PencilRuler className="size-5" />}
           label="Draw"
+          tourId="draw-toolbar"
           onClick={() => setSheet(sheet === "draw" ? null : "draw")}
         />
         <NavButton
           icon={<Sparkles className="size-5" />}
           label="AI"
+          tourId="top-ai"
           onClick={() => {
             setSheet(null);
             setAssistantOpen(true);
@@ -207,6 +282,7 @@ function MobileShell() {
             sheet === "export" ? <FileDown className="size-5" /> : <Printer className="size-5" />
           }
           label="Print / export"
+          tourId="top-print"
           onClick={() => {
             if (sheet === "export") setPrintOpen(true);
             else setSheet("export");
@@ -222,11 +298,13 @@ function NavButton({
   label,
   onClick,
   active,
+  tourId,
 }: {
   icon: React.ReactNode;
   label: string;
   onClick: () => void;
   active?: boolean;
+  tourId?: string;
 }) {
   return (
     <button
@@ -238,9 +316,49 @@ function NavButton({
         active ? "bg-primary text-primary-foreground" : "hover:bg-accent",
       )}
       aria-pressed={active}
+      data-tour={tourId}
     >
       {icon}
       {label}
     </button>
+  );
+}
+
+function MobileTourMenu({ onDone }: { onDone: () => void }) {
+  const { startTour, featureTips, setFeatureTips } = useTours();
+  const launch = (kind: "basic" | "advanced" | "print") => {
+    onDone();
+    startTour(kind);
+  };
+  return (
+    <div className="space-y-2 p-4 text-xs">
+      <button
+        onClick={() => launch("basic")}
+        className="flex w-full items-center gap-2 rounded-xl bg-primary px-4 py-3 font-semibold text-primary-foreground"
+      >
+        <PlayCircle className="size-4" /> Quick tour
+      </button>
+      <button
+        onClick={() => launch("advanced")}
+        className="w-full rounded-xl bg-secondary px-4 py-3 text-left font-semibold"
+      >
+        Advanced tour
+      </button>
+      <button
+        onClick={() => launch("print")}
+        className="w-full rounded-xl bg-secondary px-4 py-3 text-left font-semibold"
+      >
+        Print map tour
+      </button>
+      <label className="flex items-start gap-2 rounded-xl border border-border p-3">
+        <input
+          type="checkbox"
+          checked={featureTips}
+          onChange={(event) => setFeatureTips(event.target.checked)}
+          className="mt-0.5 accent-primary"
+        />
+        Offer tours when major new features are added
+      </label>
+    </div>
   );
 }

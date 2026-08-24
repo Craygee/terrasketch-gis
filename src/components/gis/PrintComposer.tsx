@@ -32,6 +32,16 @@ import { cn } from "@/lib/utils";
 
 const uid = () => window.crypto.randomUUID();
 
+const defaultPrintFrame = (
+  paper: PrintComposition["paper"],
+  orientation: PrintComposition["orientation"],
+): PrintComposition["frame"] => {
+  if (orientation === "portrait") return { x: 6, y: 10, width: 88, height: 86 };
+  return paper === "legal"
+    ? { x: 4, y: 12, width: 92, height: 82 }
+    : { x: 4, y: 12, width: 92, height: 82 };
+};
+
 const defaultComposition = (
   projectName: string,
   layers: GisLayer[],
@@ -48,7 +58,7 @@ const defaultComposition = (
   showDate: false,
   showAttribution: true,
   frameBorder: true,
-  frame: { x: 5, y: 14, width: 90, height: 78 },
+  frame: defaultPrintFrame("letter", "landscape"),
   furniture: {
     legend: { corner: "bottom-right", x: 82, y: 72 },
     compass: { corner: "top-right", x: 91, y: 11 },
@@ -76,22 +86,28 @@ export function PrintComposer() {
     : undefined;
   const [composition, setComposition] = useState<PrintComposition>(() => {
     const base = wb.printComposition ?? defaultComposition(wb.projectName, wb.displayLayers);
+    const normalizedBase =
+      base.annotations.length === 0 && base.frame.width < 75
+        ? { ...base, frame: defaultPrintFrame(base.paper, base.orientation) }
+        : base;
     const known = new Set(wb.displayLayers.map((layer) => layer.id));
-    const included = base.includedLayerIds.filter((id) => known.has(id));
+    const included = normalizedBase.includedLayerIds.filter((id) => known.has(id));
     const legendItems = Object.fromEntries(
       wb.displayLayers.map((layer) => [
         layer.id,
-        base.legendItems?.[layer.id] ?? { visible: layer.visible, name: layer.name },
+        normalizedBase.legendItems?.[layer.id] ?? { visible: layer.visible, name: layer.name },
       ]),
     );
     return {
       ...defaultComposition(wb.projectName, wb.displayLayers, liveView),
-      ...base,
+      ...normalizedBase,
       furniture: {
         ...defaultComposition(wb.projectName, wb.displayLayers, liveView).furniture,
-        ...(base.furniture ?? {}),
+        ...(normalizedBase.furniture ?? {}),
       },
-      ...((liveView ?? base.mapView) ? { mapView: liveView ?? base.mapView } : {}),
+      ...((liveView ?? normalizedBase.mapView)
+        ? { mapView: liveView ?? normalizedBase.mapView }
+        : {}),
       includedLayerIds:
         included.length > 0
           ? included
@@ -508,7 +524,7 @@ export function PrintComposer() {
     bounds.extend([lngLat.lng, lngLat.lat]);
     update({
       annotations,
-      frame: { ...composition.frame, x: 18, width: 64 },
+      frame: { ...composition.frame, x: 8, width: 84 },
     });
     setSelectedId(item.id);
     setPlacementMode(null);
@@ -555,6 +571,11 @@ export function PrintComposer() {
       bearing: liveMap.getBearing(),
       pitch: liveMap.getPitch(),
     });
+  };
+
+  const resetFrame = () => {
+    update({ frame: defaultPrintFrame(composition.paper, composition.orientation) });
+    window.setTimeout(() => printMapRef.current?.resize(), 90);
   };
 
   const close = () => {
@@ -635,7 +656,7 @@ export function PrintComposer() {
             A saved composition—your project map stays unchanged
           </p>
         </div>
-        <div className="ml-auto flex items-center gap-1">
+        <div data-tour="print-tools" className="ml-auto flex items-center gap-1">
           <ComposerButton icon={<Type />} label="Text" onClick={() => addAnnotation("text")} />
           <ComposerButton
             icon={<Minus />}
@@ -677,6 +698,7 @@ export function PrintComposer() {
           <ComposerButton icon={<RotateCcw />} label="Project view" onClick={resetView} />
           <button
             onClick={() => window.print()}
+            data-tour="print-output"
             className="ml-1 flex shrink-0 items-center gap-1.5 rounded-xl bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground"
           >
             <Printer className="size-4" /> Print / Save PDF
@@ -685,19 +707,32 @@ export function PrintComposer() {
       </header>
 
       <div className="flex min-h-0 flex-1">
-        <aside className="print-composer-ui w-64 shrink-0 overflow-y-auto border-r border-border bg-card p-3 text-xs">
+        <aside
+          data-tour="print-settings"
+          className="print-composer-ui w-64 shrink-0 overflow-y-auto border-r border-border bg-card p-3 text-xs"
+        >
           <h2 className="mb-2 font-semibold">Page</h2>
           <div className="grid grid-cols-2 gap-2">
             <Select
               value={composition.paper}
-              onChange={(paper) => update({ paper: paper as PrintComposition["paper"] })}
+              onChange={(paper) => {
+                const nextPaper = paper as PrintComposition["paper"];
+                update({
+                  paper: nextPaper,
+                  frame: defaultPrintFrame(nextPaper, composition.orientation),
+                });
+              }}
               options={["letter", "legal", "a4"]}
             />
             <Select
               value={composition.orientation}
-              onChange={(orientation) =>
-                update({ orientation: orientation as PrintComposition["orientation"] })
-              }
+              onChange={(orientation) => {
+                const nextOrientation = orientation as PrintComposition["orientation"];
+                update({
+                  orientation: nextOrientation,
+                  frame: defaultPrintFrame(composition.paper, nextOrientation),
+                });
+              }}
               options={["landscape", "portrait"]}
             />
           </div>
@@ -905,7 +940,19 @@ export function PrintComposer() {
               Clear markers
             </button>
             <button
-              onClick={() => update({ annotations: [] })}
+              data-tour="print-reset"
+              onClick={resetFrame}
+              className="col-span-2 flex items-center justify-center gap-1 rounded-lg border border-border px-2 py-2 text-[10px] font-medium hover:bg-accent"
+            >
+              <RotateCcw className="size-3" /> Reset map size & position
+            </button>
+            <button
+              onClick={() =>
+                update({
+                  annotations: [],
+                  frame: defaultPrintFrame(composition.paper, composition.orientation),
+                })
+              }
               className="col-span-2 rounded-lg border border-destructive/30 px-2 py-2 text-[10px] font-medium text-destructive"
             >
               Clear all print additions
@@ -931,6 +978,7 @@ export function PrintComposer() {
           )}
           <div
             ref={pageRef}
+            data-tour="print-page"
             className="print-composer-page relative mx-auto overflow-hidden bg-white shadow-2xl"
             style={{
               aspectRatio: pageRatio,
