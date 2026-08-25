@@ -115,7 +115,7 @@ export function buildLayerSpecs(layer: GisLayer, map: MlMap): LayerSpecification
           categorized.fallbackVisible ? opacity : 0,
         ]
       : opacity;
-  const shownFilter = ["!=", ["get", "__hidden"], true];
+  const shownFilter = ["!", ["boolean", ["get", "__hidden"], false]];
   const geometryFilter = (filter: unknown[]) => ["all", filter, shownFilter];
   const fillPaint: Record<string, unknown> = patternId
     ? { "fill-pattern": patternId, "fill-opacity": s.fillOpacity }
@@ -129,7 +129,7 @@ export function buildLayerSpecs(layer: GisLayer, map: MlMap): LayerSpecification
       id: fillId(layer.id),
       type: "fill",
       source: src,
-      filter: geometryFilter(["==", "$type", "Polygon"]) as never,
+      filter: geometryFilter(["==", ["geometry-type"], "Polygon"]) as never,
       paint: fillPaint as never,
       ...zoomRange,
     },
@@ -137,7 +137,13 @@ export function buildLayerSpecs(layer: GisLayer, map: MlMap): LayerSpecification
       id: lineId(layer.id),
       type: "line",
       source: src,
-      filter: geometryFilter(["in", "$type", "LineString", "Polygon"]) as never,
+      filter: geometryFilter([
+        "match",
+        ["geometry-type"],
+        ["LineString", "Polygon"],
+        true,
+        false,
+      ]) as never,
       layout: { "line-cap": "round", "line-join": "round" },
       paint: {
         "line-color": categoryMatch(categorized?.fallbackColor ?? s.strokeColor) as never,
@@ -151,7 +157,7 @@ export function buildLayerSpecs(layer: GisLayer, map: MlMap): LayerSpecification
       id: lineHitId(layer.id),
       type: "line",
       source: src,
-      filter: geometryFilter(["==", "$type", "LineString"]) as never,
+      filter: geometryFilter(["==", ["geometry-type"], "LineString"]) as never,
       layout: { "line-cap": "round", "line-join": "round" },
       paint: {
         "line-color": "#000000",
@@ -164,7 +170,7 @@ export function buildLayerSpecs(layer: GisLayer, map: MlMap): LayerSpecification
       id: pointId(layer.id),
       type: "circle",
       source: src,
-      filter: geometryFilter(["==", "$type", "Point"]) as never,
+      filter: geometryFilter(["==", ["geometry-type"], "Point"]) as never,
       paint: {
         "circle-radius": s.pointSize,
         "circle-color": categoryMatch(categorized?.fallbackColor ?? s.fillColor) as never,
@@ -178,7 +184,13 @@ export function buildLayerSpecs(layer: GisLayer, map: MlMap): LayerSpecification
       id: highlightId(layer.id),
       type: "line",
       source: src,
-      filter: geometryFilter(["in", "$type", "LineString", "Polygon"]) as never,
+      filter: geometryFilter([
+        "match",
+        ["geometry-type"],
+        ["LineString", "Polygon"],
+        true,
+        false,
+      ]) as never,
       paint: {
         "line-color": "#f2b73d",
         "line-width": s.strokeWidth + 3,
