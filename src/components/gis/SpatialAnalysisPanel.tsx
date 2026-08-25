@@ -9,7 +9,7 @@ import {
   union,
 } from "@turf/turf";
 import type { Feature, Geometry, Polygon, MultiPolygon } from "geojson";
-import { Beaker, ChevronDown, Loader2, Sparkles, X } from "lucide-react";
+import { Beaker, ChevronDown, Loader2, Sparkles, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { useWorkbench } from "@/lib/gis/store";
@@ -17,6 +17,15 @@ import { useMapRef } from "@/lib/gis/mapRef";
 
 type Operation = "buffer" | "centroid" | "union" | "intersect" | "difference" | "convex";
 type PolygonFeature = Feature<Polygon | MultiPolygon>;
+type AnalysisResult = {
+  id: string;
+  kind: "layer" | "features";
+  layerId: string;
+  layerName: string;
+  analysisName: string;
+  featureCount: number;
+  featureIndexes: number[];
+};
 
 const operations: Array<{ id: Operation; name: string; description: string }> = [
   {
@@ -71,6 +80,69 @@ export function SpatialAnalysisPanel() {
   );
   const selectedOperation = operations.find((item) => item.id === operation) ?? operations[0]!;
   const needsOverlay = operation === "intersect" || operation === "difference";
+  const analysisResults = useMemo<AnalysisResult[]>(() => {
+    const results: AnalysisResult[] = [];
+    wb.layers.forEach((layer) => {
+      const analysisFeatures = layer.data.features
+        .map((feature, index) => ({
+          index,
+          name: feature.properties?.["ANALYSIS"],
+          runId: feature.properties?.["ANALYSIS_RUN_ID"],
+          analyzedAt: feature.properties?.["ANALYZED_AT"],
+        }))
+        .filter((item): item is typeof item & { name: string } => typeof item.name === "string");
+      if (analysisFeatures.length === 0) return;
+
+      const derivedQuery = layer.source.kind === "derived" ? layer.source.query : undefined;
+      const isAnalysisLayer =
+        layer.source.kind === "derived" &&
+        (typeof derivedQuery === "string" ||
+          analysisFeatures.length === layer.data.features.length);
+      if (isAnalysisLayer) {
+        results.push({
+          id: `layer:${layer.id}`,
+          kind: "layer",
+          layerId: layer.id,
+          layerName: layer.name,
+          analysisName: String(derivedQuery ?? analysisFeatures[0]?.name ?? "Analysis"),
+          featureCount: layer.data.features.length,
+          featureIndexes: [],
+        });
+        return;
+      }
+
+      const batches = new Map<string, { name: string; indexes: number[] }>();
+      analysisFeatures.forEach((item) => {
+        const batchId =
+          typeof item.runId === "string" && item.runId
+            ? item.runId
+            : `${item.name}:${String(item.analyzedAt ?? "legacy")}`;
+        const batch = batches.get(batchId) ?? { name: item.name, indexes: [] as number[] };
+        batch.indexes.push(item.index);
+        batches.set(batchId, batch);
+      });
+      batches.forEach((batch, batchId) =>
+        results.push({
+          id: `features:${layer.id}:${batchId}`,
+          kind: "features",
+          layerId: layer.id,
+          layerName: layer.name,
+          analysisName: batch.name,
+          featureCount: batch.indexes.length,
+          featureIndexes: batch.indexes,
+        }),
+      );
+    });
+    return results;
+  }, [wb.layers]);
+
+  const removeAnalysisResult = (result: AnalysisResult) => {
+    const target = result.kind === "layer" ? result.layerName : `${result.analysisName} additions`;
+    if (!window.confirm(`Remove ${target}?`)) return;
+    if (result.kind === "layer") wb.removeLayers([result.layerId]);
+    else wb.removeFeatures(result.layerId, result.featureIndexes);
+    toast.success(`${target} removed`);
+  };
 
   const runAnalysis = () => {
     if (!inputLayer) {
@@ -102,13 +174,22 @@ export function SpatialAnalysisPanel() {
     setRunning(true);
     window.setTimeout(() => {
       try {
+        const analyzedAt = new Date().toISOString();
+        const analysisRunId = `analysis-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
         const output = analyze(
           operation,
           inputs,
           overlayLayer?.data.features ?? [],
           distance,
           units,
-        );
+        ).map((feature) => ({
+          ...feature,
+          properties: {
+            ...(feature.properties ?? {}),
+            ANALYSIS_RUN_ID: analysisRunId,
+            ANALYZED_AT: analyzedAt,
+          },
+        }));
         if (output.length === 0) {
           toast.info("The analysis produced no features", {
             description: "Try a different selection, distance, or overlay layer.",
@@ -286,6 +367,46 @@ export function SpatialAnalysisPanel() {
               Results open in the standard destination dialog so you can create a new Working layer,
               choose another category, or append compatible features to an existing layer.
             </p>
+
+            {analysisResults.length > 0 && (
+              <details className="group rounded-2xl border border-border bg-card/60">
+                <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 font-semibold">
+                  <ChevronDown className="size-3.5 -rotate-90 transition-transform group-open:rotate-0" />
+                  Analysis results on map
+                  <span className="ml-auto rounded-full bg-secondary px-2 py-0.5 text-[10px]">
+                    {analysisResults.length}
+                  </span>
+                </summary>
+                <div className="space-y-1 border-t border-border p-2">
+                  {analysisResults.map((result) => (
+                    <div
+                      key={result.id}
+                      className="flex items-center gap-2 rounded-xl px-2 py-2 hover:bg-secondary"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <strong className="block truncate text-[11px]">
+                          {result.kind === "layer" ? result.layerName : result.analysisName}
+                        </strong>
+                        <span className="block truncate text-[9px] text-muted-foreground">
+                          {result.featureCount.toLocaleString()} feature
+                          {result.featureCount === 1 ? "" : "s"}
+                          {result.kind === "features" ? ` added to ${result.layerName}` : ""}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => removeAnalysisResult(result)}
+                        className="flex size-8 shrink-0 items-center justify-center rounded-lg text-destructive hover:bg-destructive/10"
+                        aria-label={`Remove ${result.analysisName} result from ${result.layerName}`}
+                        title="Remove this analysis result"
+                      >
+                        <Trash2 className="size-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </details>
+            )}
           </>
         )}
       </div>
