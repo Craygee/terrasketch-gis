@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { bbox as turfBbox } from "@turf/turf";
 import {
   Eye,
@@ -40,6 +40,8 @@ const exportFormats: Array<{ id: ExportFormat; label: string }> = [
   { id: "shp", label: "Shapefile (.zip)" },
 ];
 
+type LayerDropPosition = "before" | "after";
+
 export function LayerPanel() {
   const wb = useWorkbench();
   const { setTableOpen } = useMapRef();
@@ -51,10 +53,106 @@ export function LayerPanel() {
   const [expandedLayers, setExpandedLayers] = useState<Set<string>>(() => new Set());
   const [draggedLayerId, setDraggedLayerId] = useState<string | null>(null);
   const draggedLayerRef = useRef<string | null>(null);
+  const draggedPointerRef = useRef<number | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
+  const dropTargetRef = useRef<string | null>(null);
+  const layerListRef = useRef<HTMLDivElement>(null);
   const [duplicateTargets, setDuplicateTargets] = useState<Record<string, string>>({});
   const [groupStyleFor, setGroupStyleFor] = useState<string | null>(null);
   const visibleGroups = flattenVisibleGroups(wb.groups);
+
+  const updateDropTarget = (target: string | null) => {
+    if (dropTargetRef.current === target) return;
+    dropTargetRef.current = target;
+    setDropTarget(target);
+  };
+
+  const resetLayerDrag = () => {
+    draggedLayerRef.current = null;
+    draggedPointerRef.current = null;
+    dropTargetRef.current = null;
+    setDraggedLayerId(null);
+    setDropTarget(null);
+  };
+
+  const finishLayerDrag = () => {
+    const dragged = draggedLayerRef.current;
+    const target = dropTargetRef.current;
+    if (!dragged || !target) {
+      resetLayerDrag();
+      return;
+    }
+
+    if (target.startsWith("group:")) {
+      const groupId = target.slice("group:".length);
+      const group = wb.groups.find((item) => item.id === groupId);
+      wb.reorderLayer(dragged, groupId);
+      if (group) toast.success(`Layer moved to ${group.name}`);
+      resetLayerDrag();
+      return;
+    }
+
+    const [, targetLayerId, position] = target.split(":") as [string, string, LayerDropPosition];
+    const targetLayer = wb.layers.find((layer) => layer.id === targetLayerId);
+    if (!targetLayer || targetLayer.id === dragged) {
+      resetLayerDrag();
+      return;
+    }
+
+    let beforeLayerId: string | undefined = targetLayer.id;
+    if (position === "after") {
+      const targetGroupLayers = wb.layers.filter(
+        (layer) => layer.groupId === targetLayer.groupId && layer.id !== dragged,
+      );
+      const targetIndex = targetGroupLayers.findIndex((layer) => layer.id === targetLayer.id);
+      beforeLayerId = targetGroupLayers[targetIndex + 1]?.id;
+    }
+    wb.reorderLayer(dragged, targetLayer.groupId, beforeLayerId);
+    resetLayerDrag();
+  };
+
+  const updatePointerDropTarget = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (draggedPointerRef.current !== event.pointerId) return;
+    event.preventDefault();
+
+    const list = layerListRef.current;
+    if (list) {
+      const bounds = list.getBoundingClientRect();
+      if (event.clientY < bounds.top + 36) list.scrollBy({ top: -14 });
+      else if (event.clientY > bounds.bottom - 36) list.scrollBy({ top: 14 });
+    }
+
+    const hit = document.elementFromPoint(event.clientX, event.clientY);
+    const layerRow = hit?.closest<HTMLElement>("[data-layer-drop-id]");
+    const dragged = draggedLayerRef.current;
+    if (layerRow) {
+      const targetLayerId = layerRow.dataset["layerDropId"];
+      if (!targetLayerId || targetLayerId === dragged) {
+        updateDropTarget(null);
+        return;
+      }
+      const bounds = layerRow.getBoundingClientRect();
+      const position: LayerDropPosition =
+        event.clientY < bounds.top + bounds.height / 2 ? "before" : "after";
+      updateDropTarget(`layer:${targetLayerId}:${position}`);
+      return;
+    }
+
+    const group = hit?.closest<HTMLElement>("[data-group-drop-id]");
+    const groupId = group?.dataset["groupDropId"];
+    updateDropTarget(groupId ? `group:${groupId}` : null);
+  };
+
+  const startPointerLayerDrag = (event: ReactPointerEvent<HTMLButtonElement>, layerId: string) => {
+    if (!event.isPrimary || event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    draggedLayerRef.current = layerId;
+    draggedPointerRef.current = event.pointerId;
+    setDraggedLayerId(layerId);
+    updateDropTarget(null);
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
 
   const toggleLayerExpanded = (id: string) => {
     setExpandedLayers((current) => {
@@ -171,7 +269,7 @@ export function LayerPanel() {
         />
       </div>
 
-      <div className="flex-1 overflow-y-auto px-2 pb-6">
+      <div ref={layerListRef} className="flex-1 overflow-y-auto px-2 pb-6">
         {visibleGroups.map(({ group, depth }) => {
           const layers = wb.layers.filter((l) => l.groupId === group.id);
           const childGroups = wb.groups.filter((item) => item.parentId === group.id);
@@ -182,28 +280,12 @@ export function LayerPanel() {
           return (
             <div
               key={group.id}
+              data-group-drop-id={group.id}
               style={{ marginLeft: depth * 12 }}
               className={cn(
                 "mb-2 rounded-xl transition-colors",
                 dropTarget === `group:${group.id}` && "bg-accent/70 ring-2 ring-primary/60",
               )}
-              onDragOver={(event) => {
-                if (!draggedLayerRef.current) return;
-                event.preventDefault();
-                event.dataTransfer.dropEffect = "move";
-                setDropTarget(`group:${group.id}`);
-              }}
-              onDrop={(event) => {
-                const dragged = draggedLayerRef.current;
-                if (!dragged) return;
-                event.preventDefault();
-                event.stopPropagation();
-                wb.reorderLayer(dragged, group.id);
-                draggedLayerRef.current = null;
-                setDraggedLayerId(null);
-                setDropTarget(null);
-                toast.success(`Layer moved to ${group.name}`);
-              }}
             >
               <div className="flex items-center rounded-lg text-muted-foreground hover:bg-sidebar-accent">
                 <button
@@ -271,45 +353,17 @@ export function LayerPanel() {
                     return (
                       <div
                         key={layer.id}
-                        draggable
-                        onDragStart={(event) => {
-                          draggedLayerRef.current = layer.id;
-                          setDraggedLayerId(layer.id);
-                          event.dataTransfer.effectAllowed = "move";
-                          event.dataTransfer.setData("application/x-landdraft-layer", layer.id);
-                          event.dataTransfer.setData("text/plain", layer.name);
-                        }}
-                        onDragEnd={() => {
-                          draggedLayerRef.current = null;
-                          setDraggedLayerId(null);
-                          setDropTarget(null);
-                        }}
-                        onDragOver={(event) => {
-                          const dragged = draggedLayerRef.current;
-                          if (!dragged || dragged === layer.id) return;
-                          event.preventDefault();
-                          event.stopPropagation();
-                          event.dataTransfer.dropEffect = "move";
-                          setDropTarget(`layer:${layer.id}`);
-                        }}
-                        onDrop={(event) => {
-                          const dragged = draggedLayerRef.current;
-                          if (!dragged || dragged === layer.id) return;
-                          event.preventDefault();
-                          event.stopPropagation();
-                          wb.reorderLayer(dragged, layer.groupId, layer.id);
-                          draggedLayerRef.current = null;
-                          setDraggedLayerId(null);
-                          setDropTarget(null);
-                        }}
+                        data-layer-drop-id={layer.id}
                         className={cn(
                           "rounded-xl border px-1.5 py-1.5 transition-all",
                           selected
                             ? "border-primary bg-accent/60"
                             : "border-transparent hover:bg-sidebar-accent",
                           draggedLayerId === layer.id && "opacity-40",
-                          dropTarget === `layer:${layer.id}` &&
+                          dropTarget === `layer:${layer.id}:before` &&
                             "border-primary shadow-[0_-3px_0_0_hsl(var(--primary))]",
+                          dropTarget === `layer:${layer.id}:after` &&
+                            "border-primary shadow-[0_3px_0_0_hsl(var(--primary))]",
                         )}
                       >
                         <div className="flex min-h-8 items-center gap-1.5">
@@ -388,10 +442,29 @@ export function LayerPanel() {
                           >
                             <Tag className="size-3.5" />
                           </button>
-                          <GripVertical
-                            className="size-4 shrink-0 cursor-grab text-muted-foreground active:cursor-grabbing"
-                            aria-label="Drag to reorder layer"
-                          />
+                          <button
+                            type="button"
+                            onPointerDown={(event) => startPointerLayerDrag(event, layer.id)}
+                            onPointerMove={updatePointerDropTarget}
+                            onPointerUp={(event) => {
+                              if (draggedPointerRef.current !== event.pointerId) return;
+                              updatePointerDropTarget(event);
+                              if (event.currentTarget.hasPointerCapture(event.pointerId))
+                                event.currentTarget.releasePointerCapture(event.pointerId);
+                              finishLayerDrag();
+                            }}
+                            onPointerCancel={resetLayerDrag}
+                            aria-label={`Drag ${layer.name} to reorder`}
+                            title="Drag layer up, down, or into another group"
+                            className={cn(
+                              "-mr-0.5 flex size-7 shrink-0 touch-none select-none items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground",
+                              draggedLayerId === layer.id
+                                ? "cursor-grabbing bg-accent text-foreground"
+                                : "cursor-grab",
+                            )}
+                          >
+                            <GripVertical className="size-4 pointer-events-none" />
+                          </button>
                         </div>
 
                         {expanded && (
