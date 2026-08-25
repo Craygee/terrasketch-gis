@@ -2,6 +2,40 @@
 @source "../src";
 @import "tw-animate-css";
 
+@layer components {
+  .public-copy {
+    @apply space-y-10 text-[15px] leading-7 text-[#43574e];
+  }
+
+  .public-copy section {
+    @apply space-y-3;
+  }
+
+  .public-copy h2 {
+    @apply text-2xl font-bold tracking-tight text-[#173328];
+  }
+
+  .public-copy p + p {
+    @apply mt-3;
+  }
+
+  .public-copy ul {
+    @apply list-disc space-y-2 pl-5;
+  }
+
+  .public-copy strong {
+    @apply font-semibold text-[#173328];
+  }
+
+  .public-primary-link {
+    @apply inline-flex rounded-full bg-[#227448] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#195c39];
+  }
+
+  .public-secondary-link {
+    @apply inline-flex rounded-full border border-[#b9c2ba] bg-white px-5 py-2.5 text-sm font-semibold text-[#173328] transition hover:border-[#227448] hover:text-[#227448];
+  }
+}
+
 @custom-variant dark (&:is(.dark *));
 
 /*

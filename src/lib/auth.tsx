@@ -502,6 +502,17 @@ function LoginScreen() {
           "Cloud connection pending; this build keeps its existing device-only workspace."
         )}
       </p>
+      <p className="mt-3 text-center text-[10px] leading-relaxed text-muted-foreground">
+        By continuing, you agree to the{" "}
+        <a className="font-medium text-primary hover:underline" href="/terms">
+          Terms
+        </a>{" "}
+        and acknowledge the{" "}
+        <a className="font-medium text-primary hover:underline" href="/privacy">
+          Privacy Policy
+        </a>
+        .
+      </p>
     </AuthCard>
   );
 }
