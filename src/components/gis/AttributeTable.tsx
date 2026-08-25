@@ -95,7 +95,7 @@ export function AttributeTable() {
   if (!tableOpen) return null;
 
   return (
-    <div className="panel-surface flex h-[45vh] flex-col rounded-t-2xl md:h-[38vh]">
+    <div className="attribute-table-height panel-surface flex flex-col rounded-t-2xl">
       <div className="flex items-center gap-2 border-b border-border px-3 py-2">
         <Table2 className="size-4 text-primary" />
         <span className="text-sm font-semibold">{layer ? layer.name : "Attribute table"}</span>

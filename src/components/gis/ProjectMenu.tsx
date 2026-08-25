@@ -44,7 +44,7 @@ export function ProjectMenu({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <div className="max-h-[78vh] w-[min(92vw,410px)] overflow-y-auto p-3 text-xs">
+    <div className="project-menu-height w-[min(92vw,410px)] overflow-y-auto p-3 text-xs">
       <div className="mb-3 flex items-center gap-2 rounded-xl bg-secondary p-2">
         <span className="flex size-8 items-center justify-center rounded-full bg-primary text-primary-foreground">
           <UserRound className="size-4" />

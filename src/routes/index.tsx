@@ -25,7 +25,7 @@ export const Route = createFileRoute("/")({
 
 function MapSkeleton() {
   return (
-    <div className="flex h-screen w-full items-center justify-center bg-background">
+    <div className="app-viewport flex items-center justify-center bg-background">
       <div className="text-center">
         <div className="mx-auto flex size-10 animate-pulse items-center justify-center rounded-xl bg-primary text-primary-foreground">
           <LandDraftMark className="size-6" />

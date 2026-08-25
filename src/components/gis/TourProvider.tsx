@@ -145,7 +145,7 @@ function WelcomeTour({
   onSkip: () => void;
 }) {
   return (
-    <div className="fixed inset-0 z-[260] flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm">
+    <div className="app-overlay-viewport fixed inset-0 z-[260] flex items-center justify-center overflow-y-auto bg-slate-950/55 p-4 backdrop-blur-sm">
       <section
         role="dialog"
         aria-modal="true"
@@ -252,7 +252,10 @@ function GuidedTour({
   const finalStep = stepIndex === steps.length - 1;
 
   return (
-    <div className="fixed inset-0 z-[210] pointer-events-none" aria-live="polite">
+    <div
+      className="app-overlay-viewport pointer-events-none fixed inset-0 z-[210]"
+      aria-live="polite"
+    >
       <div
         className="fixed rounded-2xl ring-4 ring-amber-300/90 transition-all duration-200"
         style={{

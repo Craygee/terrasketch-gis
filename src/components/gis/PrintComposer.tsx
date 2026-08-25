@@ -641,7 +641,7 @@ export function PrintComposer() {
   };
 
   return (
-    <div className="print-composer fixed inset-0 z-[100] flex flex-col bg-[#e9e8e2] text-foreground">
+    <div className="app-overlay-viewport print-composer fixed inset-0 z-[100] flex flex-col bg-[#e9e8e2] text-foreground">
       <header className="print-composer-ui flex h-14 shrink-0 items-center gap-2 overflow-x-auto border-b border-border bg-card px-3">
         <button
           onClick={close}

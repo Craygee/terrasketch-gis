@@ -66,6 +66,8 @@
 }
 
 :root {
+  /* 100vh is the legacy fallback; newer Safari follows the live browser viewport. */
+  --app-viewport-height: 100vh;
   --radius: 0.75rem;
   --background: oklch(0.985 0.012 96);
   --foreground: oklch(0.26 0.03 150);
@@ -112,6 +114,18 @@
   --sidebar-ring: oklch(0.6 0.1 152);
 }
 
+@supports (height: 100svh) {
+  :root {
+    --app-viewport-height: 100svh;
+  }
+}
+
+@supports (height: 100dvh) {
+  :root {
+    --app-viewport-height: 100dvh;
+  }
+}
+
 .dark {
   --background: oklch(0.19 0.02 152);
   --foreground: oklch(0.96 0.012 96);
@@ -151,6 +165,15 @@
     border-color: var(--color-border);
   }
 
+  html,
+  body {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+
   body {
     background-color: var(--color-background);
     color: var(--color-foreground);
@@ -162,6 +185,90 @@
   h2,
   h3 {
     letter-spacing: -0.015em;
+  }
+}
+
+/*
+ * Full-screen application surfaces share one viewport contract. This avoids
+ * iOS Safari's legacy 100vh/layout-viewport overflow while keeping a 100vh
+ * fallback for older browsers. Scrolling belongs inside explicit content
+ * regions, never on the document behind the map.
+ */
+.app-viewport {
+  width: 100%;
+  height: var(--app-viewport-height);
+  min-height: 0;
+  max-height: var(--app-viewport-height);
+  overflow: hidden;
+}
+
+.app-scroll-viewport {
+  width: 100%;
+  height: var(--app-viewport-height);
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  padding-top: max(1rem, env(safe-area-inset-top, 0px));
+  padding-bottom: max(1rem, env(safe-area-inset-bottom, 0px));
+  -webkit-overflow-scrolling: touch;
+}
+
+.app-safe-frame {
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-left: env(safe-area-inset-left, 0px);
+}
+
+.app-overlay-viewport {
+  height: var(--app-viewport-height);
+  max-height: var(--app-viewport-height);
+}
+
+.attribute-table-height {
+  height: 45vh;
+}
+
+.project-menu-height {
+  max-height: 78vh;
+}
+
+.mobile-sheet-height {
+  max-height: 62vh;
+}
+
+.mobile-layer-height {
+  height: 54vh;
+}
+
+@supports (height: 100dvh) {
+  .attribute-table-height {
+    height: 45dvh;
+  }
+
+  .project-menu-height {
+    max-height: 78dvh;
+  }
+
+  .mobile-sheet-height {
+    max-height: 62dvh;
+  }
+
+  .mobile-layer-height {
+    height: 54dvh;
+  }
+}
+
+@media (min-width: 48rem) {
+  .attribute-table-height {
+    height: 38vh;
+  }
+
+  @supports (height: 100dvh) {
+    .attribute-table-height {
+      height: 38dvh;
+    }
   }
 }
 

@@ -77,7 +77,7 @@ function MobileShell() {
 
   if (!wb.projectReady)
     return (
-      <div className="flex h-[100dvh] items-center justify-center bg-background px-4 text-center text-sm text-muted-foreground">
+      <div className="app-viewport flex items-center justify-center bg-background px-4 text-center text-sm text-muted-foreground">
         {wb.projectError ? (
           <div>
             <p className="font-semibold text-foreground">Cloud workspace could not open</p>
@@ -96,7 +96,7 @@ function MobileShell() {
     );
 
   return (
-    <div className="relative h-[100dvh] w-full overflow-hidden bg-background">
+    <div className="app-viewport relative bg-background">
       <MapCanvas />
       <SelectionToolbar mobile />
 
@@ -148,7 +148,7 @@ function MobileShell() {
       </div>
 
       {sheet && (
-        <section className="panel-surface absolute inset-x-2 bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-40 max-h-[62dvh] overflow-hidden rounded-3xl">
+        <section className="mobile-sheet-height panel-surface absolute inset-x-2 bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-40 overflow-hidden rounded-3xl">
           <div className="flex items-center border-b border-border px-4 py-2">
             <h2 className="text-sm font-semibold">
               {sheet === "layers"
@@ -173,7 +173,7 @@ function MobileShell() {
             </button>
           </div>
           {sheet === "layers" ? (
-            <div data-tour="layer-panel" className="h-[54dvh]">
+            <div data-tour="layer-panel" className="mobile-layer-height">
               <LayerPanel />
             </div>
           ) : sheet === "data" ? (

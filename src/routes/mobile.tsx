@@ -19,7 +19,7 @@ export const Route = createFileRoute("/mobile")({
 
 function Loading() {
   return (
-    <div className="flex h-[100dvh] items-center justify-center bg-background text-sm font-medium">
+    <div className="app-viewport flex items-center justify-center bg-background text-sm font-medium">
       Loading field map…
     </div>
   );

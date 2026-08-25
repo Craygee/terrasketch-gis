@@ -373,7 +373,11 @@ export function AiAssistant() {
   };
 
   return (
-    <div className="pointer-events-auto fixed inset-0 z-[90] flex" role="dialog" aria-modal="true">
+    <div
+      className="app-overlay-viewport pointer-events-auto fixed inset-0 z-[90] flex"
+      role="dialog"
+      aria-modal="true"
+    >
       <button
         className="flex-1 bg-foreground/20 backdrop-blur-[2px]"
         aria-label="Close AI"

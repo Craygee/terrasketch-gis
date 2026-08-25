@@ -55,7 +55,7 @@ function WorkbenchShell() {
 
   if (!wb.projectReady)
     return (
-      <div className="flex h-screen items-center justify-center bg-background px-4 text-sm text-muted-foreground">
+      <div className="app-viewport flex items-center justify-center bg-background px-4 text-sm text-muted-foreground">
         {wb.projectError ? (
           <div className="max-w-md rounded-2xl border border-border bg-card p-5 text-center shadow-panel">
             <p className="font-semibold text-foreground">Cloud workspace could not open</p>
@@ -74,7 +74,7 @@ function WorkbenchShell() {
     );
 
   return (
-    <div className="flex h-screen w-full flex-col overflow-hidden bg-background">
+    <div className="app-safe-frame app-viewport flex flex-col bg-background">
       <TopBar onTogglePanel={() => setPanelOpen((o) => !o)} panelOpen={panelOpen} />
 
       <div className="relative flex min-h-0 flex-1">

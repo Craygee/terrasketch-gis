@@ -298,7 +298,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
   const auth = useAuth();
   if (!auth.ready)
     return (
-      <div className="flex min-h-screen items-center justify-center bg-background text-sm text-muted-foreground">
+      <div className="app-scroll-viewport flex items-center justify-center bg-background text-sm text-muted-foreground">
         Opening your workspace…
       </div>
     );
@@ -568,7 +568,7 @@ function AuthCard({
   children: ReactNode;
 }) {
   return (
-    <main className="flex min-h-screen items-center justify-center bg-[radial-gradient(circle_at_top,#e4efdc,transparent_55%)] px-4">
+    <main className="app-scroll-viewport flex items-center justify-center bg-[radial-gradient(circle_at_top,#e4efdc,transparent_55%)] px-4">
       <section className="panel-surface w-full max-w-sm rounded-3xl p-6 shadow-float">
         <div className="mb-5 flex items-center gap-3">
           <span className="flex size-11 items-center justify-center rounded-2xl bg-primary text-primary-foreground">

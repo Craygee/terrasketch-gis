@@ -112,7 +112,7 @@ export function FeatureDestinationDialog() {
   };
 
   return (
-    <div className="fixed inset-0 z-[110] flex items-center justify-center bg-foreground/25 p-4 backdrop-blur-[2px]">
+    <div className="app-overlay-viewport fixed inset-0 z-[110] flex items-center justify-center overflow-y-auto bg-foreground/25 p-4 backdrop-blur-[2px]">
       <section
         className="panel-surface w-full max-w-md rounded-3xl p-4 shadow-2xl"
         role="dialog"
