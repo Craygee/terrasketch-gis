@@ -32,6 +32,7 @@ const supportedSocialProviders = [
   "google",
   "apple",
 ] as const satisfies readonly CloudOAuthProvider[];
+const defaultCloudSocialProviders = ["google"] as const satisfies readonly CloudOAuthProvider[];
 
 interface CloudAuthSettings {
   external?: Record<string, boolean>;
@@ -113,16 +114,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AppUser | null>(null);
   const [ready, setReady] = useState(false);
   const [recoveryMode, setRecoveryMode] = useState(false);
-  const [socialProviders, setSocialProviders] = useState<CloudOAuthProvider[]>([]);
+  const [socialProviders, setSocialProviders] = useState<CloudOAuthProvider[]>(() =>
+    cloudConfigured ? [...defaultCloudSocialProviders] : [],
+  );
 
   useEffect(() => {
     void (async () => {
       try {
         if (cloudConfigured) {
-          const settings = await cloudAuthRequest<CloudAuthSettings>("/settings").catch(() => null);
-          setSocialProviders(
-            supportedSocialProviders.filter((provider) => settings?.external?.[provider]),
-          );
+          try {
+            const settings = await cloudAuthRequest<CloudAuthSettings>("/settings");
+            setSocialProviders(
+              supportedSocialProviders.filter((provider) => settings.external?.[provider]),
+            );
+          } catch {
+            // Keep configured providers available during a temporary settings-endpoint outage.
+          }
           const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
           const hashAccessToken = hash.get("access_token");
           const hashRefreshToken = hash.get("refresh_token");
