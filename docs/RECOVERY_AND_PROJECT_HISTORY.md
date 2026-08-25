@@ -184,6 +184,31 @@ The next requested release should:
 6. Keep the interface compact: common choices visible, detail controls inside collapsed advanced
    sections, with mobile behavior remaining uncluttered.
 
-Before publishing that release, update this document with its commit IDs, new data structures,
-rollback behavior, and any new cloud dependency.
+## Completed release after the recovery point
 
+Primary commit `d7a597b` completes the request above. It adds:
+
+- `LayerStyle.categorized`, with an attribute field, per-value color/visibility rules, and a fallback
+  style. MapLibre expressions apply these rules to points, lines, and polygons; streamed public
+  layers retain the rule set while unseen values use the fallback.
+- A compact Color features by attribute editor with up to 100 loaded distinct values and a refresh
+  action for viewport-fed layers.
+- Project-scoped `AssistantConversation` data containing up to 80 messages and the three most recent
+  reversible assistant actions. It is serialized through the existing project state and Supabase
+  project/version storage, so no new cloud service or secret is required.
+- Assistant actions save a normal project restore point before changing layer state. The Revert
+  control calls the existing secure version restore path, then preserves the current conversation
+  while removing the reverted action from its three-item stack.
+- Conversational program help, clarification prompts, exact UI instructions, current-map pattern
+  summaries, attribute selection, categorized styling, public-data routing, panel opening, and map
+  report generation. This remains an on-device LandDraft intent engine; a general-purpose remote
+  language model still requires a separately configured secure server-side provider and secret.
+- Expandable feature sublayers with search, selection/zoom, rename, visibility, and deletion or
+  local hiding controls. Feature deletion remaps selection indexes safely.
+- A 12-pixel invisible hit target for line features. Click and box selection query only base
+  selectable geometry layers, deduplicate style-layer hits by feature, and continue to prefer the
+  active layer when rendered features overlap.
+
+Verification for this release: TypeScript completed with no errors, ESLint completed with no
+errors (existing Fast Refresh warnings only), the production client/SSR/Cloudflare build completed,
+and the unauthenticated local sign-in surface opened with no browser console errors.
