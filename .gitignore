@@ -15,6 +15,7 @@ dist-ssr
 .tanstack/**
 .nitro
 *.local
+.local-backups/
 
 # Wrangler / Cloudflare
 .wrangler/
