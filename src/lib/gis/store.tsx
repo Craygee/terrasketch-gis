@@ -18,6 +18,7 @@ import {
   type ProjectState,
   type AreaUnitsPref,
   type PrintComposition,
+  type AssistantConversation,
 } from "./types";
 import {
   workspaceProjectStore,
@@ -68,6 +69,7 @@ interface WorkbenchState {
   enabledSubprojectIds: string[];
   subprojectOverlays: Array<{ projectId: string; projectName: string; layers: GisLayer[] }>;
   printComposition: PrintComposition | undefined;
+  assistant: AssistantConversation;
 }
 
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -102,6 +104,7 @@ const initialState = (): WorkbenchState => ({
   enabledSubprojectIds: [],
   subprojectOverlays: [],
   printComposition: undefined,
+  assistant: { messages: [], actions: [] },
 });
 
 const blankProjectState = (name: string): ProjectState => ({
@@ -183,6 +186,7 @@ const normalizedProject = (project: StoredProject, projects: ProjectSummary[]) =
     enabledSubprojectIds: stored.enabledSubprojectIds ?? [],
     subprojectOverlays: [],
     printComposition: stored.printComposition,
+    assistant: stored.assistant ?? { messages: [], actions: [] },
   };
 };
 
@@ -198,6 +202,7 @@ const stateToProject = (state: WorkbenchState): ProjectState => ({
   parentProjectId: state.parentProjectId,
   enabledSubprojectIds: state.enabledSubprojectIds,
   ...(state.printComposition ? { printComposition: state.printComposition } : {}),
+  assistant: state.assistant,
 });
 
 export interface WorkbenchApi extends WorkbenchState {
@@ -240,7 +245,9 @@ export interface WorkbenchApi extends WorkbenchState {
     properties: Record<string, unknown>,
   ) => void;
   updateFeatureGeometry: (layerId: string, index: number, geometry: Geometry) => void;
-  saveProject: (reason?: SaveReason) => Promise<void>;
+  removeFeatures: (layerId: string, indexes: number[]) => void;
+  setAssistantConversation: (conversation: AssistantConversation) => void;
+  saveProject: (reason?: SaveReason) => Promise<ProjectVersion | undefined>;
   createProject: (name: string) => Promise<void>;
   createSubproject: (name: string, parentProjectId?: string) => Promise<void>;
   duplicateProject: (id: string) => Promise<void>;
@@ -597,6 +604,44 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  const removeFeatures = useCallback<WorkbenchApi["removeFeatures"]>((layerId, indexes) => {
+    const removed = new Set(indexes);
+    if (removed.size === 0) return;
+    setState((current) => {
+      const remap = (selection: SelectedFeature): SelectedFeature | null => {
+        if (selection.layerId !== layerId) return selection;
+        if (removed.has(selection.index)) return null;
+        let offset = 0;
+        for (const index of removed) if (index < selection.index) offset += 1;
+        return { ...selection, index: selection.index - offset };
+      };
+      const selectedFeatures = current.selectedFeatures
+        .map(remap)
+        .filter((selection): selection is SelectedFeature => selection !== null);
+      return {
+        ...current,
+        layers: current.layers.map((layer) =>
+          layer.id === layerId
+            ? {
+                ...layer,
+                data: {
+                  type: "FeatureCollection",
+                  features: layer.data.features.filter((_, index) => !removed.has(index)),
+                },
+              }
+            : layer,
+        ),
+        selectedFeatures,
+        selectedFeature: selectedFeatures[0] ?? null,
+      };
+    });
+  }, []);
+
+  const setAssistantConversation = useCallback<WorkbenchApi["setAssistantConversation"]>(
+    (assistant) => patch({ assistant }),
+    [patch],
+  );
+
   const toProjectState = useCallback<WorkbenchApi["toProjectState"]>(
     () => stateToProject(state),
     [state],
@@ -620,6 +665,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
         saveHistory: project.versions,
         lastSavedAt: project.updatedAt,
       }));
+      return project.versions[0];
     },
     [auth.user?.id],
   );
@@ -878,6 +924,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
     state.enabledSubprojectIds,
     state.parentProjectId,
     state.printComposition,
+    state.assistant,
     state.units,
   ]);
 
@@ -915,6 +962,8 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       appendFeature,
       updateFeatureProperties,
       updateFeatureGeometry,
+      removeFeatures,
+      setAssistantConversation,
       saveProject,
       createProject,
       createSubproject,
@@ -955,6 +1004,8 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       appendFeature,
       updateFeatureProperties,
       updateFeatureGeometry,
+      removeFeatures,
+      setAssistantConversation,
       saveProject,
       createProject,
       createSubproject,

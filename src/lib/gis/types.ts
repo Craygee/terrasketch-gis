@@ -4,6 +4,21 @@ export type FillPattern =
   "solid" | "diagonal" | "horizontal" | "vertical" | "crosshatch" | "dotted";
 export type StrokePattern = "solid" | "dashed" | "dotted";
 
+export interface CategoryStyleRule {
+  value: string;
+  label: string;
+  color: string;
+  visible: boolean;
+}
+
+export interface CategorizedStyle {
+  enabled: boolean;
+  field: string;
+  rules: CategoryStyleRule[];
+  fallbackColor: string;
+  fallbackVisible: boolean;
+}
+
 export interface LayerStyle {
   fillColor: string;
   fillOpacity: number;
@@ -19,6 +34,7 @@ export interface LayerStyle {
   labelEnabled: boolean;
   labelMinZoom: number;
   labelMaxZoom: number;
+  categorized?: CategorizedStyle;
 }
 
 export interface AreaUnitsPref {
@@ -153,7 +169,28 @@ export interface ProjectState {
   parentProjectId?: string | null;
   enabledSubprojectIds?: string[];
   printComposition?: PrintComposition;
+  assistant?: AssistantConversation;
   savedAt?: number;
+}
+
+export interface AssistantMessage {
+  id: string;
+  role: "assistant" | "user";
+  text: string;
+  createdAt: number;
+}
+
+export interface AssistantAction {
+  id: string;
+  request: string;
+  summary: string;
+  versionId: string;
+  createdAt: number;
+}
+
+export interface AssistantConversation {
+  messages: AssistantMessage[];
+  actions: AssistantAction[];
 }
 
 export type GisFeature = Feature<Geometry, Record<string, unknown>>;

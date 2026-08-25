@@ -30,7 +30,15 @@ import {
 import { useWorkbench } from "@/lib/gis/store";
 import { useMapRef } from "@/lib/gis/mapRef";
 import { getBasemap } from "@/lib/gis/basemaps";
-import { buildLayerSpecs, sourceId, allLayerIds } from "@/lib/gis/mapStyle";
+import {
+  buildLayerSpecs,
+  sourceId,
+  allLayerIds,
+  fillId,
+  lineId,
+  lineHitId,
+  pointId,
+} from "@/lib/gis/mapStyle";
 import { composeLabel } from "@/lib/gis/labels";
 import type { GisLayer } from "@/lib/gis/types";
 import {
@@ -79,8 +87,15 @@ const sourcePerformanceOptions = (layer: GisLayer, featureCount: number) => {
 };
 
 function renderedLayerId(styleLayerId: string): string {
-  return styleLayerId.replace(/^(hl-point|fill|line|point|label|hl)-/, "");
+  return styleLayerId.replace(/^(line-hit|hl-point|fill|line|point|label|hl)-/, "");
 }
+
+const selectableLayerIds = (layerId: string) => [
+  pointId(layerId),
+  lineHitId(layerId),
+  lineId(layerId),
+  fillId(layerId),
+];
 
 export function MapCanvas() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -533,14 +548,22 @@ export function MapCanvas() {
         }
         const ids = wb.displayLayers
           .filter((l) => l.visible)
-          .flatMap((l) => allLayerIds(l.id))
+          .flatMap((l) => selectableLayerIds(l.id))
           .filter((id) => map.getLayer(id));
         const hits = ids.length > 0 ? map.queryRenderedFeatures(e.point, { layers: ids }) : [];
+        const uniqueHits = new Map<string, (typeof hits)[number]>();
+        for (const candidate of hits) {
+          const layerId = renderedLayerId(String(candidate.layer.id));
+          const index = Number((candidate.properties as Record<string, unknown>)?.["__idx"] ?? -1);
+          if (index >= 0 && !uniqueHits.has(`${layerId}:${index}`))
+            uniqueHits.set(`${layerId}:${index}`, candidate);
+        }
+        const candidates = [...uniqueHits.values()];
         const hit = wb.activeLayerId
-          ? (hits.find(
+          ? (candidates.find(
               (candidate) => renderedLayerId(String(candidate.layer.id)) === wb.activeLayerId,
-            ) ?? hits[0])
-          : hits[0];
+            ) ?? candidates[0])
+          : candidates[0];
         const additive =
           mode === "select-multiple" ||
           e.originalEvent.shiftKey ||
@@ -648,7 +671,7 @@ export function MapCanvas() {
       if (width < 4 && height < 4) return;
       const ids = wb.displayLayers
         .filter((layer) => layer.visible)
-        .flatMap((layer) => allLayerIds(layer.id))
+        .flatMap((layer) => selectableLayerIds(layer.id))
         .filter((id) => map.getLayer(id));
       const hits = ids.length
         ? map.queryRenderedFeatures(

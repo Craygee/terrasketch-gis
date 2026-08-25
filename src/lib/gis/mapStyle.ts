@@ -4,6 +4,7 @@ import type { GisLayer, FillPattern } from "./types";
 export const sourceId = (layerId: string) => `src-${layerId}`;
 export const fillId = (layerId: string) => `fill-${layerId}`;
 export const lineId = (layerId: string) => `line-${layerId}`;
+export const lineHitId = (layerId: string) => `line-hit-${layerId}`;
 export const pointId = (layerId: string) => `point-${layerId}`;
 export const labelId = (layerId: string) => `label-${layerId}`;
 export const highlightId = (layerId: string) => `hl-${layerId}`;
@@ -84,7 +85,8 @@ export function buildLayerSpecs(layer: GisLayer, map: MlMap): LayerSpecification
   const s = layer.style;
   const labelMinZoom = s.labelMinZoom ?? 4;
   const labelMaxZoom = s.labelMaxZoom ?? 24;
-  const patternId = ensurePatternImage(map, s.fillPattern, s.fillColor);
+  const categorized = s.categorized?.enabled && s.categorized.field ? s.categorized : undefined;
+  const patternId = categorized ? null : ensurePatternImage(map, s.fillPattern, s.fillColor);
   const zoomRange =
     layer.source.kind === "remote" && layer.source.minZoom !== undefined
       ? { minzoom: layer.source.minZoom }
@@ -92,16 +94,42 @@ export function buildLayerSpecs(layer: GisLayer, map: MlMap): LayerSpecification
   const lineDash =
     s.strokePattern === "dashed" ? [3, 2] : s.strokePattern === "dotted" ? [0.2, 1.6] : undefined;
 
+  const categoryValue = categorized
+    ? ["to-string", ["coalesce", ["get", categorized.field], ""]]
+    : undefined;
+  const categoryMatch = (fallback: string) =>
+    categorized && categoryValue
+      ? [
+          "match",
+          categoryValue,
+          ...categorized.rules.flatMap((rule) => [rule.value, rule.color]),
+          fallback,
+        ]
+      : fallback;
+  const categoryOpacity = (opacity: number) =>
+    categorized && categoryValue
+      ? [
+          "match",
+          categoryValue,
+          ...categorized.rules.flatMap((rule) => [rule.value, rule.visible ? opacity : 0]),
+          categorized.fallbackVisible ? opacity : 0,
+        ]
+      : opacity;
+  const shownFilter = ["!=", ["get", "__hidden"], true];
+  const geometryFilter = (filter: unknown[]) => ["all", filter, shownFilter];
   const fillPaint: Record<string, unknown> = patternId
     ? { "fill-pattern": patternId, "fill-opacity": s.fillOpacity }
-    : { "fill-color": s.fillColor, "fill-opacity": s.fillOpacity };
+    : {
+        "fill-color": categoryMatch(categorized?.fallbackColor ?? s.fillColor),
+        "fill-opacity": categoryOpacity(s.fillOpacity),
+      };
 
   const specs: LayerSpecification[] = [
     {
       id: fillId(layer.id),
       type: "fill",
       source: src,
-      filter: ["==", "$type", "Polygon"],
+      filter: geometryFilter(["==", "$type", "Polygon"]) as never,
       paint: fillPaint as never,
       ...zoomRange,
     },
@@ -109,13 +137,26 @@ export function buildLayerSpecs(layer: GisLayer, map: MlMap): LayerSpecification
       id: lineId(layer.id),
       type: "line",
       source: src,
-      filter: ["in", "$type", "LineString", "Polygon"],
+      filter: geometryFilter(["in", "$type", "LineString", "Polygon"]) as never,
       layout: { "line-cap": "round", "line-join": "round" },
       paint: {
-        "line-color": s.strokeColor,
+        "line-color": categoryMatch(categorized?.fallbackColor ?? s.strokeColor) as never,
         "line-width": s.strokeWidth,
-        "line-opacity": s.strokeOpacity,
+        "line-opacity": categoryOpacity(s.strokeOpacity) as never,
         ...(lineDash ? { "line-dasharray": lineDash } : {}),
+      },
+      ...zoomRange,
+    },
+    {
+      id: lineHitId(layer.id),
+      type: "line",
+      source: src,
+      filter: geometryFilter(["==", "$type", "LineString"]) as never,
+      layout: { "line-cap": "round", "line-join": "round" },
+      paint: {
+        "line-color": "#000000",
+        "line-width": Math.max(12, s.strokeWidth + 8),
+        "line-opacity": 0.01,
       },
       ...zoomRange,
     },
@@ -123,12 +164,12 @@ export function buildLayerSpecs(layer: GisLayer, map: MlMap): LayerSpecification
       id: pointId(layer.id),
       type: "circle",
       source: src,
-      filter: ["==", "$type", "Point"],
+      filter: geometryFilter(["==", "$type", "Point"]) as never,
       paint: {
         "circle-radius": s.pointSize,
-        "circle-color": s.fillColor,
-        "circle-opacity": Math.max(0.5, s.fillOpacity + 0.4),
-        "circle-stroke-color": s.strokeColor,
+        "circle-color": categoryMatch(categorized?.fallbackColor ?? s.fillColor) as never,
+        "circle-opacity": categoryOpacity(Math.max(0.5, s.fillOpacity + 0.4)) as never,
+        "circle-stroke-color": categoryMatch(categorized?.fallbackColor ?? s.strokeColor) as never,
         "circle-stroke-width": Math.min(3, s.strokeWidth),
       },
       ...zoomRange,
@@ -137,7 +178,7 @@ export function buildLayerSpecs(layer: GisLayer, map: MlMap): LayerSpecification
       id: highlightId(layer.id),
       type: "line",
       source: src,
-      filter: ["in", "$type", "LineString", "Polygon"],
+      filter: geometryFilter(["in", "$type", "LineString", "Polygon"]) as never,
       paint: {
         "line-color": "#f2b73d",
         "line-width": s.strokeWidth + 3,
@@ -149,7 +190,7 @@ export function buildLayerSpecs(layer: GisLayer, map: MlMap): LayerSpecification
       id: highlightPointId(layer.id),
       type: "circle",
       source: src,
-      filter: ["==", ["geometry-type"], "Point"],
+      filter: geometryFilter(["==", ["geometry-type"], "Point"]) as never,
       paint: {
         "circle-radius": s.pointSize + 5,
         "circle-color": "#f2b73d",
@@ -167,6 +208,7 @@ export function buildLayerSpecs(layer: GisLayer, map: MlMap): LayerSpecification
       id: labelId(layer.id),
       type: "symbol",
       source: src,
+      filter: shownFilter as never,
       layout: {
         "text-field": ["coalesce", ["get", "__label"], ""],
         "text-size": [
@@ -203,6 +245,7 @@ export const allLayerIds = (layerId: string) => [
   highlightPointId(layerId),
   highlightId(layerId),
   pointId(layerId),
+  lineHitId(layerId),
   lineId(layerId),
   fillId(layerId),
 ];

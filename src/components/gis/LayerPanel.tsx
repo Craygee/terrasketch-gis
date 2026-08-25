@@ -17,6 +17,8 @@ import {
   Layers,
   Loader2,
   Tag,
+  Pencil,
+  Search,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -525,6 +527,7 @@ export function LayerPanel() {
                                 {layer.source.kind === "remote" && (
                                   <RemoteLayerSettings layerId={layer.id} source={layer.source} />
                                 )}
+                                <FeatureSublayers layer={layer} onZoom={zoomTo} />
                               </div>
                             </details>
                           </div>
@@ -553,6 +556,125 @@ export function LayerPanel() {
         </p>
       </div>
     </div>
+  );
+}
+
+function featureDisplayName(layer: GisLayer, index: number): string {
+  const properties = layer.data.features[index]?.properties ?? {};
+  const preferred = ["NAME", "name", "LABEL", "label", "OWNER", "owner", "ID", "id"];
+  const key = preferred.find((field) => properties[field] !== undefined);
+  return key ? String(properties[key]) : `Feature ${index + 1}`;
+}
+
+function FeatureSublayers({
+  layer,
+  onZoom,
+}: {
+  layer: GisLayer;
+  onZoom: (data: GisLayer["data"]) => void;
+}) {
+  const wb = useWorkbench();
+  const [query, setQuery] = useState("");
+  const normalizedQuery = query.trim().toLowerCase();
+  const matches = layer.data.features
+    .map((feature, index) => ({ feature, index, name: featureDisplayName(layer, index) }))
+    .filter(({ feature, name }) => {
+      if (!normalizedQuery) return true;
+      return `${name} ${JSON.stringify(feature.properties ?? {})}`
+        .toLowerCase()
+        .includes(normalizedQuery);
+    });
+  const visible = matches.slice(0, 100);
+
+  return (
+    <details className="group rounded-lg border border-border bg-card/70">
+      <summary className="flex cursor-pointer list-none items-center gap-1 px-2 py-1.5 text-[10px] font-semibold">
+        <ChevronRight className="size-3.5 transition-transform group-open:rotate-90" />
+        Features as sublayers ({layer.data.features.length})
+      </summary>
+      <div className="space-y-2 border-t border-border p-2">
+        <label className="relative block">
+          <Search className="absolute left-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground" />
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Find a feature or attribute"
+            className="w-full rounded-lg border border-border bg-secondary py-1.5 pl-7 pr-2 text-[10px] outline-none focus:border-primary"
+          />
+        </label>
+        <div className="max-h-64 space-y-1 overflow-y-auto">
+          {visible.map(({ feature, index, name }) => {
+            const hidden = feature.properties?.["__hidden"] === true;
+            const selected = wb.selectedFeatures.some(
+              (selection) => selection.layerId === layer.id && selection.index === index,
+            );
+            return (
+              <div
+                key={`${index}-${name}`}
+                className={cn(
+                  "flex items-center gap-1 rounded-lg border px-1.5 py-1",
+                  selected ? "border-primary bg-accent" : "border-transparent bg-secondary/50",
+                )}
+              >
+                <button
+                  onClick={() => wb.updateFeatureProperties(layer.id, index, { __hidden: !hidden })}
+                  title={hidden ? "Show feature" : "Hide feature"}
+                  className="rounded p-0.5 text-muted-foreground hover:text-foreground"
+                >
+                  {hidden ? <EyeOff className="size-3" /> : <Eye className="size-3" />}
+                </button>
+                <button
+                  onClick={() => {
+                    wb.setActiveLayer(layer.id);
+                    wb.setSelectedFeatures([{ layerId: layer.id, index }]);
+                    onZoom({ type: "FeatureCollection", features: [feature] });
+                  }}
+                  className="min-w-0 flex-1 truncate text-left text-[10px]"
+                  title={name}
+                >
+                  {name}
+                </button>
+                <button
+                  onClick={() => {
+                    const next = window.prompt("Rename feature", name)?.trim();
+                    if (next) wb.updateFeatureProperties(layer.id, index, { NAME: next });
+                  }}
+                  title="Rename feature"
+                  className="rounded p-0.5 text-muted-foreground hover:text-foreground"
+                >
+                  <Pencil className="size-3" />
+                </button>
+                <button
+                  onClick={() => {
+                    if (layer.source.kind === "remote")
+                      wb.updateFeatureProperties(layer.id, index, { __hidden: true });
+                    else wb.removeFeatures(layer.id, [index]);
+                  }}
+                  title={
+                    layer.source.kind === "remote"
+                      ? "Hide public feature locally"
+                      : "Delete feature"
+                  }
+                  className="rounded p-0.5 text-muted-foreground hover:text-destructive"
+                >
+                  <Trash2 className="size-3" />
+                </button>
+              </div>
+            );
+          })}
+          {visible.length === 0 && (
+            <p className="py-2 text-center text-[10px] text-muted-foreground">
+              No matching features
+            </p>
+          )}
+        </div>
+        {matches.length > visible.length && (
+          <p className="text-[9px] text-muted-foreground">
+            Showing the first 100 matches. Search to narrow this list.
+          </p>
+        )}
+      </div>
+    </details>
   );
 }
 

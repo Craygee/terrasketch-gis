@@ -23,6 +23,24 @@ const strokePatterns: Array<{ value: StrokePattern; label: string }> = [
   { value: "dotted", label: "Dotted" },
 ];
 
+const categoryPalette = [
+  "#2f7d4f",
+  "#d17b2f",
+  "#3973ad",
+  "#93528c",
+  "#bd4d43",
+  "#2f8984",
+  "#8268b2",
+  "#a78431",
+];
+
+const categoryValues = (layer: GisLayer, field: string) =>
+  Array.from(
+    new Set(layer.data.features.map((feature) => String(feature.properties?.[field] ?? ""))),
+  )
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+    .slice(0, 100);
+
 export function StyleEditor({ layer }: { layer: GisLayer }) {
   const wb = useWorkbench();
   const s = layer.style;
@@ -31,6 +49,34 @@ export function StyleEditor({ layer }: { layer: GisLayer }) {
   const selectedFields =
     s.labelFields?.length > 0 ? s.labelFields : labelFieldsFromTemplate(s.labelTemplate);
   const separator = s.labelSeparator || " · ";
+  const categorized = s.categorized;
+
+  const applyCategoryField = (field: string) => {
+    if (!field) {
+      if (categorized)
+        wb.updateStyle(layer.id, { categorized: { ...categorized, enabled: false } });
+      return;
+    }
+    const existing = new Map(categorized?.rules.map((rule) => [rule.value, rule]));
+    const values = categoryValues(layer, field);
+    wb.updateStyle(layer.id, {
+      categorized: {
+        enabled: true,
+        field,
+        rules: values.map(
+          (value, index) =>
+            existing.get(value) ?? {
+              value,
+              label: value || "No value",
+              color: categoryPalette[index % categoryPalette.length] ?? "#2f7d4f",
+              visible: true,
+            },
+        ),
+        fallbackColor: categorized?.fallbackColor ?? s.fillColor,
+        fallbackVisible: categorized?.fallbackVisible ?? true,
+      },
+    });
+  };
 
   const applyLabelFields = (fields: string[], nextSeparator = separator) => {
     const unique = Array.from(new Set(fields.filter(Boolean))).slice(0, 4);
@@ -94,6 +140,86 @@ export function StyleEditor({ layer }: { layer: GisLayer }) {
           </button>
         </div>
       </Field>
+
+      <section className="space-y-2 border-t border-border pt-3">
+        <Field label="Color features by attribute">
+          <select
+            value={categorized?.enabled ? categorized.field : ""}
+            onChange={(event) => applyCategoryField(event.target.value)}
+            className="w-full rounded-lg border border-border bg-card px-2 py-1.5 text-xs"
+          >
+            <option value="">Single layer color</option>
+            {keys.map((field) => (
+              <option key={field} value={field}>
+                {field}
+              </option>
+            ))}
+          </select>
+        </Field>
+        {categorized?.enabled && (
+          <details className="group rounded-lg border border-border bg-card/70">
+            <summary className="flex cursor-pointer list-none items-center gap-1 px-2 py-1.5 text-[11px] font-medium">
+              <ChevronRight className="size-3.5 transition-transform group-open:rotate-90" />
+              {categorized.rules.length} value colors
+            </summary>
+            <div className="max-h-64 space-y-1 overflow-y-auto border-t border-border p-2">
+              {categorized.rules.map((rule, index) => (
+                <div
+                  key={rule.value}
+                  className="flex items-center gap-2 rounded-lg bg-secondary/70 p-1.5"
+                >
+                  <input
+                    type="checkbox"
+                    checked={rule.visible}
+                    onChange={(event) =>
+                      wb.updateStyle(layer.id, {
+                        categorized: {
+                          ...categorized,
+                          rules: categorized.rules.map((item, itemIndex) =>
+                            itemIndex === index ? { ...item, visible: event.target.checked } : item,
+                          ),
+                        },
+                      })
+                    }
+                    aria-label={`Show ${rule.label}`}
+                    className="accent-primary"
+                  />
+                  <input
+                    type="color"
+                    value={rule.color}
+                    onChange={(event) =>
+                      wb.updateStyle(layer.id, {
+                        categorized: {
+                          ...categorized,
+                          rules: categorized.rules.map((item, itemIndex) =>
+                            itemIndex === index ? { ...item, color: event.target.value } : item,
+                          ),
+                        },
+                      })
+                    }
+                    aria-label={`Color for ${rule.label}`}
+                    className="h-6 w-7 cursor-pointer rounded border border-border bg-card"
+                  />
+                  <span className="min-w-0 flex-1 truncate text-[10px]" title={rule.value}>
+                    {rule.label}
+                  </span>
+                </div>
+              ))}
+              <button
+                onClick={() => applyCategoryField(categorized.field)}
+                className="w-full rounded-lg border border-border px-2 py-1 text-[10px] hover:bg-accent"
+              >
+                Refresh values from loaded features
+              </button>
+              {layer.data.features.length > 0 && categorized.rules.length >= 100 && (
+                <p className="text-[9px] text-muted-foreground">
+                  Showing the first 100 values; unmatched values use the fallback color.
+                </p>
+              )}
+            </div>
+          </details>
+        )}
+      </section>
 
       <section className="space-y-2 border-t border-border pt-3">
         <label className="flex items-center gap-2 text-xs font-medium">

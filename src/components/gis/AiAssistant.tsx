@@ -1,21 +1,36 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUp, CheckSquare, Database, FileText, Layers3, Sparkles, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { ArrowUp, Database, FileText, History, Sparkles, Undo2, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { useWorkbench } from "@/lib/gis/store";
 import { useMapRef } from "@/lib/gis/mapRef";
 import { exportAnalysisReportPdf } from "@/lib/gis/mapPdf";
-import type { GisLayer } from "@/lib/gis/types";
+import type { AssistantAction, AssistantMessage, GisLayer } from "@/lib/gis/types";
+import type { ProjectVersion } from "@/lib/gis/project";
 import { propertyKeys } from "@/lib/gis/labels";
 
 type Operator = "contains" | "equals" | "starts" | "greater" | "less";
-type Message = { role: "assistant" | "user"; text: string };
 
 const starters = [
-  "Summarize this project",
+  "Analyze patterns in this map",
+  "How do I rename a layer?",
   "Find public parcel data",
   "Select features where ACRES > 10",
-  "Create a report from my selection",
+];
+const colors = ["#2f7d4f", "#d17b2f", "#3973ad", "#93528c", "#bd4d43", "#2f8984"];
+const uid = () =>
+  globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+const makeMessage = (role: AssistantMessage["role"], text: string): AssistantMessage => ({
+  id: uid(),
+  role,
+  text,
+  createdAt: Date.now(),
+});
+const welcome = () => [
+  makeMessage(
+    "assistant",
+    "I’m your LandDraft map assistant. I can explain tools, inspect patterns, query attributes, select features, change common layer settings, find public data, and create map reports. Map-changing requests include three-step undo.",
+  ),
 ];
 
 export function AiAssistant() {
@@ -26,30 +41,42 @@ export function AiAssistant() {
     setDrawerOpen,
     setPendingCatalogQuery,
     setPendingFeatureSave,
+    setTableOpen,
+    setAnalysisOpen,
+    setPrintOpen,
     map,
   } = useMapRef();
+  const [messages, setMessages] = useState<AssistantMessage[]>(
+    wb.assistant.messages.length ? wb.assistant.messages : welcome(),
+  );
+  const [actions, setActions] = useState<AssistantAction[]>(wb.assistant.actions.slice(0, 3));
+  const messagesRef = useRef(messages);
+  const actionsRef = useRef(actions);
   const [prompt, setPrompt] = useState("");
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      role: "assistant",
-      text: "Ask me to search attributes, select features, make a derived layer, find public data, create a map report, or explain any LandDraft tool.",
-    },
-  ]);
-  const [builderLayerId, setBuilderLayerId] = useState("");
-  const [builderField, setBuilderField] = useState("");
-  const [builderOperator, setBuilderOperator] = useState<Operator>("contains");
-  const [builderValue, setBuilderValue] = useState("");
   const [running, setRunning] = useState(false);
   const latestMessageRef = useRef<HTMLDivElement>(null);
 
-  const builderLayer = wb.layers.find((layer) => layer.id === builderLayerId) ?? wb.activeLayer;
-  const builderFields = useMemo(
-    () =>
-      propertyKeys((builderLayer?.data.features ?? []) as never).filter(
-        (key) => !key.startsWith("__"),
-      ),
-    [builderLayer],
-  );
+  const persist = (nextMessages: AssistantMessage[], nextActions = actionsRef.current) => {
+    const trimmedMessages = nextMessages.slice(-80);
+    const trimmedActions = nextActions.slice(0, 3);
+    messagesRef.current = trimmedMessages;
+    actionsRef.current = trimmedActions;
+    setMessages(trimmedMessages);
+    setActions(trimmedActions);
+    wb.setAssistantConversation({ messages: trimmedMessages, actions: trimmedActions });
+  };
+  const append = (...items: AssistantMessage[]) => persist([...messagesRef.current, ...items]);
+  const answer = (text: string) => append(makeMessage("assistant", text));
+
+  useEffect(() => {
+    const nextMessages = wb.assistant.messages.length ? wb.assistant.messages : welcome();
+    messagesRef.current = nextMessages;
+    actionsRef.current = wb.assistant.actions.slice(0, 3);
+    setMessages(nextMessages);
+    setActions(actionsRef.current);
+    // Conversation state is project-scoped and reloads only when switching projects.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wb.projectId]);
 
   useEffect(() => {
     latestMessageRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
@@ -57,8 +84,36 @@ export function AiAssistant() {
 
   if (!assistantOpen) return null;
 
-  const answer = (text: string) =>
-    setMessages((current) => [...current, { role: "assistant", text }]);
+  const recordAction = (request: string, summary: string, version?: ProjectVersion) => {
+    if (!version) return;
+    persist(messagesRef.current, [
+      { id: uid(), request, summary, versionId: version.id, createdAt: Date.now() },
+      ...actionsRef.current,
+    ]);
+  };
+
+  const mutate = async (request: string, summary: string, action: () => void) => {
+    const version = await wb.saveProject("manual");
+    action();
+    recordAction(request, summary, version);
+  };
+
+  const undoAction = async (action: AssistantAction) => {
+    setRunning(true);
+    try {
+      await wb.restoreVersion(action.versionId);
+      const nextActions = actionsRef.current.filter((item) => item.id !== action.id);
+      persist(
+        [...messagesRef.current, makeMessage("assistant", `Reverted: ${action.summary}`)],
+        nextActions,
+      );
+      toast.success("AI map change reverted");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "That change could not be reverted");
+    } finally {
+      setRunning(false);
+    }
+  };
 
   const executeFilter = (
     layer: GisLayer,
@@ -71,6 +126,7 @@ export function AiAssistant() {
       .map((feature, index) => ({ feature, index }))
       .filter(({ feature }) => compare((feature.properties ?? {})[field], operator, value));
     wb.setSelectedFeatures(matches.map(({ index }) => ({ layerId: layer.id, index })));
+    wb.setActiveLayer(layer.id);
     if (createLayer && matches.length) {
       const suggestedLayerName = `${layer.name} · ${field} ${operatorLabel(operator)} ${value}`;
       setPendingFeatureSave({
@@ -100,20 +156,19 @@ export function AiAssistant() {
       const feature = layer?.data.features[selection.index];
       return feature ? [feature] : [];
     });
-    const layer = wb.activeLayer;
     const features = resultFeatures?.length
       ? resultFeatures
       : selected.length
         ? selected
-        : (layer?.data.features ?? []);
+        : (wb.activeLayer?.data.features ?? []);
     await exportAnalysisReportPdf(map, wb.projectName, wb.layers, {
       title: `${wb.projectName} · GIS analysis`,
       summary,
       features,
       ...(selected.length
         ? { sourceLayerName: "Current selection" }
-        : layer?.name
-          ? { sourceLayerName: layer.name }
+        : wb.activeLayer?.name
+          ? { sourceLayerName: wb.activeLayer.name }
           : {}),
     });
     return features.length;
@@ -124,32 +179,130 @@ export function AiAssistant() {
     if (!text || running) return;
     setRunning(true);
     setPrompt("");
-    setMessages((current) => [...current, { role: "user", text }]);
+    append(makeMessage("user", text));
     const lower = text.toLowerCase();
     try {
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-      if (/\b(report|pdf|brief)\b/.test(lower)) {
-        const reportLayer = findMentionedLayer(text, wb.layers, wb.activeLayer);
-        const reportCondition = reportLayer ? parseCondition(text, reportLayer) : null;
-        const filtered =
-          reportLayer && reportCondition
-            ? executeFilter(
-                reportLayer,
-                reportCondition.field,
-                reportCondition.operator,
-                reportCondition.value,
-                false,
-              )
-            : null;
-        const count = await createReport(
-          `Requested analysis: ${text}. The map reflects the current view and visible layer stack; the result summary uses the current feature selection when one exists.`,
-          filtered?.features,
+
+      const rename = text.match(
+        /rename(?: the)?(?: layer)?\s+[“"']?(.+?)[”"']?\s+to\s+[“"']?(.+?)[”"']?$/i,
+      );
+      if (/\brename\b.*\blayer\b|^rename\b/i.test(text)) {
+        if (!rename) {
+          answer(
+            "Which layer should I rename, and what should its new name be? For example: “Rename Roads to Access routes.”",
+          );
+          return;
+        }
+        const layer = findLayerByName(rename[1] ?? "", wb.layers);
+        const nextName = (rename[2] ?? "").trim();
+        if (!layer) {
+          answer(
+            `I couldn’t find “${rename[1]}”. Available layers are: ${wb.layers.map((item) => item.name).join(", ") || "none yet"}.`,
+          );
+          return;
+        }
+        const summary = `Renamed “${layer.name}” to “${nextName}”`;
+        await mutate(text, summary, () => wb.updateLayer(layer.id, { name: nextName }));
+        answer(`${summary}. You can also rename a layer by double-clicking its name.`);
+        return;
+      }
+
+      const visibility = text.match(
+        /\b(show|hide|turn on|turn off)\b(?: the)?(?: layer)?\s+[“"']?(.+?)[”"']?$/i,
+      );
+      if (visibility) {
+        const layer = findLayerByName(visibility[2] ?? "", wb.layers);
+        if (!layer) {
+          answer("Which layer should I show or hide? Please use its name from the Layers panel.");
+          return;
+        }
+        const visible = /show|turn on/i.test(visibility[1] ?? "");
+        if (layer.visible === visible) {
+          answer(`“${layer.name}” is already ${visible ? "visible" : "hidden"}.`);
+          return;
+        }
+        const summary = `${visible ? "Showed" : "Hid"} “${layer.name}”`;
+        await mutate(text, summary, () => wb.toggleVisible(layer.id));
+        answer(summary);
+        return;
+      }
+
+      if (
+        /\b(color|colour|style|symboliz|categor)\b.*\b(attribute|field|column|value)\b/.test(lower)
+      ) {
+        const layer = findMentionedLayer(text, wb.layers, wb.activeLayer);
+        if (!layer) {
+          answer("Which layer should I color by attribute? Select a layer or include its name.");
+          return;
+        }
+        const fields = propertyKeys(layer.data.features as never).filter(
+          (field) => !field.startsWith("__"),
+        );
+        const field = fields.find((item) => lower.includes(item.toLowerCase()));
+        if (!field) {
+          answer(
+            `Which attribute should control “${layer.name}”? Available fields include: ${fields.slice(0, 20).join(", ") || "none currently loaded"}.`,
+          );
+          return;
+        }
+        const values = Array.from(
+          new Set(layer.data.features.map((feature) => String(feature.properties?.[field] ?? ""))),
+        ).slice(0, 100);
+        const summary = `Colored “${layer.name}” by ${field}`;
+        await mutate(text, summary, () =>
+          wb.updateStyle(layer.id, {
+            categorized: {
+              enabled: true,
+              field,
+              rules: values.map((value, index) => ({
+                value,
+                label: value || "No value",
+                color: colors[index % colors.length] ?? "#2f7d4f",
+                visible: true,
+              })),
+              fallbackColor: layer.style.fillColor,
+              fallbackVisible: true,
+            },
+          }),
         );
         answer(
-          `Created a PDF report with the current map, visible-layer legend, and ${count.toLocaleString()} result feature${count === 1 ? "" : "s"}.`,
+          `${summary} using ${values.length} loaded value${values.length === 1 ? "" : "s"}. Adjust individual colors under Layer → Style.`,
         );
         return;
       }
+
+      if (/\b(analy[sz]e|patterns?|insights?|distribution|statistics|stats)\b/.test(lower)) {
+        answer(
+          analyzeMap(
+            wb.layers,
+            findMentionedLayer(text, wb.layers, wb.activeLayer),
+            wb.selectedFeatures,
+          ),
+        );
+        return;
+      }
+
+      if (/\b(report|pdf|brief)\b/.test(lower)) {
+        const reportLayer = findMentionedLayer(text, wb.layers, wb.activeLayer);
+        const condition = reportLayer ? parseCondition(text, reportLayer) : null;
+        const filtered =
+          reportLayer && condition
+            ? executeFilter(
+                reportLayer,
+                condition.field,
+                condition.operator,
+                condition.value,
+                false,
+              )
+            : null;
+        const count = await createReport(`Requested analysis: ${text}.`, filtered?.features);
+        answer(
+          `Created a PDF report with the current map, legend, and ${count.toLocaleString()} result feature${count === 1 ? "" : "s"}.`,
+        );
+        return;
+      }
+
       if (
         /\b(public data|dataset|repository|find data|parcel data|flood data|well data)\b/.test(
           lower,
@@ -164,11 +317,30 @@ export function AiAssistant() {
           .trim();
         setPendingCatalogQuery(query);
         setDrawerOpen(true);
+        answer(`Opened the public-data library${query ? ` and searched for “${query}”` : ""}.`);
+        return;
+      }
+
+      if (/\b(open|show)\b.*\b(attribute )?table\b/.test(lower)) {
+        setTableOpen(true);
         answer(
-          `Opened the public-data library${query ? ` and searched for “${query}”` : ""}. Use Ready-to-add for direct services or Search repositories for the nationwide government catalog.`,
+          wb.activeLayer
+            ? `Opened the table for “${wb.activeLayer.name}”.`
+            : "Opened the table. Select a layer to inspect it.",
         );
         return;
       }
+      if (/\b(open|show)\b.*\b(spatial )?analysis\b/.test(lower)) {
+        setAnalysisOpen(true);
+        answer("Opened Spatial analysis. Results are created as Working layers.");
+        return;
+      }
+      if (/\b(open|show|print)\b.*\b(print|layout|map preview)\b/.test(lower)) {
+        setPrintOpen(true);
+        answer("Opened Print map. Print annotations remain separate from the live project map.");
+        return;
+      }
+
       const layer = findMentionedLayer(text, wb.layers, wb.activeLayer);
       const parsed = layer ? parseCondition(text, layer) : null;
       if (layer && parsed) {
@@ -182,25 +354,19 @@ export function AiAssistant() {
         );
         answer(
           result.created
-            ? `Found ${result.count.toLocaleString()} matches. Choose where to save “${result.created}” in the open layer dialog.`
-            : `Selected ${result.count.toLocaleString()} matching feature${result.count === 1 ? "" : "s"} in “${layer.name}”. You can now inspect the table, create a layer, or ask me for a report.`,
+            ? `Found ${result.count.toLocaleString()} matches. Confirm the name and category in the New layer dialog.`
+            : `Selected exactly ${result.count.toLocaleString()} matching feature${result.count === 1 ? "" : "s"} in “${layer.name}”.`,
         );
         return;
       }
+
       const help = helpAnswer(lower);
-      if (help) {
-        answer(help);
-        return;
-      }
-      const featureCount = wb.layers.reduce((total, item) => total + item.data.features.length, 0);
-      const visible = wb.layers.filter((item) => item.visible).length;
-      answer(
-        `“${wb.projectName}” has ${wb.layers.length} layers (${visible} visible), ${wb.groups.length} groups or subgroups, and ${featureCount.toLocaleString()} currently loaded features. For a table query, include a field and condition such as “select parcels where ACRES > 10.”`,
-      );
+      answer(help ?? contextualAnswer(wb.layers, wb.activeLayer, wb.projectName));
     } catch (error) {
-      const message = error instanceof Error ? error.message : "The request could not be completed";
-      answer(message);
-      toast.error("AI action could not finish", { description: message });
+      const errorMessage =
+        error instanceof Error ? error.message : "The request could not be completed";
+      answer(`I couldn’t complete that request: ${errorMessage}`);
+      toast.error("Assistant action could not finish", { description: errorMessage });
     } finally {
       setRunning(false);
     }
@@ -211,7 +377,6 @@ export function AiAssistant() {
       <button
         className="flex-1 bg-foreground/20 backdrop-blur-[2px]"
         aria-label="Close AI"
-        title="Close the AI assistant"
         onClick={() => setAssistantOpen(false)}
       />
       <aside
@@ -224,14 +389,11 @@ export function AiAssistant() {
           </span>
           <div>
             <h2 className="text-sm font-semibold">LandDraft AI</h2>
-            <p className="text-[10px] text-muted-foreground">
-              GIS actions, answers and map reports
-            </p>
+            <p className="text-[10px] text-muted-foreground">Map actions, guidance and analysis</p>
           </div>
           <button
             onClick={() => setAssistantOpen(false)}
             aria-label="Close AI"
-            title="Close the AI assistant"
             className="ml-auto rounded-lg p-1.5 hover:bg-accent"
           >
             <X className="size-4" />
@@ -239,17 +401,17 @@ export function AiAssistant() {
         </div>
 
         <div className="flex-1 space-y-3 overflow-y-auto p-4" aria-live="polite">
-          {messages.map((message, index) => (
+          {messages.map((item, index) => (
             <div
-              key={index}
+              key={item.id}
               ref={index === messages.length - 1 && !running ? latestMessageRef : undefined}
               className={
-                message.role === "user"
+                item.role === "user"
                   ? "ml-10 rounded-2xl rounded-tr-sm bg-primary px-3 py-2 text-xs text-primary-foreground"
-                  : "mr-6 rounded-2xl rounded-tl-sm bg-secondary px-3 py-2 text-xs leading-relaxed"
+                  : "mr-6 whitespace-pre-line rounded-2xl rounded-tl-sm bg-secondary px-3 py-2 text-xs leading-relaxed"
               }
             >
-              {message.text}
+              {item.text}
             </div>
           ))}
           {running && (
@@ -258,9 +420,35 @@ export function AiAssistant() {
               className="mr-6 flex items-center gap-2 rounded-2xl rounded-tl-sm bg-secondary px-3 py-2 text-xs text-muted-foreground"
             >
               <span className="size-1.5 animate-pulse rounded-full bg-primary" />
-              Working on your map request…
+              Working on your request…
             </div>
           )}
+
+          {actions.length > 0 && (
+            <details className="rounded-xl border border-border bg-card">
+              <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-[11px] font-semibold">
+                <History className="size-3.5" /> Undo recent AI changes ({actions.length})
+              </summary>
+              <div className="space-y-1 border-t border-border p-2">
+                {actions.map((action) => (
+                  <div
+                    key={action.id}
+                    className="flex items-center gap-2 rounded-lg bg-secondary p-2 text-[10px]"
+                  >
+                    <span className="min-w-0 flex-1">{action.summary}</span>
+                    <button
+                      disabled={running}
+                      onClick={() => void undoAction(action)}
+                      className="flex items-center gap-1 rounded-lg border border-border bg-card px-2 py-1 hover:border-primary disabled:opacity-40"
+                    >
+                      <Undo2 className="size-3" /> Revert
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </details>
+          )}
+
           <div className="flex flex-wrap gap-1">
             {starters.map((starter) => (
               <button
@@ -273,103 +461,6 @@ export function AiAssistant() {
               </button>
             ))}
           </div>
-
-          <details className="group rounded-xl border border-border bg-card">
-            <summary className="cursor-pointer list-none px-3 py-2 text-xs font-semibold">
-              Advanced · precise table query
-            </summary>
-            <div className="space-y-2 border-t border-border p-3">
-              <select
-                value={builderLayer?.id ?? ""}
-                onChange={(event) => {
-                  setBuilderLayerId(event.target.value);
-                  setBuilderField("");
-                }}
-                className="w-full rounded-lg border border-border bg-secondary px-2 py-1.5 text-xs"
-              >
-                <option value="">Choose layer</option>
-                {wb.layers.map((layer) => (
-                  <option key={layer.id} value={layer.id}>
-                    {layer.name}
-                  </option>
-                ))}
-              </select>
-              <div className="grid grid-cols-[1fr_auto] gap-1">
-                <select
-                  value={builderField}
-                  onChange={(event) => setBuilderField(event.target.value)}
-                  className="min-w-0 rounded-lg border border-border bg-secondary px-2 py-1.5 text-xs"
-                >
-                  <option value="">Attribute field</option>
-                  {builderFields.map((field) => (
-                    <option key={field} value={field}>
-                      {field}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  value={builderOperator}
-                  onChange={(event) => setBuilderOperator(event.target.value as Operator)}
-                  className="rounded-lg border border-border bg-secondary px-2 py-1.5 text-xs"
-                >
-                  <option value="contains">contains</option>
-                  <option value="equals">equals</option>
-                  <option value="starts">starts with</option>
-                  <option value="greater">&gt;</option>
-                  <option value="less">&lt;</option>
-                </select>
-              </div>
-              <input
-                value={builderValue}
-                onChange={(event) => setBuilderValue(event.target.value)}
-                placeholder="Value"
-                className="w-full rounded-lg border border-border bg-secondary px-2 py-1.5 text-xs outline-none focus:border-primary"
-              />
-              <div className="grid grid-cols-2 gap-1">
-                <button
-                  disabled={!builderLayer || !builderField}
-                  onClick={() => {
-                    if (!builderLayer || !builderField) return;
-                    const result = executeFilter(
-                      builderLayer,
-                      builderField,
-                      builderOperator,
-                      builderValue,
-                      false,
-                    );
-                    answer(
-                      `Selected ${result.count.toLocaleString()} matching features in “${builderLayer.name}”.`,
-                    );
-                  }}
-                  className="flex items-center justify-center gap-1 rounded-lg bg-secondary px-2 py-1.5 text-[11px] disabled:opacity-40"
-                >
-                  <CheckSquare className="size-3.5" /> Select
-                </button>
-                <button
-                  disabled={!builderLayer || !builderField}
-                  onClick={() => {
-                    if (!builderLayer || !builderField) return;
-                    const result = executeFilter(
-                      builderLayer,
-                      builderField,
-                      builderOperator,
-                      builderValue,
-                      true,
-                    );
-                    answer(
-                      result.created
-                        ? `Found ${result.count.toLocaleString()} features. Choose where to save “${result.created}” in the open layer dialog.`
-                        : "No matching features were found.",
-                    );
-                  }}
-                  className="flex items-center justify-center gap-1 rounded-lg bg-primary px-2 py-1.5 text-[11px] text-primary-foreground disabled:opacity-40"
-                >
-                  <Layers3 className="size-3.5" /> New layer
-                </button>
-              </div>
-            </div>
-          </details>
-
           <div className="grid grid-cols-2 gap-2">
             <button
               onClick={() => {
@@ -417,18 +508,28 @@ export function AiAssistant() {
               type="submit"
               disabled={!prompt.trim() || running}
               aria-label="Send request"
-              title="Send this request to LandDraft AI"
               className="flex size-8 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground disabled:opacity-40"
             >
               <ArrowUp className="size-4" />
             </button>
           </div>
           <p className="mt-1.5 text-center text-[9px] text-muted-foreground">
-            Review AI-assisted selections and public records before relying on them.
+            Review assistant selections and public records before relying on them.
           </p>
         </form>
       </aside>
     </div>
+  );
+}
+
+function findLayerByName(raw: string, layers: GisLayer[]) {
+  const value = raw
+    .trim()
+    .replace(/^(the|layer)\s+/i, "")
+    .toLowerCase();
+  return (
+    layers.find((layer) => layer.name.toLowerCase() === value) ??
+    layers.find((layer) => layer.name.toLowerCase().includes(value))
   );
 }
 
@@ -439,14 +540,12 @@ function findMentionedLayer(text: string, layers: GisLayer[], active: GisLayer |
       .sort((a, b) => b.name.length - a.name.length)
       .find((layer) => lower.includes(layer.name.toLowerCase())) ??
     active ??
-    layers[0]
+    layers[0] ??
+    null
   );
 }
 
-function parseCondition(
-  text: string,
-  layer: GisLayer,
-): { field: string; operator: Operator; value: string } | null {
+function parseCondition(text: string, layer: GisLayer) {
   const fields = propertyKeys(layer.data.features as never).sort((a, b) => b.length - a.length);
   const lower = text.toLowerCase();
   const field = fields.find((candidate) => lower.includes(candidate.toLowerCase()));
@@ -456,15 +555,15 @@ function parseCondition(
     /\s*(?:is\s*)?(>=|<=|>|<|=|equals?|contains?|starts\s+with)\s*["']?([^"']+?)["']?(?:\s+(?:and\s+)?(?:create|make|as|into)\b.*)?$/i,
   );
   if (!match) return null;
-  const rawOperator = match[1]?.toLowerCase() ?? "contains";
+  const raw = match[1]?.toLowerCase() ?? "contains";
   const operator: Operator =
-    rawOperator === ">" || rawOperator === ">="
+    raw === ">" || raw === ">="
       ? "greater"
-      : rawOperator === "<" || rawOperator === "<="
+      : raw === "<" || raw === "<="
         ? "less"
-        : rawOperator.startsWith("equal") || rawOperator === "="
+        : raw.startsWith("equal") || raw === "="
           ? "equals"
-          : rawOperator.startsWith("start")
+          : raw.startsWith("start")
             ? "starts"
             : "contains";
   return { field, operator, value: (match[2] ?? "").trim() };
@@ -475,8 +574,11 @@ function compare(raw: unknown, operator: Operator, expected: string) {
   if (operator === "greater" || operator === "less") {
     const left = Number(value.replaceAll(",", ""));
     const right = Number(expected.replaceAll(",", ""));
-    if (!Number.isFinite(left) || !Number.isFinite(right)) return false;
-    return operator === "greater" ? left > right : left < right;
+    return (
+      Number.isFinite(left) &&
+      Number.isFinite(right) &&
+      (operator === "greater" ? left > right : left < right)
+    );
   }
   const left = value.toLowerCase();
   const right = expected.toLowerCase();
@@ -488,18 +590,87 @@ function compare(raw: unknown, operator: Operator, expected: string) {
 const operatorLabel = (operator: Operator) =>
   ({ contains: "contains", equals: "=", starts: "starts with", greater: ">", less: "<" })[operator];
 
+function analyzeMap(
+  layers: GisLayer[],
+  focused: GisLayer | null,
+  selections: Array<{ layerId: string; index: number }>,
+) {
+  if (!layers.length)
+    return "This project has no layers yet. Add public data, import a file, or draw features, then ask again.";
+  const visible = layers.filter((layer) => layer.visible);
+  const layer = (focused ?? visible[0] ?? layers[0])!;
+  const total = layers.reduce((sum, item) => sum + item.data.features.length, 0);
+  const geometry = new Map<string, number>();
+  layer.data.features.forEach((feature) =>
+    geometry.set(feature.geometry.type, (geometry.get(feature.geometry.type) ?? 0) + 1),
+  );
+  const insights: string[] = [];
+  for (const field of propertyKeys(layer.data.features as never)
+    .filter((item) => !item.startsWith("__"))
+    .slice(0, 25)) {
+    const values = layer.data.features
+      .map((feature) => feature.properties?.[field])
+      .filter((value) => value !== null && value !== undefined && value !== "");
+    const numbers = values.map(Number).filter(Number.isFinite);
+    if (numbers.length >= Math.max(3, values.length * 0.8)) {
+      const mean = numbers.reduce((sum, value) => sum + value, 0) / numbers.length;
+      insights.push(
+        `${field}: range ${Math.min(...numbers).toLocaleString()}–${Math.max(...numbers).toLocaleString()}, average ${mean.toLocaleString(undefined, { maximumFractionDigits: 2 })}`,
+      );
+    } else if (values.length) {
+      const counts = new Map<string, number>();
+      values.forEach((value) => counts.set(String(value), (counts.get(String(value)) ?? 0) + 1));
+      if (counts.size > 1) {
+        const top = [...counts]
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 3)
+          .map(([value, count]) => `${value || "No value"} (${count})`)
+          .join(", ");
+        insights.push(`${field}: ${counts.size} distinct values; most common ${top}`);
+      }
+    }
+    if (insights.length >= 4) break;
+  }
+  const selected = selections.filter((selection) => selection.layerId === layer.id).length;
+  return [
+    `Project overview: ${layers.length} layers, ${visible.length} visible, ${total.toLocaleString()} loaded features.`,
+    `Focused layer “${layer.name}”: ${layer.data.features.length.toLocaleString()} features (${[...geometry].map(([type, count]) => `${count} ${type}`).join(", ") || "no loaded geometry"})${selected ? `; ${selected} selected` : ""}.`,
+    ...(insights.length
+      ? ["Attribute patterns:", ...insights.map((item) => `• ${item}`)]
+      : ["No sufficiently populated attributes are loaded for a pattern summary."]),
+    "These describe the currently loaded viewport and do not prove causation. Use Spatial analysis for buffers, intersections, clipping, dissolve, and proximity work.",
+  ].join("\n");
+}
+
+function contextualAnswer(layers: GisLayer[], active: GisLayer | null, projectName: string) {
+  const count = layers.reduce((sum, layer) => sum + layer.data.features.length, 0);
+  return `I don’t yet recognize that as a direct action. “${projectName}” has ${layers.length} layers and ${count.toLocaleString()} loaded features${active ? `; “${active.name}” is active` : ""}. Name the layer and outcome—for example, “hide Roads,” “color Roads by TYPE,” “select Parcels where ACRES > 10,” or ask “how do I …?” Your request is saved in this project’s assistant history.`;
+}
+
 function helpAnswer(prompt: string): string | null {
+  if (/\brename\b.*\blayer\b/.test(prompt))
+    return "Double-click the layer name in the Layers panel, type the new name, and confirm. Or tell me: “Rename Roads to Access routes.”";
   if (/\b(import|kml|kmz|shp|shapefile|csv|gpx)\b/.test(prompt))
-    return "Drop GeoJSON, KML, KMZ, zipped Shapefile, GPX or CSV files onto the Layers panel. LandDraft adds them to Imported files and zooms to the first result.";
+    return "Drop GeoJSON, KML, KMZ, zipped Shapefile, GPX, or CSV files onto the Layers panel. They are added to Imported files.";
   if (/\b(label|labels|attribute label)\b/.test(prompt))
-    return "Expand a layer, open Style, choose one or more label attribute fields, and switch labels on. Advanced labeling controls separators and zoom visibility.";
-  if (/\b(group|subgroup|folder)\b/.test(prompt))
-    return "Use the folder-plus button to create a group, or the smaller folder-plus on any group to create a subgroup. Collapse with the caret; the eye and palette apply to the whole branch.";
+    return "Expand a layer, open Style, choose one or more label fields, and turn labels on. Advanced labeling controls separators and zoom visibility.";
+  if (/\b(color|colour|symbolog|categor)\b/.test(prompt))
+    return "Expand a layer, open Style, then choose Color features by attribute. Pick a field and set each distinct value’s color or visibility.";
+  if (/\b(group|subgroup|folder|sublayer|feature list)\b/.test(prompt))
+    return "Use folder-plus for groups and subgroups. Expand a layer, then Advanced layer options → Features as sublayers to search, select, zoom, rename, hide, or remove features.";
+  if (/\b(vertex|vertices|reshape|edit geometry)\b/.test(prompt))
+    return "Select one feature, turn on Edit vertices, then drag a square vertex. Click a faint midpoint to add a vertex. Points can be dragged; lines and polygons reshaped.";
+  if (/\b(multiple|multi-select|box select|select many)\b/.test(prompt))
+    return "Use Multi-select to click features one at a time, or Box select to drag across an area. The active layer is preferred where features overlap.";
   if (/\b(snap|snapping|draw)\b/.test(prompt))
-    return "Turn on Snap in the draw toolbar, then add a point, line or area. New vertices snap to nearby visible features; GPS point uses your device location when permission is available.";
-  if (/\b(export|kmz|pdf|shp)\b/.test(prompt))
-    return "Open Export in the top bar for map PDF, GeoJSON, KML, KMZ or Shapefile output. A LandDraft AI report adds the current map, legend and selected attributes.";
+    return "Turn on Snap, then draw a point, line, or area. New vertices snap to nearby visible features; GPS point uses device location with permission.";
+  if (/\b(export|kmz|pdf|shp|print)\b/.test(prompt))
+    return "Open Export for PDF, GeoJSON, KML, KMZ, or Shapefile. Print map opens the layout editor; reports include the map, legend, and selected attributes.";
   if (/\b(parcel|ownership|tax)\b/.test(prompt))
-    return "Open Public data, choose the project states, search parcel, and use a county filter where the publisher supports it. Parcel fills start transparent and stream only for the visible area at a close zoom.";
+    return "Open Public data, choose project states, search parcel, and use a county filter where supported. Parcel data streams for the visible area at close zoom.";
+  if (/\b(spatial|buffer|intersect|clip|dissolve|proximity)\b/.test(prompt))
+    return "Open Spatial analysis, choose an operation and inputs, and LandDraft creates a new Working layer without altering originals.";
+  if (/\b(project|subproject|autosave|history)\b/.test(prompt))
+    return "Use the project name in the top bar to switch, duplicate, create a project or subproject, manage overlays, toggle autosave, and restore history.";
   return null;
 }
