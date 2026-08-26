@@ -84,7 +84,10 @@ export async function probeConnectionUrl(
 ): Promise<void> {
   const timeout = withTimeout(timeoutMs);
   try {
-    const target = classifyUrl(url) === "arcgis" ? `${normalizeArcgisLayerUrl(url)}?f=json` : url;
+    const target =
+      classifyUrl(url) === "arcgis"
+        ? `${normalizeArcgisLayerUrl(url)}/query?where=1%3D1&returnCountOnly=true&f=json`
+        : url;
     const response = await fetch(target, {
       cache: "no-store",
       signal: timeout.signal,
@@ -101,8 +104,11 @@ export async function probeConnectionUrl(
         error?: { message?: string };
         version?: number;
         features?: unknown[];
+        count?: number;
       };
       if (json.error) throw new Error(json.error.message ?? "The service returned an error");
+      if (classifyUrl(url) === "arcgis" && typeof json.count !== "number")
+        throw new Error("The ArcGIS layer did not accept a lightweight data query");
       if (/\/styles\//i.test(url) && json.version !== 8)
         throw new Error("The endpoint did not return a MapLibre style");
       if (expectDataService && classifyUrl(url) !== "arcgis" && !Array.isArray(json.features))
