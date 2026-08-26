@@ -13,6 +13,7 @@ import {
   PlayCircle,
   LogOut,
   UserRound,
+  Share2,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -24,6 +25,7 @@ import { ExportPanel } from "./ExportMenu";
 import { ProjectMenu } from "./ProjectMenu";
 import { LandDraftMark } from "@/components/brand/LandDraftMark";
 import { useTours } from "./TourProvider";
+import { SharePanel } from "./SharePanel";
 
 export function TopBar({
   onTogglePanel,
@@ -48,6 +50,7 @@ export function TopBar({
   const [showAbout, setShowAbout] = useState(false);
   const [showProjects, setShowProjects] = useState(false);
   const [showExport, setShowExport] = useState(false);
+  const [showShare, setShowShare] = useState(false);
 
   const save = async () => {
     await wb.saveProject();
@@ -80,21 +83,23 @@ export function TopBar({
         </div>
       </div>
 
-      <label className="ml-2 hidden items-center gap-1 md:flex">
-        <FolderOpen className="size-3.5 text-muted-foreground" />
-        <select
-          value={wb.projectId}
-          onChange={(event) => void wb.openProject(event.target.value)}
-          aria-label="Switch project"
-          className="w-44 rounded-xl border border-transparent bg-secondary px-3 py-1.5 text-xs font-medium outline-none focus:border-primary"
-        >
-          {wb.projects.map((project) => (
-            <option key={project.id} value={project.id}>
-              {project.name}
-            </option>
-          ))}
-        </select>
-      </label>
+      {wb.canEditProject && (
+        <label className="ml-2 hidden items-center gap-1 md:flex">
+          <FolderOpen className="size-3.5 text-muted-foreground" />
+          <select
+            value={wb.projectId}
+            onChange={(event) => void wb.openProject(event.target.value)}
+            aria-label="Switch project"
+            className="w-44 rounded-xl border border-transparent bg-secondary px-3 py-1.5 text-xs font-medium outline-none focus:border-primary"
+          >
+            {wb.projects.map((project) => (
+              <option key={project.id} value={project.id}>
+                {project.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
 
       <div className="ml-auto flex items-center gap-1">
         <BarBtn
@@ -105,33 +110,43 @@ export function TopBar({
           primary
           tourId="top-ai"
         />
-        <BarBtn
-          icon={<Database className="size-4" />}
-          label="Public data"
-          help="Find and add official public datasets"
-          onClick={() => setDrawerOpen(true)}
-          tourId="top-public-data"
-        />
-        <BarBtn
-          icon={<Beaker className="size-4" />}
-          label="Analysis"
-          help="Create buffers, centroids, intersections and other derived layers"
-          onClick={() => setAnalysisOpen(!analysisOpen)}
-          tourId="top-analysis"
-        />
+        {wb.canEditProject && (
+          <BarBtn
+            icon={<Database className="size-4" />}
+            label="Public data"
+            help="Find and add official public datasets"
+            onClick={() => setDrawerOpen(true)}
+            tourId="top-public-data"
+          />
+        )}
+        {wb.canEditProject && (
+          <BarBtn
+            icon={<Beaker className="size-4" />}
+            label="Analysis"
+            help="Create buffers, centroids, intersections and other derived layers"
+            onClick={() => setAnalysisOpen(!analysisOpen)}
+            tourId="top-analysis"
+          />
+        )}
         <BarBtn
           icon={<Table2 className="size-4" />}
           label="Table"
-          help="Search and edit layer attribute tables"
+          help={
+            wb.canEditProject
+              ? "Search and edit layer attribute tables"
+              : "Search shared attributes"
+          }
           onClick={() => setTableOpen(!tableOpen)}
           tourId="top-table"
         />
-        <BarBtn
-          icon={<Save className="size-4" />}
-          label="Save"
-          help="Save this project and add a restore point"
-          onClick={() => void save()}
-        />
+        {wb.canEditProject && (
+          <BarBtn
+            icon={<Save className="size-4" />}
+            label="Save"
+            help="Save this project and add a restore point"
+            onClick={() => void save()}
+          />
+        )}
         <BarBtn
           icon={<Printer className="size-4" />}
           label="Print map"
@@ -140,25 +155,40 @@ export function TopBar({
           tourId="top-print"
         />
         <BarBtn
-          icon={<FolderOpen className="size-4" />}
-          label="Projects"
-          help="Switch, duplicate, or organize projects"
+          icon={<Share2 className="size-4" />}
+          label="Share"
+          help="Create secure map links and manage access"
           onClick={() => {
-            setShowProjects((value) => !value);
+            setShowShare((value) => !value);
+            setShowProjects(false);
             setShowExport(false);
           }}
-          tourId="top-projects"
+          tourId="top-share"
         />
-        <BarBtn
-          icon={<FileDown className="size-4" />}
-          label="Export"
-          help="Export map data to GIS file formats"
-          onClick={() => {
-            setShowExport((value) => !value);
-            setShowProjects(false);
-          }}
-          tourId="top-export"
-        />
+        {wb.canEditProject && (
+          <BarBtn
+            icon={<FolderOpen className="size-4" />}
+            label="Projects"
+            help="Switch, duplicate, or organize projects"
+            onClick={() => {
+              setShowProjects((value) => !value);
+              setShowExport(false);
+            }}
+            tourId="top-projects"
+          />
+        )}
+        {wb.canEditProject && (
+          <BarBtn
+            icon={<FileDown className="size-4" />}
+            label="Export"
+            help="Export map data to GIS file formats"
+            onClick={() => {
+              setShowExport((value) => !value);
+              setShowProjects(false);
+            }}
+            tourId="top-export"
+          />
+        )}
         <button
           onClick={() => {
             setShowAbout((s) => !s);
@@ -189,6 +219,12 @@ export function TopBar({
       {showExport && (
         <div className="float-surface absolute right-2 top-14 w-80 rounded-2xl">
           <ExportPanel onDone={() => setShowExport(false)} />
+        </div>
+      )}
+
+      {showShare && (
+        <div className="float-surface absolute right-2 top-14 rounded-2xl">
+          <SharePanel onClose={() => setShowShare(false)} />
         </div>
       )}
 

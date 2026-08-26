@@ -12,9 +12,9 @@ OAuth secrets, session tokens, or signing files.
 The immutable tag `landdraft-pre-ai-symbology-20260824` identifies the last published release before
 the categorized-symbology and GIS-assistant upgrade.
 
-| Copy | Repository | Commit at tag |
-| --- | --- | --- |
-| Primary source | `https://github.com/Craygee/terrasketch-gis.git` | `d2a04276a3526ff429c72661fb7c3176e6eaee59` |
+| Copy                        | Repository                                          | Commit at tag                              |
+| --------------------------- | --------------------------------------------------- | ------------------------------------------ |
+| Primary source              | `https://github.com/Craygee/terrasketch-gis.git`    | `d2a04276a3526ff429c72661fb7c3176e6eaee59` |
 | Connected deployment source | `https://github.com/Craygee/terra-sketch-buddy.git` | `062a00d9db5426a1feacb42ebbdbfdb3ae415f0a` |
 
 Both tags were pushed to GitHub. Published Git history must remain forward-only: do not force push,
@@ -26,11 +26,11 @@ These files are intentionally kept outside Git tracking under
 `.local-backups/LandDraft-20260824-pre-ai-symbology/` so repository history does not recursively
 contain copies of itself.
 
-| Artifact | Bytes | SHA-256 |
-| --- | ---: | --- |
-| `terrasketch-gis-complete.bundle` | 438,967 | `C8137FDAC3ABABDF53E99BD0C761D6D917E2FBC8B24D17CEB99845410103589D` |
-| `terrasketch-gis-source-d2a0427.zip` | 299,614 | `04186EEA781A777C1123BE67475BB207FB51AB18B1A491686313D0738AE41C77` |
-| `terra-sketch-buddy-complete.bundle` | 396,620 | `F98AC024A676499F10BC4EADF2367B803879E7FD29A8AC7460A757F9454AA9D7` |
+| Artifact                                |   Bytes | SHA-256                                                            |
+| --------------------------------------- | ------: | ------------------------------------------------------------------ |
+| `terrasketch-gis-complete.bundle`       | 438,967 | `C8137FDAC3ABABDF53E99BD0C761D6D917E2FBC8B24D17CEB99845410103589D` |
+| `terrasketch-gis-source-d2a0427.zip`    | 299,614 | `04186EEA781A777C1123BE67475BB207FB51AB18B1A491686313D0738AE41C77` |
+| `terra-sketch-buddy-complete.bundle`    | 396,620 | `F98AC024A676499F10BC4EADF2367B803879E7FD29A8AC7460A757F9454AA9D7` |
 | `terra-sketch-buddy-source-062a00d.zip` | 299,614 | `7DDA284523160A5E26DBD9215B7625D7156A85654BE566C11D13CA29A3A557B4` |
 
 Both Git bundles passed `git bundle verify` and record complete repository history. Both source ZIPs
@@ -212,3 +212,20 @@ Primary commit `d7a597b` completes the request above. It adds:
 Verification for this release: TypeScript completed with no errors, ESLint completed with no
 errors (existing Fast Refresh warnings only), the production client/SSR/Cloudflare build completed,
 and the unauthenticated local sign-in surface opened with no browser console errors.
+
+## Secure map-sharing release
+
+The sharing release adds `supabase/migrations/202608260001_secure_map_sharing.sql` and a matching
+client module in `src/lib/gis/sharing.ts`. It provides signed-in viewer, editor-copy, and
+administrator roles; secure snapshots limited to selected layers/features; revocable email access;
+shared-map switching; near-live share refresh; editor-owned working copies and administrator review;
+and a dedicated Share panel. Share URLs use `?share=<uuid>`, and Google OAuth preserves that return
+path. Viewer screens intentionally omit drawing, styling, analysis, save, project-management, and
+GIS export controls while retaining layer visibility, feature inspection, attributes, basemaps,
+printing, and help.
+
+Project map position is stored both in the project snapshot and in `projects.map_view`. A lightweight
+debounced RPC updates the latter after map movement, independent of the autosave toggle, so the last
+center, zoom, bearing, and pitch follow the account across devices. `projects.last_opened_at` controls
+which project opens after sign-in. Shared-map assets use the private path pattern
+`<uploader>/<project>/shares/<share>/state.json`; storage RLS checks the share ID before download.

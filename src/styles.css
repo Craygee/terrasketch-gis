@@ -276,6 +276,10 @@
   max-height: 78vh;
 }
 
+.share-panel-height {
+  max-height: 82vh;
+}
+
 .mobile-sheet-height {
   max-height: 62vh;
 }
@@ -291,6 +295,10 @@
 
   .project-menu-height {
     max-height: 78dvh;
+  }
+
+  .share-panel-height {
+    max-height: 82dvh;
   }
 
   .mobile-sheet-height {

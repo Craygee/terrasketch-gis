@@ -1,4 +1,4 @@
-import type { ProjectState } from "./types";
+import type { MapViewState, ProjectState } from "./types";
 import {
   cloudConfigured,
   cloudDataRequest,
@@ -107,6 +107,8 @@ interface CloudProjectRow {
   autosave: boolean;
   state_path: string;
   parent_project_id: string | null;
+  last_opened_at: string;
+  map_view: MapViewState;
 }
 
 interface CloudVersionRow {
@@ -174,20 +176,30 @@ const cloudVersions = async (projectId: string): Promise<ProjectVersion[]> => {
   }));
 };
 
-const storedFromCloud = async (row: CloudProjectRow): Promise<StoredProject> => ({
-  id: row.id,
-  userId: row.owner_id,
-  name: row.name,
-  createdAt: new Date(row.created_at).getTime(),
-  updatedAt: new Date(row.updated_at).getTime(),
-  autosave: row.autosave,
-  state: await downloadProjectState(row.state_path),
-  versions: await cloudVersions(row.id),
-  parentProjectId: row.parent_project_id,
-});
+const storedFromCloud = async (row: CloudProjectRow): Promise<StoredProject> => {
+  const state = await downloadProjectState(row.state_path);
+  return {
+    id: row.id,
+    userId: row.owner_id,
+    name: row.name,
+    createdAt: new Date(row.created_at).getTime(),
+    updatedAt: new Date(row.updated_at).getTime(),
+    autosave: row.autosave,
+    state: { ...state, mapView: row.map_view ?? state.mapView },
+    versions: await cloudVersions(row.id),
+    parentProjectId: row.parent_project_id,
+  };
+};
 
 const cloudProjectSelect =
-  "id,owner_id,name,created_at,updated_at,autosave,state_path,parent_project_id";
+  "id,owner_id,name,created_at,updated_at,autosave,state_path,parent_project_id,last_opened_at,map_view";
+
+const touchCloudProject = async (projectId: string) => {
+  await cloudDataRequest("/rest/v1/rpc/touch_project_opened", {
+    method: "POST",
+    body: JSON.stringify({ p_project_id: projectId }),
+  });
+};
 
 const createCloudProject = async (
   userId: string,
@@ -281,7 +293,9 @@ export const workspaceProjectStore = {
       const rows = await cloudDataRequest<CloudProjectRow[]>(
         `/rest/v1/projects?select=${cloudProjectSelect}&id=eq.${encodeURIComponent(projectId)}&limit=1`,
       );
-      return rows[0] ? storedFromCloud(rows[0]) : null;
+      if (!rows[0]) return null;
+      await touchCloudProject(rows[0].id);
+      return storedFromCloud(rows[0]);
     }
     const projects = readProjects();
     const index = projects.findIndex((item) => item.userId === userId && item.id === projectId);
@@ -299,7 +313,7 @@ export const workspaceProjectStore = {
   async loadLast(userId: string): Promise<StoredProject | null> {
     if (cloudConfigured) {
       const rows = await cloudDataRequest<CloudProjectRow[]>(
-        `/rest/v1/projects?select=${cloudProjectSelect}&order=updated_at.desc&limit=1`,
+        `/rest/v1/projects?select=${cloudProjectSelect}&order=last_opened_at.desc,updated_at.desc&limit=1`,
       );
       return rows[0] ? storedFromCloud(rows[0]) : null;
     }
@@ -403,6 +417,22 @@ export const workspaceProjectStore = {
     const index = projects.findIndex((item) => item.userId === userId && item.id === projectId);
     if (index < 0) return;
     projects[index] = { ...(projects[index] as StoredProject), autosave };
+    writeProjects(projects);
+  },
+
+  async setMapView(userId: string, projectId: string, mapView: MapViewState): Promise<void> {
+    if (cloudConfigured) {
+      await cloudDataRequest("/rest/v1/rpc/update_project_view", {
+        method: "POST",
+        body: JSON.stringify({ p_project_id: projectId, p_map_view: mapView }),
+      });
+      return;
+    }
+    const projects = readProjects();
+    const index = projects.findIndex((item) => item.userId === userId && item.id === projectId);
+    if (index < 0) return;
+    const project = projects[index] as StoredProject;
+    projects[index] = { ...project, state: { ...project.state, mapView } };
     writeProjects(projects);
   },
 

@@ -163,6 +163,7 @@ export interface ProjectState {
   groups: LayerGroup[];
   layers: GisLayer[];
   basemapId: string;
+  mapView?: MapViewState;
   units: AreaUnitsPref;
   selectedStates?: string[];
   derivedLayerGroupId?: string;
@@ -171,7 +172,19 @@ export interface ProjectState {
   printComposition?: PrintComposition;
   assistant?: AssistantConversation;
   connectionHints?: Record<string, ConnectionRecoveryHint>;
+  shareSource?: {
+    shareId: string;
+    sourceProjectId: string;
+    sourceName: string;
+  };
   savedAt?: number;
+}
+
+export interface MapViewState {
+  center: [number, number];
+  zoom: number;
+  bearing: number;
+  pitch: number;
 }
 
 export interface ConnectionRecoveryHint {

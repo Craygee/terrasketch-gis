@@ -187,13 +187,15 @@ export function AttributeTable() {
           >
             <CheckSquare className="size-3.5" /> Select {rows.length}
           </button>
-          <button
-            onClick={createFromResults}
-            disabled={rows.length === 0}
-            className="flex items-center gap-1 rounded-lg bg-primary px-2 py-1 text-xs text-primary-foreground disabled:opacity-50"
-          >
-            <CopyPlus className="size-3.5" /> New layer
-          </button>
+          {wb.canEditProject && (
+            <button
+              onClick={createFromResults}
+              disabled={rows.length === 0}
+              className="flex items-center gap-1 rounded-lg bg-primary px-2 py-1 text-xs text-primary-foreground disabled:opacity-50"
+            >
+              <CopyPlus className="size-3.5" /> New layer
+            </button>
+          )}
         </div>
       )}
 

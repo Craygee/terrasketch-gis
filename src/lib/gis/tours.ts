@@ -11,7 +11,7 @@ export interface TourStep {
  * Add tour-worthy features here and increment TOUR_VERSION. Users who keep
  * feature tips enabled will be offered the refreshed walkthrough once.
  */
-export const TOUR_VERSION = 2;
+export const TOUR_VERSION = 3;
 
 export const TOUR_REGISTRY: Record<TourKind, TourStep[]> = {
   basic: [
@@ -38,6 +38,12 @@ export const TOUR_REGISTRY: Record<TourKind, TourStep[]> = {
       target: "top-ai",
       title: "You can ask the AI",
       body: "Ask LandDraft AI to find data, query attributes, select features, explain tools or prepare a report.",
+    },
+    {
+      id: "share",
+      target: "top-share",
+      title: "Share a focused live map",
+      body: "Choose the layers or selected features to include, capture the current extent, and grant view, editor-copy, or administrator access.",
     },
     {
       id: "analysis",

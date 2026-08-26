@@ -101,6 +101,8 @@ export function MapCanvas() {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapObj = useRef<MlMap | null>(null);
   const wb = useWorkbench();
+  const wbRef = useRef(wb);
+  wbRef.current = wb;
   const {
     setMap,
     setDrawerOpen,
@@ -128,11 +130,16 @@ export function MapCanvas() {
   const styleSignatureRef = useRef(new Map<string, string>());
   const orderSignatureRef = useRef("");
   const selectedStateRef = useRef(new Map<string, Set<number>>());
+  const appliedProjectRef = useRef("");
 
   const drawModeRef = useRef(wb.drawMode);
   drawModeRef.current = wb.drawMode;
   const draftRef = useRef(draft);
   draftRef.current = draft;
+
+  useEffect(() => {
+    if (!wb.canEditProject && editEnabled) setEditEnabled(false);
+  }, [editEnabled, setEditEnabled, wb.canEditProject]);
 
   /* ---------------- map init ---------------- */
   useEffect(() => {
@@ -140,8 +147,10 @@ export function MapCanvas() {
     const map = new MlMap({
       container: containerRef.current,
       style: getBasemapStyle(wb.basemapId),
-      center: TEXAS_CENTER,
-      zoom: 6,
+      center: wb.mapView?.center ?? TEXAS_CENTER,
+      zoom: wb.mapView?.zoom ?? 6,
+      bearing: wb.mapView?.bearing ?? 0,
+      pitch: wb.mapView?.pitch ?? 0,
       attributionControl: { compact: true },
       canvasContextAttributes: { preserveDrawingBuffer: true },
     });
@@ -167,15 +176,39 @@ export function MapCanvas() {
     observer.observe(containerRef.current);
     map.on("mousemove", (e) => setCursor({ lng: e.lngLat.lng, lat: e.lngLat.lat }));
     map.on("mouseout", () => setCursor(null));
+    const rememberView = () => {
+      const center = map.getCenter();
+      wbRef.current.setMapView({
+        center: [center.lng, center.lat],
+        zoom: map.getZoom(),
+        bearing: map.getBearing(),
+        pitch: map.getPitch(),
+      });
+    };
+    map.on("moveend", rememberView);
     return () => {
       observer.disconnect();
       map.off("style.load", onStyleLoad);
+      map.off("moveend", rememberView);
       map.remove();
       mapObj.current = null;
       setMap(null);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    const map = mapObj.current;
+    const viewKey = `${wb.projectId}:${wb.activeShare?.id ?? "project"}:${wb.activeShare?.updatedAt ?? ""}`;
+    if (!map || !ready || appliedProjectRef.current === viewKey) return;
+    appliedProjectRef.current = viewKey;
+    map.jumpTo({
+      center: wb.mapView.center,
+      zoom: wb.mapView.zoom,
+      bearing: wb.mapView.bearing,
+      pitch: wb.mapView.pitch,
+    });
+  }, [ready, wb.activeShare?.id, wb.activeShare?.updatedAt, wb.mapView, wb.projectId]);
 
   useEffect(() => {
     const applyVerifiedBasemap = (event: Event) => {

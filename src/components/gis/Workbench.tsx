@@ -16,6 +16,7 @@ import { SelectionToolbar } from "./SelectionToolbar";
 import { AuthGate } from "@/lib/auth";
 import { FeatureDestinationDialog } from "./FeatureDestinationDialog";
 import { TourProvider } from "./TourProvider";
+import { SharedLayerPanel } from "./SharedLayerPanel";
 
 const AiAssistant = lazy(() =>
   import("./AiAssistant").then((module) => ({ default: module.AiAssistant })),
@@ -85,31 +86,35 @@ function WorkbenchShell() {
             panelOpen ? "translate-x-0" : "-translate-x-full md:hidden",
           )}
         >
-          <LayerPanel />
+          {wb.canEditProject ? <LayerPanel /> : <SharedLayerPanel />}
         </aside>
 
         <main className="relative min-w-0 flex-1">
           <MapCanvas />
-          <SelectionToolbar />
+          {wb.canEditProject && <SelectionToolbar />}
 
           <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex flex-col gap-2 p-3">
             <div className="pointer-events-auto flex flex-wrap items-start justify-between gap-2">
               <div data-tour="map-search">
                 <SearchBox />
               </div>
-              <div className="hidden md:block">
-                <div data-tour="draw-toolbar">
-                  <DrawToolbar />
+              {wb.canEditProject && (
+                <div className="hidden md:block">
+                  <div data-tour="draw-toolbar">
+                    <DrawToolbar />
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
           </div>
 
-          <div className="pointer-events-auto absolute bottom-16 left-1/2 z-20 -translate-x-1/2 md:hidden">
-            <div data-tour="draw-toolbar">
-              <DrawToolbar />
+          {wb.canEditProject && (
+            <div className="pointer-events-auto absolute bottom-16 left-1/2 z-20 -translate-x-1/2 md:hidden">
+              <div data-tour="draw-toolbar">
+                <DrawToolbar />
+              </div>
             </div>
-          </div>
+          )}
 
           <div className="pointer-events-auto absolute bottom-16 right-14 z-20 md:bottom-24">
             <div data-tour="basemap-control">

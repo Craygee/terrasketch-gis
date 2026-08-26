@@ -33,6 +33,7 @@ const supportedSocialProviders = [
   "apple",
 ] as const satisfies readonly CloudOAuthProvider[];
 const defaultCloudSocialProviders = ["google"] as const satisfies readonly CloudOAuthProvider[];
+const AUTH_RETURN_KEY = "landdraft.auth-return.v1";
 
 interface CloudAuthSettings {
   external?: Record<string, boolean>;
@@ -145,7 +146,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               user: currentUser,
             });
             setRecoveryMode(hash.get("type") === "recovery");
-            window.history.replaceState({}, document.title, window.location.pathname);
+            const authReturn = window.localStorage.getItem(AUTH_RETURN_KEY);
+            window.localStorage.removeItem(AUTH_RETURN_KEY);
+            window.history.replaceState(
+              {},
+              document.title,
+              authReturn || `${window.location.pathname}${window.location.search}`,
+            );
           }
           const session = await getCloudSession().catch(() => null);
           if (session) {
@@ -206,6 +213,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signInWithProvider(provider) {
         if (!cloudConfigured)
           throw new Error("Social sign-in becomes available when cloud accounts are connected");
+        window.localStorage.setItem(
+          AUTH_RETURN_KEY,
+          `${window.location.pathname}${window.location.search}`,
+        );
         window.location.assign(createCloudOAuthUrl(provider, window.location.origin));
       },
       async signUp(rawName, rawEmail, password) {

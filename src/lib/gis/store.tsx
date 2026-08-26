@@ -20,6 +20,7 @@ import {
   type PrintComposition,
   type AssistantConversation,
   type ConnectionRecoveryHint,
+  type MapViewState,
 } from "./types";
 import {
   workspaceProjectStore,
@@ -29,6 +30,7 @@ import {
   type StoredProject,
 } from "./project";
 import { useAuth } from "@/lib/auth";
+import { downloadSharedState, shareStore, type MapShare, type ShareRole } from "./sharing";
 
 export type DrawMode =
   | "none"
@@ -57,6 +59,10 @@ interface WorkbenchState {
   groups: LayerGroup[];
   layers: GisLayer[];
   basemapId: string;
+  mapView: MapViewState;
+  accessRole: "owner" | ShareRole;
+  activeShare: MapShare | null;
+  shareSource: ProjectState["shareSource"];
   units: AreaUnitsPref;
   activeLayerId: string | null;
   selectedLayerIds: string[];
@@ -93,6 +99,10 @@ const initialState = (): WorkbenchState => ({
   ],
   layers: [],
   basemapId: "street",
+  mapView: { center: [-98.5, 31.3], zoom: 6, bearing: 0, pitch: 0 },
+  accessRole: "owner",
+  activeShare: null,
+  shareSource: undefined,
   units: { area: "acres", length: "miles" },
   activeLayerId: null,
   selectedLayerIds: [],
@@ -121,6 +131,7 @@ const blankProjectState = (name: string): ProjectState => ({
   ],
   layers: [],
   basemapId: "street",
+  mapView: { center: [-98.5, 31.3], zoom: 6, bearing: 0, pitch: 0 },
   units: { area: "acres", length: "miles" },
   selectedStates: ["TX"],
   derivedLayerGroupId: "working",
@@ -157,7 +168,12 @@ const durableLayer = (layer: GisLayer): GisLayer => {
   };
 };
 
-const normalizedProject = (project: StoredProject, projects: ProjectSummary[]) => {
+const normalizedProject = (
+  project: StoredProject,
+  projects: ProjectSummary[],
+  accessRole: WorkbenchState["accessRole"] = "owner",
+  activeShare: MapShare | null = null,
+) => {
   const stored = project.state;
   const groups = stored.groups.some((group) => group.id === "working")
     ? stored.groups
@@ -174,6 +190,16 @@ const normalizedProject = (project: StoredProject, projects: ProjectSummary[]) =
     groups,
     layers: stored.layers.map((layer, index) => durableLayer(normalizedLayer(layer, index))),
     basemapId: stored.basemapId,
+    mapView: activeShare?.mapView ??
+      stored.mapView ?? {
+        center: [-98.5, 31.3] as [number, number],
+        zoom: 6,
+        bearing: 0,
+        pitch: 0,
+      },
+    accessRole,
+    activeShare,
+    shareSource: stored.shareSource,
     units: stored.units,
     activeLayerId: null,
     selectedLayerIds: [],
@@ -200,6 +226,7 @@ const stateToProject = (state: WorkbenchState): ProjectState => ({
   groups: state.groups,
   layers: state.layers.map(durableLayer),
   basemapId: state.basemapId,
+  mapView: state.mapView,
   units: state.units,
   selectedStates: state.selectedStates,
   derivedLayerGroupId: state.derivedLayerGroupId,
@@ -208,6 +235,7 @@ const stateToProject = (state: WorkbenchState): ProjectState => ({
   ...(state.printComposition ? { printComposition: state.printComposition } : {}),
   assistant: state.assistant,
   connectionHints: state.connectionHints,
+  ...(state.shareSource ? { shareSource: state.shareSource } : {}),
 });
 
 export interface WorkbenchApi extends WorkbenchState {
@@ -241,6 +269,7 @@ export interface WorkbenchApi extends WorkbenchState {
   setSelectedStates: (states: string[]) => void;
   setDerivedLayerGroupId: (groupId: string) => void;
   setBasemapId: (id: string) => void;
+  setMapView: (view: MapViewState) => void;
   setUnits: (units: Partial<AreaUnitsPref>) => void;
   setProjectName: (name: string) => void;
   appendFeature: (layerId: string, feature: FeatureCollection["features"][number]) => void;
@@ -260,6 +289,9 @@ export interface WorkbenchApi extends WorkbenchState {
   promoteProject: (id: string) => Promise<void>;
   toggleSubprojectOverlay: (id: string, enabled: boolean) => Promise<void>;
   openProject: (id: string) => Promise<void>;
+  openSharedMap: (id: string) => Promise<void>;
+  createSharedWorkingCopy: () => Promise<void>;
+  openReviewProject: (id: string) => Promise<void>;
   deleteProject: (id: string) => Promise<void>;
   restoreVersion: (versionId: string) => Promise<void>;
   setAutosave: (enabled: boolean) => Promise<void>;
@@ -268,6 +300,7 @@ export interface WorkbenchApi extends WorkbenchState {
   layersInGroup: (groupId: string) => GisLayer[];
   activeLayer: GisLayer | null;
   displayLayers: GisLayer[];
+  canEditProject: boolean;
 }
 
 const WorkbenchContext = createContext<WorkbenchApi | null>(null);
@@ -329,10 +362,54 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
   const stateRef = useRef(state);
   stateRef.current = state;
   const autosaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mapViewTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const skipNextAutosave = useRef(true);
   const bootUserId = useRef<string | null>(null);
 
   const patch = useCallback((p: Partial<WorkbenchState>) => setState((s) => ({ ...s, ...p })), []);
+
+  const setShareQuery = useCallback((shareId: string | null) => {
+    const url = new URL(window.location.href);
+    if (shareId) url.searchParams.set("share", shareId);
+    else url.searchParams.delete("share");
+    window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+  }, []);
+
+  const loadShareIntoState = useCallback(
+    async (userId: string, email: string, shareId: string, projects: ProjectSummary[]) => {
+      const share = await shareStore.get(userId, email, shareId);
+      if (!share) throw new Error("This shared map is unavailable or your access was removed");
+      if (share.role === "admin") {
+        const project = await workspaceProjectStore.load(userId, share.projectId);
+        if (!project) throw new Error("The shared project could not be opened");
+        skipNextAutosave.current = true;
+        setState((current) => ({
+          ...current,
+          ...normalizedProject(project, projects, "admin", share),
+        }));
+        return;
+      }
+      const sharedState = await downloadSharedState(share.statePath);
+      const now = share.updatedAt;
+      const sharedProject: StoredProject = {
+        id: share.projectId,
+        userId: share.ownerId,
+        name: share.name,
+        createdAt: share.createdAt,
+        updatedAt: now,
+        autosave: false,
+        state: { ...sharedState, name: share.name, mapView: share.mapView },
+        versions: [],
+        parentProjectId: null,
+      };
+      skipNextAutosave.current = true;
+      setState((current) => ({
+        ...current,
+        ...normalizedProject(sharedProject, projects, share.role, share),
+      }));
+    },
+    [],
+  );
 
   const hydrateSubprojectOverlays = useCallback(async (userId: string, project: StoredProject) => {
     const enabledIds = project.state.enabledSubprojectIds ?? [];
@@ -657,7 +734,13 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
     async (reason = "manual") => {
       const userId = auth.user?.id;
       const current = stateRef.current;
-      if (!userId || !current.projectId || !current.projectReady) return;
+      if (
+        !userId ||
+        !current.projectId ||
+        !current.projectReady ||
+        !["owner", "admin"].includes(current.accessRole)
+      )
+        return;
       const project = await workspaceProjectStore.save(
         userId,
         current.projectId,
@@ -801,9 +884,53 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       const projects = await workspaceProjectStore.list(userId);
       skipNextAutosave.current = true;
       setState((current) => ({ ...current, ...normalizedProject(project, projects) }));
+      setShareQuery(null);
       void hydrateSubprojectOverlays(userId, project);
     },
-    [auth.user?.id, hydrateSubprojectOverlays],
+    [auth.user?.id, hydrateSubprojectOverlays, setShareQuery],
+  );
+
+  const openSharedMap = useCallback<WorkbenchApi["openSharedMap"]>(
+    async (id) => {
+      const userId = auth.user?.id;
+      const email = auth.user?.email ?? "";
+      if (!userId) return;
+      const projects = await workspaceProjectStore.list(userId);
+      await loadShareIntoState(userId, email, id, projects);
+      setShareQuery(id);
+    },
+    [auth.user?.email, auth.user?.id, loadShareIntoState, setShareQuery],
+  );
+
+  const createSharedWorkingCopy = useCallback<WorkbenchApi["createSharedWorkingCopy"]>(async () => {
+    const userId = auth.user?.id;
+    const current = stateRef.current;
+    if (!userId || !current.activeShare || current.activeShare.role !== "editor") return;
+    const projectId = await shareStore.createWorkingCopy({
+      userId,
+      share: current.activeShare,
+      state: stateToProject(current),
+    });
+    const project = await workspaceProjectStore.load(userId, projectId);
+    if (!project) throw new Error("Your editable copy could not be opened");
+    const projects = await workspaceProjectStore.list(userId);
+    skipNextAutosave.current = true;
+    setState((value) => ({ ...value, ...normalizedProject(project, projects) }));
+    setShareQuery(null);
+  }, [auth.user?.id, setShareQuery]);
+
+  const openReviewProject = useCallback<WorkbenchApi["openReviewProject"]>(
+    async (id) => {
+      const userId = auth.user?.id;
+      if (!userId) return;
+      const project = await workspaceProjectStore.load(userId, id);
+      if (!project) throw new Error("The submitted map could not be opened");
+      const projects = await workspaceProjectStore.list(userId);
+      skipNextAutosave.current = true;
+      setState((current) => ({ ...current, ...normalizedProject(project, projects, "viewer") }));
+      setShareQuery(null);
+    },
+    [auth.user?.id, setShareQuery],
   );
 
   const deleteProject = useCallback<WorkbenchApi["deleteProject"]>(
@@ -888,20 +1015,72 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const userId = auth.user?.id;
+    const share = state.activeShare;
+    if (
+      !userId ||
+      !share ||
+      (!["viewer", "editor"].includes(state.accessRole) && share.ownerId === userId)
+    )
+      return;
+    let checking = false;
+    const checkForShareUpdate = async () => {
+      if (checking) return;
+      checking = true;
+      try {
+        const latest = await shareStore.get(userId, auth.user?.email ?? "", share.id);
+        if (!latest) {
+          const project = await workspaceProjectStore.loadLast(userId);
+          const projects = await workspaceProjectStore.list(userId);
+          if (project) {
+            skipNextAutosave.current = true;
+            setState((current) => ({ ...current, ...normalizedProject(project, projects) }));
+            setShareQuery(null);
+          }
+          return;
+        }
+        if (latest.updatedAt > share.updatedAt || latest.role !== state.accessRole) {
+          const projects = await workspaceProjectStore.list(userId);
+          await loadShareIntoState(userId, auth.user?.email ?? "", share.id, projects);
+        }
+      } catch (error) {
+        console.warn("Shared map refresh will retry", error);
+      } finally {
+        checking = false;
+      }
+    };
+    const timer = window.setInterval(() => void checkForShareUpdate(), 15_000);
+    return () => window.clearInterval(timer);
+  }, [
+    auth.user?.email,
+    auth.user?.id,
+    loadShareIntoState,
+    setShareQuery,
+    state.accessRole,
+    state.activeShare,
+  ]);
+
+  useEffect(() => {
+    const userId = auth.user?.id;
     if (!userId || bootUserId.current === userId) return;
     bootUserId.current = userId;
     void (async () => {
       try {
         await workspaceProjectStore.migrateLocalAccount(userId, auth.user?.email ?? "");
+        const projects = await workspaceProjectStore.list(userId);
+        const requestedShareId = new URL(window.location.href).searchParams.get("share");
+        if (requestedShareId) {
+          await loadShareIntoState(userId, auth.user?.email ?? "", requestedShareId, projects);
+          return;
+        }
         let project = await workspaceProjectStore.loadLast(userId);
         if (!project) {
           const legacy = await workspaceProjectStore.readLegacy();
           const initial = legacy ?? blankProjectState("Untitled project");
           project = await workspaceProjectStore.create(userId, initial.name, initial);
         }
-        const projects = await workspaceProjectStore.list(userId);
+        const refreshedProjects = await workspaceProjectStore.list(userId);
         skipNextAutosave.current = true;
-        setState((current) => ({ ...current, ...normalizedProject(project, projects) }));
+        setState((current) => ({ ...current, ...normalizedProject(project, refreshedProjects) }));
         void hydrateSubprojectOverlays(userId, project);
       } catch (error) {
         setState((current) => ({
@@ -911,10 +1090,38 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
         }));
       }
     })();
-  }, [auth.user?.email, auth.user?.id, hydrateSubprojectOverlays]);
+  }, [auth.user?.email, auth.user?.id, hydrateSubprojectOverlays, loadShareIntoState]);
 
   useEffect(() => {
-    if (!state.projectReady || !state.autosave || !auth.user) return;
+    const userId = auth.user?.id;
+    if (
+      !userId ||
+      !state.projectReady ||
+      !state.projectId ||
+      !["owner", "admin"].includes(state.accessRole)
+    )
+      return;
+    if (mapViewTimer.current) clearTimeout(mapViewTimer.current);
+    mapViewTimer.current = setTimeout(
+      () =>
+        void workspaceProjectStore
+          .setMapView(userId, state.projectId, state.mapView)
+          .catch((error) => console.warn("Map position will be saved again", error)),
+      700,
+    );
+    return () => {
+      if (mapViewTimer.current) clearTimeout(mapViewTimer.current);
+    };
+  }, [auth.user?.id, state.accessRole, state.mapView, state.projectId, state.projectReady]);
+
+  useEffect(() => {
+    if (
+      !state.projectReady ||
+      !state.autosave ||
+      !auth.user ||
+      !["owner", "admin"].includes(state.accessRole)
+    )
+      return;
     if (skipNextAutosave.current) {
       skipNextAutosave.current = false;
       return;
@@ -929,6 +1136,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
     saveProject,
     state.autosave,
     state.basemapId,
+    state.mapView,
     state.groups,
     state.layers,
     state.projectId,
@@ -942,6 +1150,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
     state.assistant,
     state.connectionHints,
     state.units,
+    state.accessRole,
   ]);
 
   const value = useMemo<WorkbenchApi>(
@@ -973,6 +1182,19 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       setSelectedStates: (states) => patch({ selectedStates: states }),
       setDerivedLayerGroupId: (groupId) => patch({ derivedLayerGroupId: groupId }),
       setBasemapId: (id) => patch({ basemapId: id }),
+      setMapView: (mapView) =>
+        setState((current) => {
+          const previous = current.mapView;
+          if (
+            Math.abs(previous.center[0] - mapView.center[0]) < 1e-7 &&
+            Math.abs(previous.center[1] - mapView.center[1]) < 1e-7 &&
+            Math.abs(previous.zoom - mapView.zoom) < 1e-4 &&
+            Math.abs(previous.bearing - mapView.bearing) < 1e-4 &&
+            Math.abs(previous.pitch - mapView.pitch) < 1e-4
+          )
+            return current;
+          return { ...current, mapView };
+        }),
       setUnits: (units) => setState((s) => ({ ...s, units: { ...s.units, ...units } })),
       setProjectName: (name) => patch({ projectName: name }),
       appendFeature,
@@ -988,6 +1210,9 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       promoteProject,
       toggleSubprojectOverlay,
       openProject,
+      openSharedMap,
+      createSharedWorkingCopy,
+      openReviewProject,
       deleteProject,
       restoreVersion,
       setAutosave,
@@ -999,6 +1224,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
         ...state.layers,
         ...state.subprojectOverlays.flatMap((overlay) => overlay.layers),
       ],
+      canEditProject: state.accessRole === "owner" || state.accessRole === "admin",
     }),
     [
       state,
@@ -1031,6 +1257,9 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       promoteProject,
       toggleSubprojectOverlay,
       openProject,
+      openSharedMap,
+      createSharedWorkingCopy,
+      openReviewProject,
       deleteProject,
       restoreVersion,
       setAutosave,

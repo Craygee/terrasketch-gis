@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 
 import { PublicPage, PublicSection } from "@/components/brand/PublicPage";
 
-const updated = "August 25, 2026";
+const updated = "August 26, 2026";
 
 export const Route = createFileRoute("/terms")({
   head: () => ({
@@ -38,6 +38,14 @@ function Terms() {
           LandDraft the limited permission needed to store, process, render, back up and export that
           content for you. You must have the right to upload and share the content you place in a
           project, especially personal, confidential, licensed or regulated information.
+        </p>
+      </PublicSection>
+      <PublicSection title="Sharing and collaboration">
+        <p>
+          Project administrators are responsible for choosing recipients, access roles, and the
+          layers or features included in a shared map. Recipients must not redistribute restricted
+          content or attempt to bypass the assigned role. Editor working copies remain separate
+          projects unless an administrator deliberately incorporates their changes.
         </p>
       </PublicSection>
       <PublicSection title="Public and third-party data">

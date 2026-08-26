@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 
 import { PublicPage, PublicSection } from "@/components/brand/PublicPage";
 
-const updated = "August 25, 2026";
+const updated = "August 26, 2026";
 
 export const Route = createFileRoute("/privacy")({
   head: () => ({
@@ -33,6 +33,10 @@ function Privacy() {
           <li>
             <strong>Project information:</strong> project names, map settings, layers, feature
             attributes, drawings, print layouts, uploaded files, saved versions and sharing choices.
+          </li>
+          <li>
+            <strong>Sharing information:</strong> recipient email addresses, assigned access roles,
+            scoped shared-map snapshots, editor working copies and review status.
           </li>
           <li>
             <strong>Device and service information:</strong> session data, preferences, error
@@ -69,6 +73,14 @@ function Privacy() {
           current map assistant processes its supported map commands inside the application;
           requests are saved with the project so recent assistant changes can be reviewed or
           reverted.
+        </p>
+      </PublicSection>
+      <PublicSection title="Shared maps">
+        <p>
+          A map administrator chooses the layers and features included in each private shared map.
+          Signed-in recipients can access only active shares granted to their account or email.
+          Editors work in a separate project copy unless they are granted administrator access.
+          Administrators can change roles or remove access at any time.
         </p>
       </PublicSection>
       <PublicSection title="Retention and your choices">
