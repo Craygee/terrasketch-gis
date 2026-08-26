@@ -161,6 +161,10 @@ const durableLayer = (layer: GisLayer): GisLayer => {
   const source = { ...layer.source };
   delete source.lastRefreshedAt;
   delete source.loading;
+  delete source.loadStatus;
+  delete source.loadedFeatures;
+  delete source.expectedFeatures;
+  delete source.loadError;
   return {
     ...layer,
     data: { type: "FeatureCollection", features: [] },

@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { fetchRemoteGeoJSON } from "@/lib/gis/arcgis";
+import { fetchRemoteGeoJSONPaged } from "@/lib/gis/arcgis";
 import { useMapRef } from "@/lib/gis/mapRef";
 import { useWorkbench } from "@/lib/gis/store";
 
@@ -27,6 +27,14 @@ const queryTuning = (zoom: number, latitude: number) => {
     maxAllowableOffset: (metersPerPixel * 0.35) / 111_320,
     geometryPrecision: zoom >= 16 ? 7 : zoom >= 12 ? 6 : 5,
   };
+};
+
+const viewportFeatureBudget = (zoom: number) => {
+  if (zoom < 9) return 8_000;
+  if (zoom < 11) return 12_000;
+  if (zoom < 13) return 16_000;
+  if (zoom < 14) return 24_000;
+  return 40_000;
 };
 
 /** Keeps dense remote layers bounded to the visible map and refreshes them in place. */
@@ -81,15 +89,23 @@ export function RemoteLayerManager() {
         if (!source.requiresViewport) continue;
         if ((source.minZoom ?? 0) > map.getZoom()) {
           coverage.current.delete(layer.id);
-          if (layer.data.features.length)
-            updateRef.current(layer.id, { data: { type: "FeatureCollection", features: [] } });
+          if (layer.data.features.length || source.loadStatus !== "idle") {
+            const nextSource = { ...source, loading: false, loadStatus: "idle" as const };
+            delete nextSource.loadedFeatures;
+            delete nextSource.expectedFeatures;
+            delete nextSource.loadError;
+            updateRef.current(layer.id, {
+              data: { type: "FeatureCollection", features: [] },
+              source: nextSource,
+            });
+          }
           continue;
         }
         if (scheduledOnly) {
           if (!source.refreshMinutes) continue;
           if (now - (source.lastRefreshedAt ?? 0) < source.refreshMinutes * 60_000) continue;
         }
-        const queryKey = `${source.url}|${source.where ?? ""}`;
+        const queryKey = `${source.url}|${source.where ?? ""}|${source.outFields?.join(",") ?? "*"}`;
         const previousCoverage = coverage.current.get(layer.id);
         if (
           !scheduledOnly &&
@@ -101,28 +117,77 @@ export function RemoteLayerManager() {
         requests.get(layer.id)?.abort();
         const controller = new AbortController();
         requests.set(layer.id, controller);
-        updateRef.current(layer.id, { source: { ...source, loading: true } });
+        const loadingSource = {
+          ...source,
+          loading: true,
+          loadStatus: "loading" as const,
+          loadedFeatures: 0,
+        };
+        delete loadingSource.expectedFeatures;
+        delete loadingSource.loadError;
+        updateRef.current(layer.id, { source: loadingSource });
         pending.push(
           (async () => {
             try {
-              const data = await fetchRemoteGeoJSON(source.url, {
+              const result = await fetchRemoteGeoJSONPaged(source.url, {
                 bbox: queryBbox,
                 where: source.where,
                 outFields: source.outFields,
-                maxFeatures: 2000,
+                pageSize: 2_000,
+                maxTotalFeatures: viewportFeatureBudget(mapZoom),
                 maxAllowableOffset: tuning.maxAllowableOffset,
                 geometryPrecision: tuning.geometryPrecision,
                 cacheHint: true,
                 signal: controller.signal,
+                onProgress: (progress) => {
+                  if (requests.get(layer.id) !== controller) return;
+                  const progressSource = {
+                    ...source,
+                    loading: !progress.complete && !progress.truncated,
+                    loadStatus: progress.truncated
+                      ? ("zoom-in" as const)
+                      : progress.complete
+                        ? ("complete" as const)
+                        : ("loading" as const),
+                    loadedFeatures: progress.loaded,
+                    ...(progress.total !== undefined ? { expectedFeatures: progress.total } : {}),
+                  };
+                  delete progressSource.loadError;
+                  updateRef.current(layer.id, {
+                    data: progress.data,
+                    source: progressSource,
+                  });
+                },
               });
               coverage.current.set(layer.id, { bbox: queryBbox, zoomBucket, queryKey });
-              updateRef.current(layer.id, {
-                data,
-                source: { ...source, loading: false, lastRefreshedAt: Date.now() },
-              });
+              const finalSource = {
+                ...source,
+                loading: false,
+                loadStatus: result.truncated
+                  ? result.loaded === 0
+                    ? ("zoom-in" as const)
+                    : ("error" as const)
+                  : ("complete" as const),
+                loadedFeatures: result.loaded,
+                ...(result.total !== undefined ? { expectedFeatures: result.total } : {}),
+                lastRefreshedAt: Date.now(),
+                ...(result.truncated && result.loaded > 0
+                  ? { loadError: "The publisher stopped before returning every feature." }
+                  : {}),
+              };
+              if (!result.truncated) delete finalSource.loadError;
+              updateRef.current(layer.id, { data: result.data, source: finalSource });
             } catch (error) {
               if (!(error instanceof DOMException && error.name === "AbortError")) {
-                updateRef.current(layer.id, { source: { ...source, loading: false } });
+                updateRef.current(layer.id, {
+                  source: {
+                    ...source,
+                    loading: false,
+                    loadStatus: "error",
+                    loadError:
+                      error instanceof Error ? error.message : "Visible area failed to load",
+                  },
+                });
                 console.warn(`[data] refresh failed for ${layer.name}`, error);
               }
             } finally {

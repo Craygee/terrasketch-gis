@@ -40,6 +40,25 @@ const exportFormats: Array<{ id: ExportFormat; label: string }> = [
   { id: "shp", label: "Shapefile (.zip)" },
 ];
 
+const remoteLoadLabel = (layer: GisLayer) => {
+  if (layer.source.kind !== "remote") return null;
+  const loaded = layer.source.loadedFeatures ?? layer.data.features.length;
+  const expected = layer.source.expectedFeatures;
+  if (layer.source.loadStatus === "loading")
+    return expected !== undefined
+      ? `Loading ${loaded.toLocaleString()} of ${expected.toLocaleString()} visible features…`
+      : `Loading ${loaded.toLocaleString()} visible features…`;
+  if (layer.source.loadStatus === "zoom-in")
+    return `${(expected ?? 0).toLocaleString()} features in view · zoom in to load all`;
+  if (layer.source.loadStatus === "error")
+    return layer.source.loadError ?? "Visible area could not finish loading";
+  if (layer.source.loadStatus === "complete")
+    return `${loaded.toLocaleString()} visible features · complete`;
+  if (layer.source.minZoom !== undefined && layer.data.features.length === 0)
+    return `Ready · appears at zoom ${layer.source.minZoom}+`;
+  return `${layer.data.features.length.toLocaleString()} visible features`;
+};
+
 type LayerDropPosition = "before" | "after";
 
 export function LayerPanel() {
@@ -402,6 +421,20 @@ export function LayerPanel() {
                             className="min-w-0 flex-1 text-left"
                           >
                             <div className="truncate text-xs font-medium">{layer.name}</div>
+                            {layer.source.kind === "remote" && (
+                              <div
+                                className={cn(
+                                  "num flex items-center gap-1 truncate text-[9px] text-muted-foreground",
+                                  layer.source.loadStatus === "error" && "text-destructive",
+                                )}
+                                title={remoteLoadLabel(layer) ?? undefined}
+                              >
+                                {layer.source.loading && (
+                                  <Loader2 className="size-2.5 shrink-0 animate-spin" />
+                                )}
+                                {remoteLoadLabel(layer)}
+                              </div>
+                            )}
                             {labelFields.length > 0 && (
                               <div className="num flex items-center gap-1 truncate text-[9px] text-muted-foreground">
                                 <Tag className="size-2.5 shrink-0" />
@@ -470,13 +503,8 @@ export function LayerPanel() {
                         {expanded && (
                           <div className="mt-2 space-y-2">
                             <div className="num px-1 text-[10px] text-muted-foreground">
-                              {layer.source.kind === "remote" && layer.source.loading
-                                ? "Loading visible area…"
-                                : layer.source.kind === "remote" &&
-                                    layer.source.minZoom !== undefined &&
-                                    layer.data.features.length === 0
-                                  ? `Ready · appears at zoom ${layer.source.minZoom}+`
-                                  : `${layer.data.features.length} features`}
+                              {remoteLoadLabel(layer) ??
+                                `${layer.data.features.length.toLocaleString()} features`}
                               {sqm > 0 ? ` · ${formatArea(sqm, wb.units.area)}` : ""}
                             </div>
                             <div className="flex flex-wrap gap-1">
@@ -903,6 +931,15 @@ function RemoteLayerSettings({
         Public data · {source.attribution ?? "official service"}
         {source.requiresViewport ? " · current view only" : ""}
       </p>
+      {source.loadStatus === "zoom-in" && (
+        <p className="text-amber-700">
+          {source.expectedFeatures?.toLocaleString() ?? "Too many"} features are in this view. Zoom
+          in once to load the complete visible set.
+        </p>
+      )}
+      {source.loadStatus === "error" && source.loadError && (
+        <p className="text-destructive">{source.loadError}</p>
+      )}
       <label className="flex items-center gap-2">
         Auto refresh
         <select

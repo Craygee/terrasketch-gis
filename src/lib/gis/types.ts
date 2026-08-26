@@ -58,6 +58,10 @@ export type LayerSource =
       refreshMinutes?: number;
       lastRefreshedAt?: number;
       loading?: boolean;
+      loadStatus?: "idle" | "loading" | "complete" | "zoom-in" | "error";
+      loadedFeatures?: number;
+      expectedFeatures?: number;
+      loadError?: string;
     };
 
 export interface GisLayer {

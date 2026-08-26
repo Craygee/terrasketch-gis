@@ -60,6 +60,10 @@ const compactState = (state: ProjectState): ProjectState => {
     if (layer.source.kind !== "remote" || !layer.source.requiresViewport) return layer;
     delete layer.source.lastRefreshedAt;
     delete layer.source.loading;
+    delete layer.source.loadStatus;
+    delete layer.source.loadedFeatures;
+    delete layer.source.expectedFeatures;
+    delete layer.source.loadError;
     return { ...layer, data: { type: "FeatureCollection", features: [] } };
   });
   return compact;
