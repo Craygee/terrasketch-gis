@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Search,
   X,
@@ -12,6 +12,11 @@ import {
   Clock3,
   SlidersHorizontal,
   Library,
+  CircleCheck,
+  TriangleAlert,
+  ChevronDown,
+  RotateCw,
+  Save,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -24,6 +29,14 @@ import {
 } from "@/lib/gis/repositories";
 import { useWorkbench } from "@/lib/gis/store";
 import { useMapRef } from "@/lib/gis/mapRef";
+import {
+  checkProjectConnections,
+  probeConnectionUrl,
+  resolveCatalogUrl,
+  saveCatalogUrlOverride,
+  saveConnectionHint,
+  type ConnectionResult,
+} from "@/lib/gis/connectionHealth";
 import { cn } from "@/lib/utils";
 
 const catalogLayerStyle = (entry: CatalogEntry) => {
@@ -45,6 +58,15 @@ export function DataDrawer() {
   const [inspectId, setInspectId] = useState<string | null>(null);
   const [fieldOptions, setFieldOptions] = useState<Record<string, ArcgisField[]>>({});
   const [selectedFields, setSelectedFields] = useState<Record<string, string[]>>({});
+  const [connections, setConnections] = useState<ConnectionResult[]>([]);
+  const [checkingConnections, setCheckingConnections] = useState(false);
+  const [connectionsOpen, setConnectionsOpen] = useState(false);
+  const [reconnectUrls, setReconnectUrls] = useState<Record<string, string>>({});
+  const [reconnectNotes, setReconnectNotes] = useState<Record<string, string>>({});
+  const layersRef = useRef(wb.layers);
+  layersRef.current = wb.layers;
+  const connectionHintsRef = useRef(wb.connectionHints);
+  connectionHintsRef.current = wb.connectionHints;
 
   const results = useMemo(
     () => searchCatalog(query, category, wb.selectedStates),
@@ -59,6 +81,36 @@ export function DataDrawer() {
     if (drawerOpen) setQuery(pendingCatalogQuery);
   }, [drawerOpen, pendingCatalogQuery]);
 
+  const verifyConnections = useCallback(async (notify = false) => {
+    setCheckingConnections(true);
+    try {
+      const results = await checkProjectConnections(layersRef.current, connectionHintsRef.current);
+      setConnections(results);
+      const failed = results.filter((result) => result.status === "error");
+      if (notify) {
+        if (failed.length) {
+          toast.warning(
+            `${failed.length} connection${failed.length === 1 ? "" : "s"} need attention`,
+            {
+              description: "Open Public data → Connections to review or reconnect them.",
+            },
+          );
+        } else {
+          toast.success("Map and public-data connections verified");
+        }
+      }
+      return results;
+    } finally {
+      setCheckingConnections(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!wb.projectReady || !wb.projectId) return;
+    const timer = window.setTimeout(() => void verifyConnections(true), 900);
+    return () => window.clearTimeout(timer);
+  }, [wb.projectId, wb.projectReady, verifyConnections]);
+
   const viewportBbox = (): [number, number, number, number] | undefined => {
     if (!map) return undefined;
     const b = map.getBounds();
@@ -66,7 +118,9 @@ export function DataDrawer() {
   };
 
   const load = async (entry: CatalogEntry) => {
-    if (!entry.url) {
+    const cloudOverride = wb.connectionHints[`catalog:${entry.id}`];
+    const entryUrl = cloudOverride?.verified ? cloudOverride.url : resolveCatalogUrl(entry);
+    if (!entryUrl) {
       if (entry.sourcePage) window.open(entry.sourcePage, "_blank", "noopener,noreferrer");
       return;
     }
@@ -74,7 +128,13 @@ export function DataDrawer() {
       (layer) => layer.source.kind === "remote" && layer.source.catalogId === entry.id,
     );
     if (existing) {
-      wb.updateLayer(existing.id, { visible: true });
+      wb.updateLayer(existing.id, {
+        visible: true,
+        source:
+          existing.source.kind === "remote"
+            ? { ...existing.source, url: entryUrl }
+            : existing.source,
+      });
       wb.setActiveLayer(existing.id);
       toast.success(`${entry.name} is ready`, {
         description:
@@ -93,7 +153,7 @@ export function DataDrawer() {
       entry.minZoom ?? (entry.geometry === "point" ? 7 : entry.geometry === "line" ? 5 : 5);
     const source = {
       kind: "remote" as const,
-      url: entry.url,
+      url: entryUrl,
       catalogId: entry.id,
       attribution: entry.agency,
       ...(where ? { where } : {}),
@@ -118,7 +178,9 @@ export function DataDrawer() {
   };
 
   const inspectFields = async (entry: CatalogEntry) => {
-    if (!entry.url) return;
+    const cloudOverride = wb.connectionHints[`catalog:${entry.id}`];
+    const entryUrl = cloudOverride?.verified ? cloudOverride.url : resolveCatalogUrl(entry);
+    if (!entryUrl) return;
     if (inspectId === entry.id) {
       setInspectId(null);
       return;
@@ -127,7 +189,7 @@ export function DataDrawer() {
     if (fieldOptions[entry.id]) return;
     setLoadingId(`fields:${entry.id}`);
     try {
-      const fields = await fetchArcgisFields(entry.url);
+      const fields = await fetchArcgisFields(entryUrl);
       setFieldOptions((current) => ({ ...current, [entry.id]: fields }));
       setSelectedFields((current) => ({
         ...current,
@@ -141,6 +203,70 @@ export function DataDrawer() {
     } finally {
       setLoadingId(null);
     }
+  };
+
+  const reconnect = async (result: ConnectionResult) => {
+    const url = (reconnectUrls[result.id] ?? wb.connectionHints[result.id]?.url)?.trim();
+    if (!url) return;
+    setLoadingId(`connection:${result.id}`);
+    try {
+      await probeConnectionUrl(url, 8_000, true);
+      if (result.id.startsWith("catalog:")) {
+        const catalogId = result.id.slice("catalog:".length);
+        saveCatalogUrlOverride(catalogId, url);
+        for (const layer of wb.layers) {
+          if (layer.source.kind === "remote" && layer.source.catalogId === catalogId) {
+            wb.updateLayer(layer.id, { source: { ...layer.source, url } });
+          }
+        }
+      } else if (result.id.startsWith("layer:")) {
+        const layerId = result.id.slice("layer:".length);
+        const layer = wb.layers.find((item) => item.id === layerId);
+        if (layer?.source.kind === "remote")
+          wb.updateLayer(layerId, { source: { ...layer.source, url } });
+      }
+      saveConnectionHint(result.id, {
+        url,
+        notes: reconnectNotes[result.id] ?? "Verified replacement service",
+      });
+      wb.setConnectionHint(result.id, {
+        url,
+        notes: reconnectNotes[result.id] ?? "Verified replacement service",
+        updatedAt: new Date().toISOString(),
+        verified: true,
+      });
+      toast.success(`${result.name} reconnected`);
+      await verifyConnections(false);
+    } catch (error) {
+      toast.error("That connection could not be verified", {
+        description: error instanceof Error ? error.message : "Check the URL and try again",
+      });
+    } finally {
+      setLoadingId(null);
+    }
+  };
+
+  const saveReconnectClue = (result: ConnectionResult) => {
+    const url =
+      reconnectUrls[result.id]?.trim() ||
+      wb.connectionHints[result.id]?.url ||
+      result.sourcePage ||
+      "";
+    const notes =
+      reconnectNotes[result.id]?.trim() ||
+      wb.connectionHints[result.id]?.notes ||
+      "Possible source for reconnecting this layer";
+    if (!url && !notes) return;
+    saveConnectionHint(result.id, { url, notes });
+    wb.setConnectionHint(result.id, {
+      url,
+      notes,
+      updatedAt: new Date().toISOString(),
+      verified: false,
+    });
+    toast.success("Reconnect information saved", {
+      description: "The source clue will be saved with this project.",
+    });
   };
 
   const loadCustom = async () => {
@@ -193,6 +319,150 @@ export function DataDrawer() {
           >
             <X className="size-4" />
           </button>
+        </div>
+
+        <div className="border-b border-border px-4 py-2">
+          <button
+            onClick={() => setConnectionsOpen((open) => !open)}
+            className="flex w-full items-center gap-2 rounded-xl px-2 py-1.5 text-left text-xs hover:bg-secondary"
+            aria-expanded={connectionsOpen}
+            title="Review basemap and public-data connection status"
+          >
+            {checkingConnections ? (
+              <Loader2 className="size-3.5 animate-spin text-primary" />
+            ) : connections.some((result) => result.status === "error") ? (
+              <TriangleAlert className="size-3.5 text-clay" />
+            ) : (
+              <CircleCheck className="size-3.5 text-primary" />
+            )}
+            <span className="font-medium">
+              {checkingConnections
+                ? "Checking connections…"
+                : connections.some((result) => result.status === "error")
+                  ? `${connections.filter((result) => result.status === "error").length} connections need attention`
+                  : connections.length
+                    ? `${connections.length} connections verified`
+                    : "Connection status"}
+            </span>
+            <ChevronDown
+              className={cn(
+                "ml-auto size-3.5 transition-transform",
+                connectionsOpen && "rotate-180",
+              )}
+            />
+          </button>
+          {connectionsOpen && (
+            <div className="mt-2 max-h-64 space-y-2 overflow-y-auto rounded-xl bg-secondary/60 p-2">
+              <div className="flex items-center justify-between px-1 text-[10px] text-muted-foreground">
+                <span>
+                  {connections.filter((result) => result.status === "healthy").length} healthy ·{" "}
+                  {connections.filter((result) => result.status === "fallback").length} fallback ·{" "}
+                  {connections.filter((result) => result.status === "error").length} failed
+                </span>
+                <button
+                  onClick={() => void verifyConnections(true)}
+                  disabled={checkingConnections}
+                  className="flex items-center gap-1 font-medium text-primary disabled:opacity-50"
+                >
+                  <RotateCw className={cn("size-3", checkingConnections && "animate-spin")} />
+                  Check now
+                </button>
+              </div>
+              {connections
+                .filter((result) => result.status !== "healthy")
+                .map((result) => (
+                  <div key={result.id} className="rounded-lg border border-border bg-card p-2">
+                    <div className="flex items-start gap-2">
+                      {result.status === "fallback" ? (
+                        <CircleCheck className="mt-0.5 size-3.5 shrink-0 text-primary" />
+                      ) : (
+                        <TriangleAlert className="mt-0.5 size-3.5 shrink-0 text-clay" />
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-[11px] font-semibold">{result.name}</div>
+                        <div className="text-[10px] text-muted-foreground">{result.message}</div>
+                      </div>
+                    </div>
+                    {result.status === "error" && (
+                      <div className="mt-2 space-y-1.5">
+                        {result.sourcePage && (
+                          <a
+                            href={result.sourcePage}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1 text-[10px] text-primary hover:underline"
+                          >
+                            <ExternalLink className="size-3" /> Open publisher website
+                          </a>
+                        )}
+                        <input
+                          value={
+                            reconnectUrls[result.id] ?? wb.connectionHints[result.id]?.url ?? ""
+                          }
+                          onChange={(event) =>
+                            setReconnectUrls((current) => ({
+                              ...current,
+                              [result.id]: event.target.value,
+                            }))
+                          }
+                          placeholder="Replacement service or helpful website URL"
+                          aria-label={`Replacement URL for ${result.name}`}
+                          className="num w-full rounded-lg border border-border bg-secondary/50 px-2 py-1.5 text-[10px] outline-none focus:border-primary"
+                        />
+                        <textarea
+                          value={
+                            reconnectNotes[result.id] ?? wb.connectionHints[result.id]?.notes ?? ""
+                          }
+                          onChange={(event) =>
+                            setReconnectNotes((current) => ({
+                              ...current,
+                              [result.id]: event.target.value,
+                            }))
+                          }
+                          placeholder="Optional notes about where this data may have moved"
+                          aria-label={`Reconnect notes for ${result.name}`}
+                          rows={2}
+                          className="w-full resize-none rounded-lg border border-border bg-secondary/50 px-2 py-1.5 text-[10px] outline-none focus:border-primary"
+                        />
+                        <div className="flex gap-1">
+                          {result.kind !== "basemap" && (
+                            <button
+                              onClick={() => void reconnect(result)}
+                              disabled={
+                                !(
+                                  reconnectUrls[result.id] ?? wb.connectionHints[result.id]?.url
+                                )?.trim() || loadingId === `connection:${result.id}`
+                              }
+                              className="flex items-center gap-1 rounded-md bg-primary px-2 py-1 text-[10px] font-medium text-primary-foreground disabled:opacity-50"
+                            >
+                              {loadingId === `connection:${result.id}` ? (
+                                <Loader2 className="size-3 animate-spin" />
+                              ) : (
+                                <Link2 className="size-3" />
+                              )}
+                              Test & use
+                            </button>
+                          )}
+                          <button
+                            onClick={() => saveReconnectClue(result)}
+                            className="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[10px] font-medium"
+                          >
+                            <Save className="size-3" /> Save source clue
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              {!checkingConnections &&
+                connections.length > 0 &&
+                connections.every((result) => result.status === "healthy") && (
+                  <p className="px-1 py-2 text-[10px] text-muted-foreground">
+                    All configured basemaps and public-data services responded successfully.
+                  </p>
+                )}
+            </div>
+          )}
         </div>
 
         <div className="space-y-2 border-b border-border px-4 py-3">

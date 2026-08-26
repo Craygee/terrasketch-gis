@@ -29,7 +29,7 @@ import {
 
 import { useWorkbench } from "@/lib/gis/store";
 import { useMapRef } from "@/lib/gis/mapRef";
-import { getBasemap } from "@/lib/gis/basemaps";
+import { getBasemapStyle } from "@/lib/gis/basemaps";
 import {
   buildLayerSpecs,
   sourceId,
@@ -139,7 +139,7 @@ export function MapCanvas() {
     if (!containerRef.current || mapObj.current) return;
     const map = new MlMap({
       container: containerRef.current,
-      style: getBasemap(wb.basemapId).style,
+      style: getBasemapStyle(wb.basemapId),
       center: TEXAS_CENTER,
       zoom: 6,
       attributionControl: { compact: true },
@@ -177,12 +177,30 @@ export function MapCanvas() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    const applyVerifiedBasemap = (event: Event) => {
+      const detail = (event as CustomEvent<{ id?: string; enabled?: boolean }>).detail;
+      if (!detail?.id || detail.id !== styledBasemapRef.current) return;
+      const currentMap = mapObj.current;
+      if (!currentMap) return;
+      currentMap.setStyle(getBasemapStyle(detail.id), { diff: false });
+      if (detail.enabled) {
+        toast.warning("Basemap provider switched", {
+          description:
+            "The preferred connection is unavailable, so an equivalent map style is active.",
+        });
+      }
+    };
+    window.addEventListener("landdraft:basemap-health", applyVerifiedBasemap);
+    return () => window.removeEventListener("landdraft:basemap-health", applyVerifiedBasemap);
+  }, []);
+
   /* ---------------- basemap switching ---------------- */
   useEffect(() => {
     const map = mapObj.current;
     if (!map || !ready || styledBasemapRef.current === wb.basemapId) return;
     styledBasemapRef.current = wb.basemapId;
-    map.setStyle(getBasemap(wb.basemapId).style, { diff: false });
+    map.setStyle(getBasemapStyle(wb.basemapId), { diff: false });
   }, [wb.basemapId, ready]);
 
   /* ---------------- layer sync ---------------- */

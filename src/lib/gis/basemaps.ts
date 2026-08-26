@@ -4,7 +4,12 @@ export interface Basemap {
   id: string;
   label: string;
   blurb: string;
-  style: StyleSpecification;
+  style: StyleSpecification | string;
+  /** Small request used by the sign-in connection check. */
+  healthUrl: string;
+  /** Equivalent keyless style used only when the preferred provider is unavailable. */
+  fallbackStyle?: StyleSpecification | string;
+  fallbackHealthUrl?: string;
 }
 
 const raster = (
@@ -29,10 +34,11 @@ export const basemaps: Basemap[] = [
     id: "street",
     label: "Street",
     blurb: "Clean roads & places",
-    style: raster(
-      ["https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png"],
-      "© OpenStreetMap contributors, © CARTO",
-    ),
+    // CARTO's supported MapLibre style endpoint replaces the retired raster URL form.
+    style: "https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json",
+    healthUrl: "https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json",
+    fallbackStyle: "https://tiles.openfreemap.org/styles/liberty",
+    fallbackHealthUrl: "https://tiles.openfreemap.org/styles/liberty",
   },
   {
     id: "satellite",
@@ -46,6 +52,8 @@ export const basemaps: Basemap[] = [
       19,
       "#0b1a12",
     ),
+    healthUrl:
+      "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/0/0/0",
   },
   {
     id: "topo",
@@ -56,17 +64,16 @@ export const basemaps: Basemap[] = [
       "© OpenTopoMap (CC-BY-SA), © OpenStreetMap contributors",
       17,
     ),
+    healthUrl: "https://tile.opentopomap.org/0/0/0.png",
   },
   {
     id: "dark",
     label: "Dark",
     blurb: "Night mode canvas",
-    style: raster(
-      ["https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png"],
-      "© OpenStreetMap contributors, © CARTO",
-      19,
-      "#0a0f0c",
-    ),
+    style: "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json",
+    healthUrl: "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json",
+    fallbackStyle: "https://tiles.openfreemap.org/styles/dark",
+    fallbackHealthUrl: "https://tiles.openfreemap.org/styles/dark",
   },
   {
     id: "osm",
@@ -77,8 +84,45 @@ export const basemaps: Basemap[] = [
       "© OpenStreetMap contributors",
       19,
     ),
+    healthUrl: "https://tile.openstreetmap.org/0/0/0.png",
   },
 ];
 
 export const getBasemap = (id: string): Basemap =>
   basemaps.find((b) => b.id === id) ?? basemaps[0]!;
+
+const BASEMAP_FALLBACKS_KEY = "landdraft.basemap-fallbacks.v1";
+
+function fallbackIds(): string[] {
+  try {
+    const value = JSON.parse(window.localStorage.getItem(BASEMAP_FALLBACKS_KEY) ?? "[]");
+    return Array.isArray(value)
+      ? value.filter((item): item is string => typeof item === "string")
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+export function setBasemapFallback(id: string, enabled: boolean): void {
+  if (typeof window === "undefined") return;
+  const ids = new Set(fallbackIds());
+  const wasEnabled = ids.has(id);
+  if (wasEnabled === enabled) return;
+  if (enabled) ids.add(id);
+  else ids.delete(id);
+  window.localStorage.setItem(BASEMAP_FALLBACKS_KEY, JSON.stringify([...ids]));
+  window.dispatchEvent(new CustomEvent("landdraft:basemap-health", { detail: { id, enabled } }));
+}
+
+export function getBasemapStyle(id: string): StyleSpecification | string {
+  const basemap = getBasemap(id);
+  if (
+    typeof window !== "undefined" &&
+    basemap.fallbackStyle &&
+    fallbackIds().includes(basemap.id)
+  ) {
+    return basemap.fallbackStyle;
+  }
+  return basemap.style;
+}

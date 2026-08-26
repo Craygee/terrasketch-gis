@@ -19,6 +19,7 @@ import {
   type AreaUnitsPref,
   type PrintComposition,
   type AssistantConversation,
+  type ConnectionRecoveryHint,
 } from "./types";
 import {
   workspaceProjectStore,
@@ -70,6 +71,7 @@ interface WorkbenchState {
   subprojectOverlays: Array<{ projectId: string; projectName: string; layers: GisLayer[] }>;
   printComposition: PrintComposition | undefined;
   assistant: AssistantConversation;
+  connectionHints: Record<string, ConnectionRecoveryHint>;
 }
 
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -105,6 +107,7 @@ const initialState = (): WorkbenchState => ({
   subprojectOverlays: [],
   printComposition: undefined,
   assistant: { messages: [], actions: [] },
+  connectionHints: {},
 });
 
 const blankProjectState = (name: string): ProjectState => ({
@@ -187,6 +190,7 @@ const normalizedProject = (project: StoredProject, projects: ProjectSummary[]) =
     subprojectOverlays: [],
     printComposition: stored.printComposition,
     assistant: stored.assistant ?? { messages: [], actions: [] },
+    connectionHints: stored.connectionHints ?? {},
   };
 };
 
@@ -203,6 +207,7 @@ const stateToProject = (state: WorkbenchState): ProjectState => ({
   enabledSubprojectIds: state.enabledSubprojectIds,
   ...(state.printComposition ? { printComposition: state.printComposition } : {}),
   assistant: state.assistant,
+  connectionHints: state.connectionHints,
 });
 
 export interface WorkbenchApi extends WorkbenchState {
@@ -247,6 +252,7 @@ export interface WorkbenchApi extends WorkbenchState {
   updateFeatureGeometry: (layerId: string, index: number, geometry: Geometry) => void;
   removeFeatures: (layerId: string, indexes: number[]) => void;
   setAssistantConversation: (conversation: AssistantConversation) => void;
+  setConnectionHint: (id: string, hint: ConnectionRecoveryHint) => void;
   saveProject: (reason?: SaveReason) => Promise<ProjectVersion | undefined>;
   createProject: (name: string) => Promise<void>;
   createSubproject: (name: string, parentProjectId?: string) => Promise<void>;
@@ -871,6 +877,15 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
     [patch],
   );
 
+  const setConnectionHint = useCallback<WorkbenchApi["setConnectionHint"]>(
+    (id, hint) =>
+      setState((current) => ({
+        ...current,
+        connectionHints: { ...current.connectionHints, [id]: hint },
+      })),
+    [],
+  );
+
   useEffect(() => {
     const userId = auth.user?.id;
     if (!userId || bootUserId.current === userId) return;
@@ -925,6 +940,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
     state.parentProjectId,
     state.printComposition,
     state.assistant,
+    state.connectionHints,
     state.units,
   ]);
 
@@ -964,6 +980,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       updateFeatureGeometry,
       removeFeatures,
       setAssistantConversation,
+      setConnectionHint,
       saveProject,
       createProject,
       createSubproject,
@@ -1006,6 +1023,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       updateFeatureGeometry,
       removeFeatures,
       setAssistantConversation,
+      setConnectionHint,
       saveProject,
       createProject,
       createSubproject,

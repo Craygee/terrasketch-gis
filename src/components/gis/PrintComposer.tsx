@@ -18,7 +18,7 @@ import type { Feature, FeatureCollection } from "geojson";
 
 import { useWorkbench } from "@/lib/gis/store";
 import { useMapRef } from "@/lib/gis/mapRef";
-import { getBasemap } from "@/lib/gis/basemaps";
+import { getBasemap, getBasemapStyle } from "@/lib/gis/basemaps";
 import { allLayerIds, buildLayerSpecs, sourceId } from "@/lib/gis/mapStyle";
 import { composeLabel } from "@/lib/gis/labels";
 import type {
@@ -170,7 +170,7 @@ export function PrintComposer() {
     const view = composition.mapView;
     const map = new MlMap({
       container: mapContainerRef.current,
-      style: getBasemap(wb.basemapId).style,
+      style: getBasemapStyle(wb.basemapId),
       center: view?.center ?? [-98.5, 31.3],
       zoom: view?.zoom ?? 6,
       bearing: view?.bearing ?? 0,

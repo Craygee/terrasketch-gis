@@ -170,7 +170,15 @@ export interface ProjectState {
   enabledSubprojectIds?: string[];
   printComposition?: PrintComposition;
   assistant?: AssistantConversation;
+  connectionHints?: Record<string, ConnectionRecoveryHint>;
   savedAt?: number;
+}
+
+export interface ConnectionRecoveryHint {
+  url: string;
+  notes: string;
+  updatedAt: string;
+  verified?: boolean;
 }
 
 export interface AssistantMessage {
