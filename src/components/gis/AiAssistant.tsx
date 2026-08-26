@@ -184,6 +184,17 @@ export function AiAssistant() {
     try {
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 
+      // Guidance questions must be answered before action matching. Without this,
+      // “How do I rename a layer?” is incorrectly treated as an incomplete rename command.
+      if (isGuidanceQuestion(lower)) {
+        const guidance = helpAnswer(lower);
+        answer(
+          guidance ??
+            "I can guide you through LandDraft’s map, layer, drawing, selection, analysis, print, project, and account tools. Tell me the result you want—for example, “How do I create a layer from selected parcels?”—and I’ll give you the exact controls to use.",
+        );
+        return;
+      }
+
       const rename = text.match(
         /rename(?: the)?(?: layer)?\s+[“"']?(.+?)[”"']?\s+to\s+[“"']?(.+?)[”"']?$/i,
       );
@@ -361,7 +372,12 @@ export function AiAssistant() {
       }
 
       const help = helpAnswer(lower);
-      answer(help ?? contextualAnswer(wb.layers, wb.activeLayer, wb.projectName));
+      answer(
+        help ??
+          (text.endsWith("?")
+            ? "I don’t have a specific help article for that question yet. Try asking about adding or editing layers, selecting features, labels, styling, drawing, measurements, spatial analysis, public data, projects, printing, exporting, or account access."
+            : contextualAnswer(wb.layers, wb.activeLayer, wb.projectName)),
+      );
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : "The request could not be completed";
@@ -594,6 +610,16 @@ function compare(raw: unknown, operator: Operator, expected: string) {
 const operatorLabel = (operator: Operator) =>
   ({ contains: "contains", equals: "=", starts: "starts with", greater: ">", less: "<" })[operator];
 
+function isGuidanceQuestion(prompt: string) {
+  return (
+    /\bhow\s+(?:do|can|would|should)\b/.test(prompt) ||
+    /\bwhere\s+(?:do|can|is)\b/.test(prompt) ||
+    /\bwhat\s+(?:is|are|does|can)\b/.test(prompt) ||
+    /\b(?:help me|walk me through|explain)\b/.test(prompt) ||
+    /\bcan you (?:tell|show|explain)(?: me)? how\b/.test(prompt)
+  );
+}
+
 function analyzeMap(
   layers: GisLayer[],
   focused: GisLayer | null,
@@ -652,6 +678,14 @@ function contextualAnswer(layers: GisLayer[], active: GisLayer | null, projectNa
 }
 
 function helpAnswer(prompt: string): string | null {
+  if (/\b(log ?out|sign ?out)\b/.test(prompt))
+    return "Open the information (i) menu in the upper-right corner, then choose Log out under Account. On mobile, open the same i menu and tap Log out at the bottom.";
+  if (/\b(add|create|make|load|import)\b.*\blayer\b/.test(prompt) && /\bedit/.test(prompt))
+    return "Add a layer in any of three ways: open Public data and choose Add, drop a supported GIS file onto the Layers panel, or draw a point, line, or polygon and choose its destination. To edit it, make the layer active, select a feature, then edit its attributes in Table or use Edit vertices to move points and reshape lines or polygons. Click a faint midpoint to insert a new vertex.";
+  if (/\b(add|create|make|load)\b.*\blayer\b/.test(prompt))
+    return "To add a layer, use Public data for an official dataset, drop GeoJSON/KML/KMZ/zipped Shapefile/GPX/CSV onto the Layers panel, or draw a feature. After drawing or selecting features, the destination dialog lets you create a new layer, choose its category and name, or add the feature to an existing compatible layer.";
+  if (/\b(edit|change|update)\b.*\b(feature|geometry|shape|attribute)\b/.test(prompt))
+    return "Make the layer active and select the feature. Use Table to edit attribute values. Turn on Edit vertices to reshape geometry: drag a square vertex, click a faint midpoint to add one, or drag a point feature to move it. Save when finished; autosave can also preserve the project.";
   if (/\brename\b.*\blayer\b/.test(prompt))
     return "Double-click the layer name in the Layers panel, type the new name, and confirm. Or tell me: “Rename Roads to Access routes.”";
   if (/\b(import|kml|kmz|shp|shapefile|csv|gpx)\b/.test(prompt))
@@ -676,5 +710,11 @@ function helpAnswer(prompt: string): string | null {
     return "Open Spatial analysis, choose an operation and inputs, and LandDraft creates a new Working layer without altering originals.";
   if (/\b(project|subproject|autosave|history)\b/.test(prompt))
     return "Use the project name in the top bar to switch, duplicate, create a project or subproject, manage overlays, toggle autosave, and restore history.";
+  if (/\b(layer order|reorder|move layer|on top|behind)\b/.test(prompt))
+    return "Drag a layer by its handle in the Layers panel. Layers higher in the list draw above layers below them. You can also move or duplicate a layer into Working layers or another group before sorting it.";
+  if (/\b(measure|area|acre|distance|length)\b/.test(prompt))
+    return "Choose the area or distance measurement tool in the drawing toolbar, click points on the map, then double-click or press Enter to finish. Use the unit selectors to switch among acres, square feet, hectares, miles, feet, meters, or kilometers.";
+  if (/\b(basemap|satellite|street map|dark map|topo)\b/.test(prompt))
+    return "Open the basemap selector at the lower-right of the map and choose Street, Satellite, Topo, Dark, or OSM. The zoom level appears directly beneath the selector.";
   return null;
 }

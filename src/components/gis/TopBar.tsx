@@ -11,6 +11,8 @@ import {
   Printer,
   Beaker,
   PlayCircle,
+  LogOut,
+  UserRound,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -158,9 +160,13 @@ export function TopBar({
           tourId="top-export"
         />
         <button
-          onClick={() => setShowAbout((s) => !s)}
-          aria-label="About and disclaimers"
-          title="About LandDraft and mapping disclaimers"
+          onClick={() => {
+            setShowAbout((s) => !s);
+            setShowProjects(false);
+            setShowExport(false);
+          }}
+          aria-label="Help, account, and disclaimers"
+          title="Help, account, and LandDraft information"
           data-tour="top-info"
           className="rounded-xl p-2 text-muted-foreground transition-colors hover:bg-accent"
         >
@@ -187,7 +193,7 @@ export function TopBar({
       )}
 
       {showAbout && (
-        <div className="float-surface absolute right-2 top-14 w-80 rounded-2xl p-4 text-xs leading-relaxed">
+        <div className="float-surface absolute right-2 top-14 max-h-[calc(100dvh-4rem)] w-80 overflow-y-auto rounded-2xl p-4 text-xs leading-relaxed">
           <h2 className="text-sm font-semibold">Help & tours</h2>
           <p className="mt-1 text-muted-foreground">
             Replay a walkthrough at any time. Tours point to the controls on the real screen.
@@ -254,6 +260,28 @@ export function TopBar({
               ? "Signed-in projects, autosave, and up to 25 restore points are stored in your private cloud workspace and follow you across devices."
               : "Cloud connection is pending; this deployment is temporarily using its existing device workspace."}
           </p>
+          <div className="mt-4 border-t border-border pt-3">
+            <h3 className="text-sm font-semibold">Account</h3>
+            <div className="mt-2 flex items-center gap-2 rounded-xl bg-secondary p-2">
+              <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground">
+                <UserRound className="size-4" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="truncate font-semibold">{auth.user?.name}</div>
+                <div className="truncate text-[10px] text-muted-foreground">{auth.user?.email}</div>
+              </div>
+              <button
+                onClick={() => {
+                  setShowAbout(false);
+                  void auth.signOut();
+                }}
+                className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 py-2 font-semibold text-destructive hover:bg-accent"
+                title="Log out of LandDraft"
+              >
+                <LogOut className="size-3.5" /> Log out
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </header>

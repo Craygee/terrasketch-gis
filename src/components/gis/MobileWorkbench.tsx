@@ -11,6 +11,8 @@ import {
   Beaker,
   Info,
   PlayCircle,
+  LogOut,
+  UserRound,
 } from "lucide-react";
 import { Toaster } from "@/components/ui/sonner";
 import { WorkbenchProvider, useWorkbench } from "@/lib/gis/store";
@@ -26,7 +28,7 @@ import { RemoteLayerManager } from "./RemoteLayerManager";
 import { SelectionToolbar } from "./SelectionToolbar";
 import { ExportPanel } from "./ExportMenu";
 import { ProjectMenu } from "./ProjectMenu";
-import { AuthGate } from "@/lib/auth";
+import { AuthGate, useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 import { LandDraftMark } from "@/components/brand/LandDraftMark";
 import { FeatureDestinationDialog } from "./FeatureDestinationDialog";
@@ -123,8 +125,8 @@ function MobileShell() {
         </div>
         <button
           onClick={() => setSheet(sheet === "help" ? null : "help")}
-          aria-label="Help and tours"
-          title="Help and tours"
+          aria-label="Help, tours, and account"
+          title="Help, tours, and account"
           className="float-surface pointer-events-auto rounded-2xl p-3"
         >
           <Info className="size-4" />
@@ -326,6 +328,7 @@ function NavButton({
 
 function MobileTourMenu({ onDone }: { onDone: () => void }) {
   const { startTour, featureTips, setFeatureTips } = useTours();
+  const auth = useAuth();
   const launch = (kind: "basic" | "advanced" | "print") => {
     onDone();
     startTour(kind);
@@ -359,6 +362,21 @@ function MobileTourMenu({ onDone }: { onDone: () => void }) {
         />
         Offer tours when major new features are added
       </label>
+      <div className="mt-3 border-t border-border pt-3">
+        <div className="mb-2 flex items-center gap-2 text-muted-foreground">
+          <UserRound className="size-4" />
+          <span className="min-w-0 flex-1 truncate">{auth.user?.email}</span>
+        </div>
+        <button
+          onClick={() => {
+            onDone();
+            void auth.signOut();
+          }}
+          className="flex w-full items-center gap-2 rounded-xl border border-border bg-card px-4 py-3 text-left font-semibold text-destructive"
+        >
+          <LogOut className="size-4" /> Log out
+        </button>
+      </div>
     </div>
   );
 }
