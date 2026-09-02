@@ -53,6 +53,11 @@ interface PendingCapture {
   suggestedName: string;
 }
 
+interface WakeLockSentinelLike {
+  released: boolean;
+  release: () => Promise<void>;
+}
+
 const FIELD_PREVIEW_SOURCE = "landdraft-field-preview";
 const FIELD_PREVIEW_FILL = "landdraft-field-preview-fill";
 const FIELD_PREVIEW_LINE = "landdraft-field-preview-line";
@@ -116,6 +121,7 @@ export function FieldModule({ active = true }: { active?: boolean }) {
   const mapInstanceRef = useRef(map);
   mapInstanceRef.current = map;
   const watchIdRef = useRef<number | null>(null);
+  const wakeLockRef = useRef<WakeLockSentinelLike | null>(null);
   const trackRef = useRef<TrackSession | null>(null);
   const pointsRef = useRef<Position[]>([]);
   const distanceRef = useRef(0);
@@ -150,6 +156,24 @@ export function FieldModule({ active = true }: { active?: boolean }) {
     trackRef.current = value;
     setTrackState(value);
   };
+
+  const requestWakeLock = useCallback(async () => {
+    const nav = navigator as Navigator & {
+      wakeLock?: { request: (type: "screen") => Promise<WakeLockSentinelLike> };
+    };
+    if (!nav.wakeLock || wakeLockRef.current) return;
+    try {
+      wakeLockRef.current = await nav.wakeLock.request("screen");
+    } catch {
+      // Tracking still works when a browser or power-saving mode rejects the optional wake lock.
+    }
+  }, []);
+
+  const releaseWakeLock = useCallback(() => {
+    const lock = wakeLockRef.current;
+    wakeLockRef.current = null;
+    if (lock && !lock.released) void lock.release();
+  }, []);
 
   const updateLocation = useCallback((position: GeolocationPosition) => {
     const next: FieldLocation = {
@@ -221,9 +245,18 @@ export function FieldModule({ active = true }: { active?: boolean }) {
       if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current);
       markerRef.current?.remove();
       markerRef.current = null;
+      releaseWakeLock();
     },
-    [],
+    [releaseWakeLock],
   );
+
+  useEffect(() => {
+    const restoreWakeLock = () => {
+      if (document.visibilityState === "visible" && trackRef.current) void requestWakeLock();
+    };
+    document.addEventListener("visibilitychange", restoreWakeLock);
+    return () => document.removeEventListener("visibilitychange", restoreWakeLock);
+  }, [requestWakeLock]);
 
   useEffect(() => {
     if (active || trackRef.current || watchIdRef.current === null) return;
@@ -302,7 +335,11 @@ export function FieldModule({ active = true }: { active?: boolean }) {
     setTrackDistance(0);
     setTrack(session);
     setFollow(true);
-    if (!ensureWatch()) setTrack(null);
+    void requestWakeLock();
+    if (!ensureWatch()) {
+      setTrack(null);
+      releaseWakeLock();
+    }
   };
 
   const stopTrack = () => {
@@ -348,6 +385,7 @@ export function FieldModule({ active = true }: { active?: boolean }) {
     setCaptureNotes("");
     setTrack(null);
     setTrackPoints([]);
+    releaseWakeLock();
   };
 
   const capturePoint = () => {
