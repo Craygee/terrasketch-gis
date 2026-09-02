@@ -1,4 +1,4 @@
-import { basemaps, setBasemapFallback } from "./basemaps";
+import { basemapProbeUrl, basemaps, saveBasemapUrlOverride, setBasemapFallback } from "./basemaps";
 import { catalog, type CatalogEntry } from "./catalog";
 import { classifyUrl, normalizeArcgisLayerUrl } from "./arcgis";
 import type { ConnectionRecoveryHint, GisLayer } from "./types";
@@ -14,7 +14,15 @@ export interface ConnectionResult {
   url: string;
   effectiveUrl?: string;
   sourcePage?: string;
+  basemapId?: string;
   message: string;
+}
+
+export interface ConnectionReplacement {
+  url: string;
+  notes: string;
+  title: string;
+  source: "trusted alternative" | "publisher page" | "public GIS directory" | "existing URL";
 }
 
 interface ConnectionTarget {
@@ -29,6 +37,89 @@ interface ConnectionTarget {
 
 const URL_OVERRIDES_KEY = "landdraft.catalog-url-overrides.v1";
 const CONNECTION_HINTS_KEY = "landdraft.connection-hints.v1";
+
+interface ReplacementCandidate extends ConnectionReplacement {
+  score: number;
+}
+
+const trustedBasemapCandidates: Record<string, Array<Omit<ReplacementCandidate, "score">>> = {
+  street: [
+    {
+      url: "https://tiles.openfreemap.org/styles/liberty",
+      title: "Detailed street map",
+      notes: "Current keyless street style with roads, boundaries and place labels.",
+      source: "trusted alternative",
+    },
+    {
+      url: "https://tiles.openfreemap.org/styles/bright",
+      title: "Bright street map",
+      notes: "Keyless street style with a lighter visual treatment.",
+      source: "trusted alternative",
+    },
+    {
+      url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+      title: "Standard street tiles",
+      notes: "Community street tiles; normal interactive viewing and attribution are required.",
+      source: "trusted alternative",
+    },
+  ],
+  satellite: [
+    {
+      url: "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+      title: "Global satellite imagery",
+      notes: "Current global cached imagery service.",
+      source: "trusted alternative",
+    },
+    {
+      url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+      title: "Global satellite imagery alternate host",
+      notes: "Equivalent global imagery endpoint on the alternate official host.",
+      source: "trusted alternative",
+    },
+  ],
+  topo: [
+    {
+      url: "https://tile.opentopomap.org/{z}/{x}/{y}.png",
+      title: "Topographic map",
+      notes: "Keyless topographic tiles with terrain and contours.",
+      source: "trusted alternative",
+    },
+    {
+      url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}",
+      title: "Global topographic map",
+      notes: "Global cached topographic map on an alternate official service.",
+      source: "trusted alternative",
+    },
+  ],
+  dark: [
+    {
+      url: "https://tiles.openfreemap.org/styles/dark",
+      title: "Dark map",
+      notes: "Current keyless dark vector style.",
+      source: "trusted alternative",
+    },
+    {
+      url: "https://tiles.openfreemap.org/styles/fiord",
+      title: "Muted dark map",
+      notes: "Keyless low-light vector style and the closest visual fallback.",
+      source: "trusted alternative",
+    },
+  ],
+  osm: [
+    {
+      url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+      title: "Standard community street map",
+      notes: "Standard community tiles; normal interactive viewing and attribution are required.",
+      source: "trusted alternative",
+    },
+    {
+      url: "https://tiles.openfreemap.org/styles/bright",
+      title: "Bright vector street map",
+      notes: "Keyless vector alternative based on the same open street data.",
+      source: "trusted alternative",
+    },
+  ],
+};
 
 function readRecord(key: string): Record<string, string> {
   if (typeof window === "undefined") return {};
@@ -77,6 +168,9 @@ function withTimeout(timeoutMs: number): { signal: AbortSignal; clear: () => voi
   return { signal: controller.signal, clear: () => window.clearTimeout(timer) };
 }
 
+const isQueryableArcgisLayer = (raw: string) =>
+  /\/(?:FeatureServer|MapServer)(?:\/\d+)?\/?$/i.test(raw.trim().replace(/\?.*$/, ""));
+
 export async function probeConnectionUrl(
   url: string,
   timeoutMs = 8_000,
@@ -84,18 +178,15 @@ export async function probeConnectionUrl(
 ): Promise<void> {
   const timeout = withTimeout(timeoutMs);
   try {
-    const target =
-      classifyUrl(url) === "arcgis"
-        ? `${normalizeArcgisLayerUrl(url)}/query?where=1%3D1&returnCountOnly=true&f=json`
-        : url;
-    const response = await fetch(target, {
-      cache: "no-store",
-      signal: timeout.signal,
-    });
+    const arcgisDataLayer = isQueryableArcgisLayer(url);
+    const target = arcgisDataLayer
+      ? `${normalizeArcgisLayerUrl(url)}/query?where=1%3D1&returnCountOnly=true&f=json`
+      : url;
+    const response = await fetch(target, { signal: timeout.signal });
     if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}`.trim());
     const contentType = response.headers.get("content-type") ?? "";
     if (
-      classifyUrl(url) === "arcgis" ||
+      arcgisDataLayer ||
       contentType.includes("json") ||
       /\/styles\//i.test(url) ||
       expectDataService
@@ -105,13 +196,33 @@ export async function probeConnectionUrl(
         version?: number;
         features?: unknown[];
         count?: number;
+        tiles?: string[];
+        sources?: Record<string, { tiles?: string[]; url?: string }>;
       };
       if (json.error) throw new Error(json.error.message ?? "The service returned an error");
-      if (classifyUrl(url) === "arcgis" && typeof json.count !== "number")
+      if (arcgisDataLayer && typeof json.count !== "number")
         throw new Error("The ArcGIS layer did not accept a lightweight data query");
       if (/\/styles\//i.test(url) && json.version !== 8)
         throw new Error("The endpoint did not return a MapLibre style");
-      if (expectDataService && classifyUrl(url) !== "arcgis" && !Array.isArray(json.features))
+      if (/\/styles\//i.test(url) && json.version === 8) {
+        const sourceTemplates: string[] = [];
+        for (const source of Object.values(json.sources ?? {})) {
+          if (source.tiles?.[0]) sourceTemplates.push(source.tiles[0]);
+          else if (source.url?.startsWith("https://")) {
+            const tileJsonResponse = await fetch(source.url, { signal: timeout.signal });
+            if (!tileJsonResponse.ok)
+              throw new Error(`Basemap source returned HTTP ${tileJsonResponse.status}`);
+            const tileJson = (await tileJsonResponse.json()) as { tiles?: string[] };
+            if (tileJson.tiles?.[0]) sourceTemplates.push(tileJson.tiles[0]);
+          }
+        }
+        for (const template of sourceTemplates.slice(0, 2)) {
+          const tileResponse = await fetch(basemapProbeUrl(template), { signal: timeout.signal });
+          if (!tileResponse.ok)
+            throw new Error(`Basemap tiles returned HTTP ${tileResponse.status}`);
+        }
+      }
+      if (expectDataService && !arcgisDataLayer && !Array.isArray(json.features))
         throw new Error("The URL is reachable, but it is not an ArcGIS layer or GeoJSON service");
     }
   } catch (error) {
@@ -168,18 +279,211 @@ async function mapWithLimit<T, R>(items: T[], limit: number, fn: (item: T) => Pr
   return results;
 }
 
+function safePublicUrl(raw: string): string | null {
+  try {
+    const url = new URL(raw.trim());
+    const hostname = url.hostname.toLowerCase();
+    if (url.protocol !== "https:" || url.username || url.password) return null;
+    if (
+      hostname === "localhost" ||
+      hostname.endsWith(".local") ||
+      hostname === "0.0.0.0" ||
+      hostname === "127.0.0.1" ||
+      hostname === "::1" ||
+      /^10\./.test(hostname) ||
+      /^192\.168\./.test(hostname) ||
+      /^169\.254\./.test(hostname) ||
+      /^172\.(1[6-9]|2\d|3[01])\./.test(hostname)
+    )
+      return null;
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+const serviceUrlPattern = /https:\/\/[^\s"'<>]+?(?:FeatureServer|MapServer)(?:\/\d+)?/gi;
+
+function directServiceCandidate(raw: string): string | null {
+  const safe = safePublicUrl(raw);
+  if (!safe) return null;
+  if (/\/(?:FeatureServer|MapServer)(?:\/\d+)?\/?(?:\?.*)?$/i.test(safe))
+    return normalizeArcgisLayerUrl(safe);
+  if (/\.geojson(?:\?.*)?$/i.test(safe)) return safe;
+  return null;
+}
+
+async function candidatesFromPublisherPage(raw: string): Promise<string[]> {
+  const pageUrl = safePublicUrl(raw);
+  if (!pageUrl || directServiceCandidate(pageUrl)) return [];
+  const timeout = withTimeout(10_000);
+  try {
+    const response = await fetch(pageUrl, { signal: timeout.signal });
+    if (!response.ok) return [];
+    const text = (await response.text()).replaceAll("\\/", "/").replaceAll("&amp;", "&");
+    return [...text.matchAll(serviceUrlPattern)]
+      .map((match) => directServiceCandidate(match[0]))
+      .filter((url): url is string => Boolean(url));
+  } catch {
+    return [];
+  } finally {
+    timeout.clear();
+  }
+}
+
+interface ArcgisSearchItem {
+  title?: string;
+  owner?: string;
+  type?: string;
+  url?: string;
+  modified?: number;
+}
+
+const searchTokens = (value: string) =>
+  new Set(
+    value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .split(" ")
+      .filter((token) => token.length >= 3 && !["map", "data", "layer", "public"].includes(token)),
+  );
+
+function similarityScore(needle: string, item: ArcgisSearchItem): number {
+  const wanted = searchTokens(needle);
+  const titleTokens = searchTokens(item.title ?? "");
+  const found = searchTokens(`${item.title ?? ""} ${item.owner ?? ""} ${item.url ?? ""}`);
+  let overlap = 0;
+  for (const token of wanted) if (found.has(token)) overlap += 1;
+  const coverage = wanted.size ? overlap / wanted.size : 0;
+  const normalizedNeedle = [...wanted].join(" ");
+  const normalizedTitle = [...titleTokens].join(" ");
+  const exactBonus = normalizedTitle === normalizedNeedle ? 100 : 0;
+  const extraTitleTokens = [...titleTokens].filter((token) => !wanted.has(token)).length;
+  const recency = item.modified
+    ? Math.min(1, Math.max(0, (item.modified - 1_577_836_800_000) / 315_576_000_000))
+    : 0;
+  return coverage * 100 + overlap * 8 + exactBonus - extraTitleTokens * 6 + recency;
+}
+
+async function candidatesFromPublicGisSearch(name: string): Promise<ReplacementCandidate[]> {
+  const params = new URLSearchParams({
+    f: "json",
+    num: "20",
+    q: `"${name.replaceAll('"', "")}" AND (type:"Feature Service" OR type:"Map Service")`,
+  });
+  const timeout = withTimeout(12_000);
+  try {
+    const response = await fetch(`https://www.arcgis.com/sharing/rest/search?${params}`, {
+      signal: timeout.signal,
+    });
+    if (!response.ok) return [];
+    const json = (await response.json()) as { results?: ArcgisSearchItem[] };
+    const candidates: ReplacementCandidate[] = [];
+    for (const item of json.results ?? []) {
+      const url = item.url ? directServiceCandidate(item.url) : null;
+      if (!url) continue;
+      const title = item.title?.trim() || name;
+      const owner = item.owner?.trim();
+      candidates.push({
+        url,
+        title,
+        notes: `Reachable public GIS result${owner ? ` published by ${owner}` : ""}. Review the publisher before using it.`,
+        source: "public GIS directory",
+        score: similarityScore(name, item),
+      });
+    }
+    return candidates
+      .filter((candidate) => candidate.score >= 35)
+      .sort((a, b) => b.score - a.score);
+  } catch {
+    return [];
+  } finally {
+    timeout.clear();
+  }
+}
+
+async function firstReachableCandidate(
+  candidates: ReplacementCandidate[],
+  kind: ConnectionKind,
+): Promise<ConnectionReplacement | null> {
+  const ordered = [...new Map(candidates.map((candidate) => [candidate.url, candidate])).values()]
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 12);
+  const checked = await mapWithLimit(ordered, 3, async (candidate) => {
+    try {
+      await probeConnectionUrl(
+        kind === "basemap" ? basemapProbeUrl(candidate.url) : candidate.url,
+        10_000,
+        kind !== "basemap",
+      );
+      return candidate;
+    } catch {
+      return null;
+    }
+  });
+  return checked.find((candidate): candidate is ReplacementCandidate => candidate !== null) ?? null;
+}
+
+/** Searches live trusted endpoints, publisher pages and the public GIS directory. */
+export async function findConnectionReplacement(
+  result: ConnectionResult,
+  clueUrl = "",
+  clueNotes = "",
+): Promise<ConnectionReplacement> {
+  if (result.kind === "basemap") {
+    const candidates = (trustedBasemapCandidates[result.basemapId ?? ""] ?? []).map(
+      (candidate, index) => ({ ...candidate, score: 1_000 - index }),
+    );
+    const replacement = await firstReachableCandidate(candidates, result.kind);
+    if (replacement) return replacement;
+    throw new Error("No healthy equivalent basemap was found right now.");
+  }
+
+  const candidates: ReplacementCandidate[] = [];
+  const addDirect = (raw: string, source: ConnectionReplacement["source"], score: number) => {
+    const url = directServiceCandidate(raw);
+    if (!url) return;
+    candidates.push({
+      url,
+      title: result.name,
+      notes: clueNotes.trim() || `Reachable service found from the ${source}.`,
+      source,
+      score,
+    });
+  };
+
+  addDirect(clueUrl, "publisher page", 500);
+  addDirect(result.sourcePage ?? "", "publisher page", 450);
+  addDirect(result.url, "existing URL", 300);
+
+  const pages = [clueUrl, result.sourcePage ?? ""].filter(Boolean);
+  const pageCandidates = (await Promise.all(pages.map(candidatesFromPublisherPage))).flat();
+  for (const url of pageCandidates) addDirect(url, "publisher page", 400);
+  candidates.push(...(await candidatesFromPublicGisSearch(result.name)));
+
+  const replacement = await firstReachableCandidate(candidates, result.kind);
+  if (replacement) return replacement;
+  throw new Error(
+    "No verified replacement was found. Add a publisher website or another clue and try again.",
+  );
+}
+
 export async function checkProjectConnections(
   layers: GisLayer[],
   connectionHints: Record<string, ConnectionRecoveryHint> = {},
 ): Promise<ConnectionResult[]> {
-  const targets: ConnectionTarget[] = basemaps.map((basemap) => ({
-    id: `basemap:${basemap.id}`,
-    name: `${basemap.label} basemap`,
-    kind: "basemap",
-    url: basemap.healthUrl,
-    ...(basemap.fallbackHealthUrl ? { fallbackUrl: basemap.fallbackHealthUrl } : {}),
-    basemapId: basemap.id,
-  }));
+  const targets: ConnectionTarget[] = basemaps.map((basemap) => {
+    const override = connectionHints[`basemap:${basemap.id}`];
+    if (override?.verified && override.url) saveBasemapUrlOverride(basemap.id, override.url);
+    return {
+      id: `basemap:${basemap.id}`,
+      name: `${basemap.label} basemap`,
+      kind: "basemap",
+      url: override?.verified ? basemapProbeUrl(override.url) : basemap.healthUrl,
+      ...(basemap.fallbackHealthUrl ? { fallbackUrl: basemap.fallbackHealthUrl } : {}),
+      basemapId: basemap.id,
+    };
+  });
 
   for (const entry of catalog) {
     const cloudOverride = connectionHints[`catalog:${entry.id}`];

@@ -714,6 +714,8 @@ function helpAnswer(prompt: string): string | null {
     return "Drag a layer by its handle in the Layers panel. Layers higher in the list draw above layers below them. You can also move or duplicate a layer into Working layers or another group before sorting it.";
   if (/\b(measure|area|acre|distance|length)\b/.test(prompt))
     return "Choose the area or distance measurement tool in the drawing toolbar, click points on the map, then double-click or press Enter to finish. Use the unit selectors to switch among acres, square feet, hectares, miles, feet, meters, or kilometers.";
+  if (/\b(broken|failed|repair|reconnect|api|connection)\b/.test(prompt))
+    return "Open Public data → Connections. For a failed or fallback connection, choose Find replacement. LandDraft checks trusted alternatives, the publisher page, and public GIS services, fills the best verified URL, and waits for you to select Test & use before changing the project.";
   if (/\b(basemap|satellite|street map|dark map|topo)\b/.test(prompt))
     return "Open the basemap selector at the lower-right of the map and choose Street, Satellite, Topo, Dark, or OSM. The zoom level appears directly beneath the selector.";
   return null;

@@ -31,12 +31,14 @@ import { useWorkbench } from "@/lib/gis/store";
 import { useMapRef } from "@/lib/gis/mapRef";
 import {
   checkProjectConnections,
+  findConnectionReplacement,
   probeConnectionUrl,
   resolveCatalogUrl,
   saveCatalogUrlOverride,
   saveConnectionHint,
   type ConnectionResult,
 } from "@/lib/gis/connectionHealth";
+import { basemapProbeUrl, saveBasemapUrlOverride } from "@/lib/gis/basemaps";
 import { cn } from "@/lib/utils";
 
 const catalogLayerStyle = (entry: CatalogEntry) => {
@@ -210,8 +212,15 @@ export function DataDrawer() {
     if (!url) return;
     setLoadingId(`connection:${result.id}`);
     try {
-      await probeConnectionUrl(url, 8_000, true);
-      if (result.id.startsWith("catalog:")) {
+      await probeConnectionUrl(
+        result.kind === "basemap" ? basemapProbeUrl(url) : url,
+        10_000,
+        result.kind !== "basemap",
+      );
+      if (result.kind === "basemap") {
+        const basemapId = result.basemapId ?? result.id.replace(/^basemap:/, "");
+        saveBasemapUrlOverride(basemapId, url);
+      } else if (result.id.startsWith("catalog:")) {
         const catalogId = result.id.slice("catalog:".length);
         saveCatalogUrlOverride(catalogId, url);
         for (const layer of wb.layers) {
@@ -240,6 +249,34 @@ export function DataDrawer() {
     } catch (error) {
       toast.error("That connection could not be verified", {
         description: error instanceof Error ? error.message : "Check the URL and try again",
+      });
+    } finally {
+      setLoadingId(null);
+    }
+  };
+
+  const findReplacement = async (result: ConnectionResult) => {
+    setLoadingId(`discover:${result.id}`);
+    try {
+      const replacement = await findConnectionReplacement(
+        result,
+        reconnectUrls[result.id] ?? wb.connectionHints[result.id]?.url ?? "",
+        reconnectNotes[result.id] ?? wb.connectionHints[result.id]?.notes ?? "",
+      );
+      setReconnectUrls((current) => ({ ...current, [result.id]: replacement.url }));
+      setReconnectNotes((current) => ({
+        ...current,
+        [result.id]: `${replacement.notes} Found via ${replacement.source}.`,
+      }));
+      toast.success("Healthy replacement found", {
+        description: `${replacement.title} is ready to review. Select Test & use to apply it.`,
+      });
+    } catch (error) {
+      toast.error("A replacement was not found", {
+        description:
+          error instanceof Error
+            ? error.message
+            : "Add a publisher website or another clue and try again.",
       });
     } finally {
       setLoadingId(null);
@@ -383,7 +420,7 @@ export function DataDrawer() {
                         <div className="text-[10px] text-muted-foreground">{result.message}</div>
                       </div>
                     </div>
-                    {result.status === "error" && (
+                    {result.status !== "healthy" && (
                       <div className="mt-2 space-y-1.5">
                         {result.sourcePage && (
                           <a
@@ -424,25 +461,36 @@ export function DataDrawer() {
                           rows={2}
                           className="w-full resize-none rounded-lg border border-border bg-secondary/50 px-2 py-1.5 text-[10px] outline-none focus:border-primary"
                         />
-                        <div className="flex gap-1">
-                          {result.kind !== "basemap" && (
-                            <button
-                              onClick={() => void reconnect(result)}
-                              disabled={
-                                !(
-                                  reconnectUrls[result.id] ?? wb.connectionHints[result.id]?.url
-                                )?.trim() || loadingId === `connection:${result.id}`
-                              }
-                              className="flex items-center gap-1 rounded-md bg-primary px-2 py-1 text-[10px] font-medium text-primary-foreground disabled:opacity-50"
-                            >
-                              {loadingId === `connection:${result.id}` ? (
-                                <Loader2 className="size-3 animate-spin" />
-                              ) : (
-                                <Link2 className="size-3" />
-                              )}
-                              Test & use
-                            </button>
-                          )}
+                        <div className="flex flex-wrap gap-1">
+                          <button
+                            onClick={() => void findReplacement(result)}
+                            disabled={loadingId === `discover:${result.id}`}
+                            title="Search trusted alternatives, the publisher page and public GIS services"
+                            className="flex items-center gap-1 rounded-md border border-primary/30 bg-primary/10 px-2 py-1 text-[10px] font-medium text-primary disabled:opacity-50"
+                          >
+                            {loadingId === `discover:${result.id}` ? (
+                              <Loader2 className="size-3 animate-spin" />
+                            ) : (
+                              <Search className="size-3" />
+                            )}
+                            Find replacement
+                          </button>
+                          <button
+                            onClick={() => void reconnect(result)}
+                            disabled={
+                              !(
+                                reconnectUrls[result.id] ?? wb.connectionHints[result.id]?.url
+                              )?.trim() || loadingId === `connection:${result.id}`
+                            }
+                            className="flex items-center gap-1 rounded-md bg-primary px-2 py-1 text-[10px] font-medium text-primary-foreground disabled:opacity-50"
+                          >
+                            {loadingId === `connection:${result.id}` ? (
+                              <Loader2 className="size-3 animate-spin" />
+                            ) : (
+                              <Link2 className="size-3" />
+                            )}
+                            Test & use
+                          </button>
                           <button
                             onClick={() => saveReconnectClue(result)}
                             className="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[10px] font-medium"

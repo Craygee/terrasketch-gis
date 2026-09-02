@@ -95,6 +95,52 @@ export const getBasemap = (id: string): Basemap =>
   basemaps.find((b) => b.id === id) ?? basemaps[0]!;
 
 const BASEMAP_FALLBACKS_KEY = "landdraft.basemap-fallbacks.v1";
+const BASEMAP_OVERRIDES_KEY = "landdraft.basemap-url-overrides.v1";
+
+function readBasemapOverrides(): Record<string, string> {
+  if (typeof window === "undefined") return {};
+  try {
+    const value = JSON.parse(window.localStorage.getItem(BASEMAP_OVERRIDES_KEY) ?? "{}");
+    return value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, string>)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+export function basemapProbeUrl(raw: string): string {
+  const url = raw.trim();
+  if (/\/MapServer\/?$/i.test(url)) return `${url.replace(/\/$/, "")}/tile/0/0/0`;
+  return url.replaceAll("{z}", "0").replaceAll("{x}", "0").replaceAll("{y}", "0");
+}
+
+const basemapAttribution = (url: string) => {
+  if (/World_Imagery/i.test(url)) return "Imagery © Esri, Maxar, Earthstar Geographics";
+  if (/World_Topo_Map/i.test(url)) return "Map data © Esri and contributors";
+  if (/opentopomap/i.test(url)) return "© OpenTopoMap (CC-BY-SA), © OpenStreetMap contributors";
+  if (/openfreemap|openstreetmap/i.test(url)) return "© OpenStreetMap contributors";
+  return "Basemap © source publisher";
+};
+
+function basemapStyleFromUrl(raw: string): StyleSpecification | string {
+  let url = raw.trim();
+  if (/\/MapServer\/?$/i.test(url)) url = `${url.replace(/\/$/, "")}/tile/{z}/{y}/{x}`;
+  if (url.includes("{z}") && url.includes("{x}") && url.includes("{y}"))
+    return raster([url], basemapAttribution(url), /opentopomap/i.test(url) ? 17 : 19);
+  return url;
+}
+
+export function saveBasemapUrlOverride(id: string, url: string): void {
+  if (typeof window === "undefined") return;
+  const overrides = readBasemapOverrides();
+  overrides[id] = url.trim();
+  window.localStorage.setItem(BASEMAP_OVERRIDES_KEY, JSON.stringify(overrides));
+  setBasemapFallback(id, false);
+  window.dispatchEvent(
+    new CustomEvent("landdraft:basemap-health", { detail: { id, enabled: false } }),
+  );
+}
 
 function fallbackIds(): string[] {
   try {
@@ -120,6 +166,8 @@ export function setBasemapFallback(id: string, enabled: boolean): void {
 
 export function getBasemapStyle(id: string): StyleSpecification | string {
   const basemap = getBasemap(id);
+  const override = typeof window !== "undefined" ? readBasemapOverrides()[id]?.trim() : "";
+  if (override) return basemapStyleFromUrl(override);
   if (
     typeof window !== "undefined" &&
     basemap.fallbackStyle &&
