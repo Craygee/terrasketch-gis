@@ -702,6 +702,8 @@ function helpAnswer(prompt: string): string | null {
     return "Use Multi-select to click features one at a time, or Box select to drag across an area. The active layer is preferred where features overlap.";
   if (/\b(snap|snapping|draw)\b/.test(prompt))
     return "Turn on Snap, then draw a point, line, or area. New vertices snap to nearby visible features; GPS point uses device location with permission.";
+  if (/\b(gps|location|track|field work|walking distance|driving path)\b/.test(prompt))
+    return "On the mobile site, switch to Field at the top. Tap Locate for your live position, Mark for a named GPS point, or Track path / Track area while walking or driving. Field captures save into this project and appear in the full map. Turn on Parcels for owner labels, then tap a feature for attributes or directions.";
   if (/\b(export|kmz|pdf|shp|print)\b/.test(prompt))
     return "Open Export for PDF, GeoJSON, KML, KMZ, or Shapefile. Print map opens the layout editor; reports include the map, legend, and selected attributes.";
   if (/\b(parcel|ownership|tax)\b/.test(prompt))

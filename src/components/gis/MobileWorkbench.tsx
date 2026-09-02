@@ -13,6 +13,8 @@ import {
   PlayCircle,
   LogOut,
   UserRound,
+  Map,
+  Navigation,
 } from "lucide-react";
 import { Toaster } from "@/components/ui/sonner";
 import { WorkbenchProvider, useWorkbench } from "@/lib/gis/store";
@@ -34,6 +36,7 @@ import { LandDraftMark } from "@/components/brand/LandDraftMark";
 import { FeatureDestinationDialog } from "./FeatureDestinationDialog";
 import { TourProvider, useTours } from "./TourProvider";
 import { ConnectionManager } from "./ConnectionManager";
+import { FieldModule } from "./FieldModule";
 
 const AiAssistant = lazy(() =>
   import("./AiAssistant").then((module) => ({ default: module.AiAssistant })),
@@ -67,6 +70,10 @@ type Sheet = "layers" | "data" | "draw" | "export" | "projects" | "help" | null;
 
 function MobileShell() {
   const [sheet, setSheet] = useState<Sheet>(null);
+  const [fieldMode, setFieldModeState] = useState(() => {
+    if (typeof window === "undefined") return true;
+    return window.localStorage.getItem("landdraft.mobile-mode.v1") !== "map";
+  });
   const wb = useWorkbench();
   const {
     setDrawerOpen,
@@ -78,6 +85,12 @@ function MobileShell() {
     analysisOpen,
     setAnalysisOpen,
   } = useMapRef();
+
+  const setFieldMode = (enabled: boolean) => {
+    setFieldModeState(enabled);
+    window.localStorage.setItem("landdraft.mobile-mode.v1", enabled ? "field" : "map");
+    setSheet(null);
+  };
 
   if (!wb.projectReady)
     return (
@@ -102,10 +115,10 @@ function MobileShell() {
   return (
     <div className="app-viewport relative bg-background">
       <MapCanvas />
-      <SelectionToolbar mobile />
+      {!fieldMode && <SelectionToolbar mobile />}
 
       <header className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-center gap-2 p-3 pt-[max(.75rem,env(safe-area-inset-top))]">
-        <div className="float-surface pointer-events-auto flex min-w-0 items-center gap-2 rounded-2xl px-3 py-2">
+        <div className="float-surface pointer-events-auto flex min-w-0 items-center gap-2 rounded-2xl px-2.5 py-2">
           <span className="flex size-8 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground">
             <LandDraftMark className="size-5" />
           </span>
@@ -113,7 +126,7 @@ function MobileShell() {
             value={wb.projectId}
             onChange={(event) => void wb.openProject(event.target.value)}
             aria-label="Switch project"
-            className="min-w-0 w-36 bg-transparent text-sm font-bold outline-none"
+            className="min-w-0 w-16 bg-transparent text-sm font-bold outline-none sm:w-36"
           >
             {wb.projects.map((project) => (
               <option key={project.id} value={project.id}>
@@ -122,36 +135,72 @@ function MobileShell() {
             ))}
           </select>
         </div>
-        <div data-tour="map-search" className="pointer-events-auto ml-auto">
-          <SearchBox />
+        <div className="float-surface pointer-events-auto ml-auto grid grid-cols-2 rounded-2xl p-1">
+          <button
+            onClick={() => setFieldMode(true)}
+            aria-pressed={fieldMode}
+            title="Field mode"
+            className={cn(
+              "flex items-center gap-1 rounded-xl px-2.5 py-2 text-[10px] font-semibold",
+              fieldMode && "bg-primary text-primary-foreground",
+            )}
+          >
+            <Navigation className="size-3.5" />{" "}
+            <span className="hidden min-[370px]:inline">Field</span>
+          </button>
+          <button
+            onClick={() => setFieldMode(false)}
+            aria-pressed={!fieldMode}
+            title="Full map mode"
+            className={cn(
+              "flex items-center gap-1 rounded-xl px-2.5 py-2 text-[10px] font-semibold",
+              !fieldMode && "bg-primary text-primary-foreground",
+            )}
+          >
+            <Map className="size-3.5" /> <span className="hidden min-[370px]:inline">Map</span>
+          </button>
         </div>
-        <button
-          onClick={() => setSheet(sheet === "help" ? null : "help")}
-          aria-label="Help, tours, and account"
-          title="Help, tours, and account"
-          className="float-surface pointer-events-auto rounded-2xl p-3"
-        >
-          <Info className="size-4" />
-        </button>
-        <button
-          onClick={() => setSheet(sheet === "projects" ? null : "projects")}
-          aria-label="Projects and account"
-          title="Open projects and account settings"
-          className="float-surface pointer-events-auto rounded-2xl p-3"
-          data-tour="top-projects"
-        >
-          <FolderOpen className="size-4" />
-        </button>
+        {!fieldMode && (
+          <>
+            <div data-tour="map-search" className="pointer-events-auto hidden sm:block">
+              <SearchBox />
+            </div>
+            <button
+              onClick={() => setSheet(sheet === "help" ? null : "help")}
+              aria-label="Help, tours, and account"
+              title="Help, tours, and account"
+              className="float-surface pointer-events-auto rounded-2xl p-3"
+            >
+              <Info className="size-4" />
+            </button>
+            <button
+              onClick={() => setSheet(sheet === "projects" ? null : "projects")}
+              aria-label="Projects and account"
+              title="Open projects and account settings"
+              className="float-surface pointer-events-auto rounded-2xl p-3"
+              data-tour="top-projects"
+            >
+              <FolderOpen className="size-4" />
+            </button>
+          </>
+        )}
       </header>
 
       <div
         data-tour="basemap-control"
-        className="pointer-events-auto absolute bottom-20 right-14 z-20"
+        className={cn(
+          "pointer-events-auto absolute right-14 z-20",
+          fieldMode ? "top-[calc(8.75rem+env(safe-area-inset-top))]" : "bottom-20",
+        )}
       >
         <BasemapControl />
       </div>
 
-      {sheet && (
+      <div className={fieldMode ? undefined : "hidden"}>
+        <FieldModule active={fieldMode} />
+      </div>
+
+      {!fieldMode && sheet && (
         <section className="mobile-sheet-height panel-surface absolute inset-x-2 bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-40 overflow-hidden rounded-3xl">
           <div className="flex items-center border-b border-border px-4 py-2">
             <h2 className="text-sm font-semibold">
@@ -227,7 +276,7 @@ function MobileShell() {
         </section>
       )}
 
-      {tableOpen && (
+      {!fieldMode && tableOpen && (
         <div className="absolute inset-x-0 bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-50">
           <AttributeTable />
         </div>
@@ -249,50 +298,52 @@ function MobileShell() {
         </Suspense>
       )}
 
-      <nav className="panel-surface absolute inset-x-2 bottom-[max(.5rem,env(safe-area-inset-bottom))] z-30 grid h-14 grid-cols-5 rounded-2xl p-1">
-        <NavButton
-          active={sheet === "layers"}
-          icon={<Layers3 className="size-5" />}
-          label="Layers"
-          tourId="layer-panel-button"
-          onClick={() => setSheet(sheet === "layers" ? null : "layers")}
-        />
-        <NavButton
-          icon={<Database className="size-5" />}
-          label="Data"
-          active={sheet === "data"}
-          tourId="top-public-data"
-          onClick={() => setSheet(sheet === "data" ? null : "data")}
-        />
-        <NavButton
-          active={sheet === "draw"}
-          icon={<PencilRuler className="size-5" />}
-          label="Draw"
-          tourId="draw-toolbar"
-          onClick={() => setSheet(sheet === "draw" ? null : "draw")}
-        />
-        <NavButton
-          icon={<Sparkles className="size-5" />}
-          label="AI"
-          tourId="top-ai"
-          onClick={() => {
-            setSheet(null);
-            setAssistantOpen(true);
-          }}
-        />
-        <NavButton
-          active={sheet === "export"}
-          icon={
-            sheet === "export" ? <FileDown className="size-5" /> : <Printer className="size-5" />
-          }
-          label="Print / export"
-          tourId="top-print"
-          onClick={() => {
-            if (sheet === "export") setPrintOpen(true);
-            else setSheet("export");
-          }}
-        />
-      </nav>
+      {!fieldMode && (
+        <nav className="panel-surface absolute inset-x-2 bottom-[max(.5rem,env(safe-area-inset-bottom))] z-30 grid h-14 grid-cols-5 rounded-2xl p-1">
+          <NavButton
+            active={sheet === "layers"}
+            icon={<Layers3 className="size-5" />}
+            label="Layers"
+            tourId="layer-panel-button"
+            onClick={() => setSheet(sheet === "layers" ? null : "layers")}
+          />
+          <NavButton
+            icon={<Database className="size-5" />}
+            label="Data"
+            active={sheet === "data"}
+            tourId="top-public-data"
+            onClick={() => setSheet(sheet === "data" ? null : "data")}
+          />
+          <NavButton
+            active={sheet === "draw"}
+            icon={<PencilRuler className="size-5" />}
+            label="Draw"
+            tourId="draw-toolbar"
+            onClick={() => setSheet(sheet === "draw" ? null : "draw")}
+          />
+          <NavButton
+            icon={<Sparkles className="size-5" />}
+            label="AI"
+            tourId="top-ai"
+            onClick={() => {
+              setSheet(null);
+              setAssistantOpen(true);
+            }}
+          />
+          <NavButton
+            active={sheet === "export"}
+            icon={
+              sheet === "export" ? <FileDown className="size-5" /> : <Printer className="size-5" />
+            }
+            label="Print / export"
+            tourId="top-print"
+            onClick={() => {
+              if (sheet === "export") setPrintOpen(true);
+              else setSheet("export");
+            }}
+          />
+        </nav>
+      )}
     </div>
   );
 }

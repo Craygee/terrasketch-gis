@@ -242,6 +242,15 @@
   overscroll-behavior: none;
 }
 
+.field-location-dot {
+  width: 18px;
+  height: 18px;
+  border: 3px solid white;
+  border-radius: 9999px;
+  background: #1685f8;
+  box-shadow: 0 0 0 7px rgb(22 133 248 / 18%), 0 2px 8px rgb(0 0 0 / 28%);
+}
+
 .app-scroll-viewport {
   position: fixed;
   inset: 0;

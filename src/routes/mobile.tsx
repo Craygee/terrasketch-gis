@@ -6,11 +6,11 @@ const MobileWorkbench = lazy(() => import("@/components/gis/MobileWorkbench"));
 export const Route = createFileRoute("/mobile")({
   head: () => ({
     meta: [
-      { title: "LandDraft Mobile Map" },
+      { title: "LandDraft Field Map" },
       {
         name: "description",
         content:
-          "A clean field map for signed-in projects, public data, GPS feature collection, layer editing and map or GIS data exports.",
+          "A clean mobile field map for GPS points, walking or driving tracks, parcel inspection, directions, signed-in projects, public data and GIS exports.",
       },
     ],
   }),
