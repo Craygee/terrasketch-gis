@@ -58,6 +58,7 @@ export function RemoteLayerManager() {
             layer.source.where ?? "",
             layer.source.outFields?.join(",") ?? "*",
             layer.source.minZoom ?? 0,
+            layer.source.refreshToken ?? 0,
           ].join(":")
         : "",
     )
@@ -105,7 +106,7 @@ export function RemoteLayerManager() {
           if (!source.refreshMinutes) continue;
           if (now - (source.lastRefreshedAt ?? 0) < source.refreshMinutes * 60_000) continue;
         }
-        const queryKey = `${source.url}|${source.where ?? ""}|${source.outFields?.join(",") ?? "*"}`;
+        const queryKey = `${source.url}|${source.where ?? ""}|${source.outFields?.join(",") ?? "*"}|${source.refreshToken ?? 0}`;
         const previousCoverage = coverage.current.get(layer.id);
         if (
           !scheduledOnly &&
@@ -163,16 +164,14 @@ export function RemoteLayerManager() {
               const finalSource = {
                 ...source,
                 loading: false,
-                loadStatus: result.truncated
-                  ? result.loaded === 0
-                    ? ("zoom-in" as const)
-                    : ("error" as const)
-                  : ("complete" as const),
+                loadStatus: result.truncated ? ("zoom-in" as const) : ("complete" as const),
                 loadedFeatures: result.loaded,
                 ...(result.total !== undefined ? { expectedFeatures: result.total } : {}),
                 lastRefreshedAt: Date.now(),
                 ...(result.truncated && result.loaded > 0
-                  ? { loadError: "The publisher stopped before returning every feature." }
+                  ? {
+                      loadError: `Showing ${result.loaded.toLocaleString()} nearby features. Zoom in for the complete area.`,
+                    }
                   : {}),
               };
               if (!result.truncated) delete finalSource.loadError;

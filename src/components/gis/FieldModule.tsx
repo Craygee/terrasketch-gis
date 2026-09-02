@@ -10,6 +10,7 @@ import {
   Gauge,
   Hexagon,
   LocateFixed,
+  Loader2,
   MapPinned,
   Navigation,
   Pause,
@@ -29,6 +30,7 @@ import { cn } from "@/lib/utils";
 
 type Activity = "walking" | "driving";
 type TrackKind = "path" | "area";
+type GpsStatus = "idle" | "requesting" | "active" | "error" | "denied";
 
 interface FieldLocation {
   lng: number;
@@ -61,6 +63,17 @@ interface WakeLockSentinelLike {
 const FIELD_PREVIEW_SOURCE = "landdraft-field-preview";
 const FIELD_PREVIEW_FILL = "landdraft-field-preview-fill";
 const FIELD_PREVIEW_LINE = "landdraft-field-preview-line";
+const PARCEL_FIELDS = [
+  "OBJECTID",
+  "Prop_ID",
+  "GEO_ID",
+  "OWNER_NAME",
+  "LEGAL_AREA",
+  "GIS_AREA",
+  "LEGAL_DESC",
+  "SITUS_ADDR",
+  "MAIL_ADDR",
+];
 
 const rad = (value: number) => (value * Math.PI) / 180;
 const segmentMeters = (a: Position, b: Position) => {
@@ -129,6 +142,8 @@ export function FieldModule({ active = true }: { active?: boolean }) {
   const locationErrorShown = useRef(false);
   const [activity, setActivity] = useState<Activity>("walking");
   const [location, setLocation] = useState<FieldLocation | null>(null);
+  const [gpsStatus, setGpsStatus] = useState<GpsStatus>("idle");
+  const [gpsMessage, setGpsMessage] = useState("");
   const [track, setTrackState] = useState<TrackSession | null>(null);
   const [trackPoints, setTrackPoints] = useState<Position[]>([]);
   const [trackDistance, setTrackDistance] = useState(0);
@@ -184,6 +199,9 @@ export function FieldModule({ active = true }: { active?: boolean }) {
       heading: position.coords.heading,
       timestamp: position.timestamp,
     };
+    locationErrorShown.current = false;
+    setGpsStatus("active");
+    setGpsMessage("");
     setLocation(next);
     const currentMap = mapInstanceRef.current;
     if (currentMap && followRef.current && activeRef.current) {
@@ -216,24 +234,76 @@ export function FieldModule({ active = true }: { active?: boolean }) {
     setTrackDistance(distanceRef.current);
   }, []);
 
-  const ensureWatch = useCallback(() => {
-    if (watchIdRef.current !== null) return true;
-    if (!navigator.geolocation) {
-      toast.error("Location is not available in this browser");
-      return false;
-    }
-    watchIdRef.current = navigator.geolocation.watchPosition(
-      updateLocation,
-      (error) => {
-        if (!locationErrorShown.current) {
-          toast.error("Location could not be read", { description: error.message });
-          locationErrorShown.current = true;
+  const ensureWatch = useCallback(
+    (restart = false) => {
+      if (restart && watchIdRef.current !== null) {
+        navigator.geolocation.clearWatch(watchIdRef.current);
+        watchIdRef.current = null;
+      }
+      if (watchIdRef.current !== null) return true;
+      if (!navigator.geolocation) {
+        toast.error("Location is not available in this browser");
+        setGpsStatus("error");
+        setGpsMessage("This browser does not provide device location.");
+        return false;
+      }
+      if (!window.isSecureContext) {
+        toast.error("GPS requires a secure connection");
+        setGpsStatus("error");
+        setGpsMessage("Open LandDraft using its secure https address and try again.");
+        return false;
+      }
+      setGpsStatus("requesting");
+      setGpsMessage("Finding your location…");
+      locationErrorShown.current = false;
+      const startWatch = (highAccuracy: boolean): void => {
+        try {
+          const watchId = navigator.geolocation.watchPosition(
+            updateLocation,
+            (error) => {
+              if (watchIdRef.current !== watchId) return;
+              navigator.geolocation.clearWatch(watchId);
+              watchIdRef.current = null;
+              if (highAccuracy && error.code !== 1) {
+                setGpsMessage("Trying a faster location fix…");
+                startWatch(false);
+                return;
+              }
+              const denied = error.code === 1;
+              const message = denied
+                ? "Location is blocked. Allow Location for this website in browser settings, then retry."
+                : error.code === 2
+                  ? "A location fix is unavailable. Turn on device Location Services or move outdoors, then retry."
+                  : "The location request timed out. Check Location Services and try again.";
+              setLocation(null);
+              setGpsStatus(denied ? "denied" : "error");
+              setGpsMessage(message);
+              if (!locationErrorShown.current) {
+                toast.error(denied ? "Location permission is blocked" : "GPS is not ready", {
+                  description: message,
+                });
+                locationErrorShown.current = true;
+              }
+            },
+            {
+              enableHighAccuracy: highAccuracy,
+              maximumAge: highAccuracy ? 2_000 : 30_000,
+              timeout: highAccuracy ? 18_000 : 12_000,
+            },
+          );
+          watchIdRef.current = watchId;
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Location could not be started";
+          setGpsStatus("error");
+          setGpsMessage(message);
+          toast.error("GPS could not start", { description: message });
         }
-      },
-      { enableHighAccuracy: true, maximumAge: 1_000, timeout: 20_000 },
-    );
-    return true;
-  }, [updateLocation]);
+      };
+      startWatch(true);
+      return true;
+    },
+    [updateLocation],
+  );
 
   useEffect(() => {
     const interval = window.setInterval(() => setClock(Date.now()), 1_000);
@@ -265,7 +335,12 @@ export function FieldModule({ active = true }: { active?: boolean }) {
   }, [active]);
 
   useEffect(() => {
-    if (!map || !location) return;
+    if (!map) return;
+    if (!location) {
+      markerRef.current?.remove();
+      markerRef.current = null;
+      return;
+    }
     if (!markerRef.current) {
       const element = document.createElement("div");
       element.className = "field-location-dot";
@@ -317,7 +392,7 @@ export function FieldModule({ active = true }: { active?: boolean }) {
 
   const locate = () => {
     setFollow(true);
-    if (!ensureWatch()) return;
+    if (!ensureWatch(gpsStatus === "error" || gpsStatus === "denied")) return;
     if (location)
       map?.easeTo({ center: [location.lng, location.lat], zoom: Math.max(map.getZoom(), 16) });
   };
@@ -397,34 +472,59 @@ export function FieldModule({ active = true }: { active?: boolean }) {
       toast.error("Location is not available in this browser");
       return;
     }
+    const stagePoint = (position: GeolocationPosition) => {
+      updateLocation(position);
+      const suggestedName = captureName("Field point");
+      setPending({
+        kind: "point",
+        geometry: {
+          type: "Point",
+          coordinates: [position.coords.longitude, position.coords.latitude],
+        },
+        suggestedName,
+        properties: {
+          LAT: Number(position.coords.latitude.toFixed(7)),
+          LON: Number(position.coords.longitude.toFixed(7)),
+          ACCURACY_M: Math.round(position.coords.accuracy),
+          ALTITUDE_M:
+            position.coords.altitude === null ? null : Number(position.coords.altitude.toFixed(1)),
+          CAPTURED: new Date().toISOString(),
+          FIELD_SOURCE: "GPS point",
+        },
+      });
+      setCaptureNameValue(suggestedName);
+      setCaptureNotes("");
+    };
+    const failPoint = (error: GeolocationPositionError) => {
+      const message =
+        error.code === 1
+          ? "Allow Location for this website in browser settings, then retry."
+          : "Turn on device Location Services or move outdoors, then retry.";
+      setGpsStatus(error.code === 1 ? "denied" : "error");
+      setGpsMessage(message);
+      toast.error("A GPS point could not be captured", { description: message });
+    };
+    setGpsStatus("requesting");
+    setGpsMessage("Finding an accurate point…");
     navigator.geolocation.getCurrentPosition(
-      (position) => {
-        updateLocation(position);
-        const suggestedName = captureName("Field point");
-        setPending({
-          kind: "point",
-          geometry: {
-            type: "Point",
-            coordinates: [position.coords.longitude, position.coords.latitude],
-          },
-          suggestedName,
-          properties: {
-            LAT: Number(position.coords.latitude.toFixed(7)),
-            LON: Number(position.coords.longitude.toFixed(7)),
-            ACCURACY_M: Math.round(position.coords.accuracy),
-            ALTITUDE_M:
-              position.coords.altitude === null
-                ? null
-                : Number(position.coords.altitude.toFixed(1)),
-            CAPTURED: new Date().toISOString(),
-            FIELD_SOURCE: "GPS point",
-          },
+      stagePoint,
+      (error) => {
+        if (error.code === 1) {
+          failPoint(error);
+          return;
+        }
+        setGpsMessage("Trying a faster location fix…");
+        navigator.geolocation.getCurrentPosition(stagePoint, failPoint, {
+          enableHighAccuracy: false,
+          maximumAge: 30_000,
+          timeout: 12_000,
         });
-        setCaptureNameValue(suggestedName);
-        setCaptureNotes("");
       },
-      (error) => toast.error("Location could not be read", { description: error.message }),
-      { enableHighAccuracy: true, maximumAge: 0, timeout: 20_000 },
+      {
+        enableHighAccuracy: true,
+        maximumAge: 2_000,
+        timeout: 18_000,
+      },
     );
   };
 
@@ -490,7 +590,44 @@ export function FieldModule({ active = true }: { active?: boolean }) {
 
   const toggleParcels = () => {
     const current = wbRef.current;
+    const entry = catalog.find((item) => item.id === "tx-parcels");
+    if (!entry) return;
+    const url =
+      (current.connectionHints["catalog:tx-parcels"]?.verified
+        ? current.connectionHints["catalog:tx-parcels"]?.url
+        : undefined) ?? resolveCatalogUrl(entry);
+    if (!url) {
+      toast.error("The parcel connection is not available");
+      return;
+    }
     if (parcelLayer) {
+      if (parcelLayer.source.kind !== "remote") return;
+      const needsRetry =
+        parcelLayer.source.loadStatus === "error" ||
+        parcelLayer.source.loadStatus === "zoom-in" ||
+        (parcelLayer.visible &&
+          !parcelLayer.source.loading &&
+          parcelLayer.data.features.length === 0);
+      const willShow = needsRetry || !parcelLayer.visible;
+      current.updateLayer(parcelLayer.id, {
+        visible: willShow,
+        ...(needsRetry ? { data: { type: "FeatureCollection", features: [] } } : {}),
+        source: {
+          ...parcelLayer.source,
+          url,
+          requiresViewport: true,
+          minZoom: 13,
+          outFields: PARCEL_FIELDS,
+          ...(needsRetry
+            ? {
+                refreshToken: Date.now(),
+                loading: false,
+                loadStatus: "idle" as const,
+                loadedFeatures: 0,
+              }
+            : {}),
+        },
+      });
       current.updateStyle(parcelLayer.id, {
         fillOpacity: 0,
         strokeColor: "#2f7d4f",
@@ -501,21 +638,14 @@ export function FieldModule({ active = true }: { active?: boolean }) {
         labelMinZoom: 14,
         labelMaxZoom: 24,
       });
-      if (parcelLayer.visible) current.toggleVisible(parcelLayer.id);
-      else {
-        current.toggleVisible(parcelLayer.id);
-        if (map && map.getZoom() < 14) map.easeTo({ zoom: 14 });
+      if (willShow && map && map.getZoom() < 14) map.easeTo({ zoom: 14 });
+      else if (parcelLayer.source.loadStatus === "zoom-in" && map)
+        map.easeTo({ zoom: Math.min(19, map.getZoom() + 1) });
+      if (needsRetry) {
+        toast.info("Retrying parcels for this map area", {
+          description: "Nearby parcel outlines will appear as each page arrives.",
+        });
       }
-      return;
-    }
-    const entry = catalog.find((item) => item.id === "tx-parcels");
-    if (!entry) return;
-    const url =
-      (current.connectionHints["catalog:tx-parcels"]?.verified
-        ? current.connectionHints["catalog:tx-parcels"]?.url
-        : undefined) ?? resolveCatalogUrl(entry);
-    if (!url) {
-      toast.error("The parcel connection is not available");
       return;
     }
     current.addLayer({
@@ -528,7 +658,8 @@ export function FieldModule({ active = true }: { active?: boolean }) {
         catalogId: entry.id,
         attribution: entry.agency,
         requiresViewport: true,
-        minZoom: 12,
+        minZoom: 13,
+        outFields: PARCEL_FIELDS,
       },
       style: {
         fillOpacity: 0,
@@ -560,7 +691,11 @@ export function FieldModule({ active = true }: { active?: boolean }) {
   };
 
   const accuracyTone = !location
-    ? "text-muted-foreground"
+    ? gpsStatus === "error" || gpsStatus === "denied"
+      ? "text-red-700"
+      : gpsStatus === "requesting"
+        ? "text-amber-700"
+        : "text-muted-foreground"
     : location.accuracy <= 10
       ? "text-emerald-700"
       : location.accuracy <= 30
@@ -576,35 +711,62 @@ export function FieldModule({ active = true }: { active?: boolean }) {
           selected.layer.name,
       )
     : "";
+  const parcelSource = parcelLayer?.source.kind === "remote" ? parcelLayer.source : null;
+  const parcelLoading = Boolean(parcelLayer?.visible && parcelSource?.loading);
+  const parcelNeedsZoom = parcelSource?.loadStatus === "zoom-in";
+  const parcelNeedsRetry = parcelSource?.loadStatus === "error";
 
   return (
     <>
       <div className="pointer-events-none absolute inset-x-3 top-[calc(4.75rem+env(safe-area-inset-top))] z-20 flex items-start justify-between gap-2">
         <button
           onClick={locate}
-          className="float-surface pointer-events-auto flex items-center gap-2 rounded-2xl px-3 py-2 text-left"
+          title={gpsMessage || "Use this device’s current location"}
+          className="float-surface pointer-events-auto flex max-w-[13rem] items-center gap-2 rounded-2xl px-3 py-2 text-left"
         >
-          <Gauge className={cn("size-4", accuracyTone)} />
-          <span>
+          {gpsStatus === "requesting" ? (
+            <Loader2 className={cn("size-4 shrink-0 animate-spin", accuracyTone)} />
+          ) : (
+            <Gauge className={cn("size-4 shrink-0", accuracyTone)} />
+          )}
+          <span className="min-w-0">
             <strong className="block text-[11px]">
-              {location ? `GPS ±${Math.round(location.accuracy)} m` : "Enable GPS"}
+              {location
+                ? `GPS ±${Math.round(location.accuracy)} m`
+                : gpsStatus === "requesting"
+                  ? "Locating…"
+                  : gpsStatus === "error" || gpsStatus === "denied"
+                    ? "Retry GPS"
+                    : "Enable GPS"}
             </strong>
-            <span className="block text-[9px] text-muted-foreground">
+            <span className="block truncate text-[9px] text-muted-foreground">
               {location
                 ? `${location.lat.toFixed(5)}, ${location.lng.toFixed(5)}`
-                : "Tap to locate"}
+                : gpsMessage || "Tap to locate"}
             </span>
           </span>
         </button>
         <button
           onClick={toggleParcels}
           aria-pressed={Boolean(parcelLayer?.visible)}
+          title={parcelSource?.loadError || "Show or hide nearby parcel boundaries"}
           className={cn(
             "float-surface pointer-events-auto flex items-center gap-2 rounded-2xl px-3 py-2 text-xs font-semibold",
             parcelLayer?.visible && "bg-primary text-primary-foreground",
           )}
         >
-          <MapPinned className="size-4" /> Parcels
+          {parcelLoading ? (
+            <Loader2 className="size-4 animate-spin" />
+          ) : (
+            <MapPinned className="size-4" />
+          )}{" "}
+          {parcelNeedsZoom
+            ? "Zoom in"
+            : parcelNeedsRetry
+              ? "Retry parcels"
+              : parcelLoading
+                ? "Loading…"
+                : "Parcels"}
         </button>
       </div>
 

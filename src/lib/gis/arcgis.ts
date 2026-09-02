@@ -195,10 +195,9 @@ const featureIdentity = (feature: FeatureCollection["features"][number]) => {
 };
 
 /**
- * Loads every feature in an ArcGIS viewport using stable server pagination.
- * A count is requested first so dense views can stop before they freeze the
- * browser and clearly ask the user to zoom in instead of silently showing an
- * arbitrary first page.
+ * Streams an ArcGIS viewport page-by-page. The first geometries render before
+ * any expensive full-count query, which is materially faster for dense parcel
+ * services and avoids a count request becoming a loading bottleneck.
  */
 export async function fetchRemoteGeoJSONPaged(
   url: string,
@@ -217,81 +216,51 @@ export async function fetchRemoteGeoJSONPaged(
     return result;
   }
 
-  const total = await fetchArcgisFeatureCount(url, opts);
   const maxTotal = Math.max(1, opts.maxTotalFeatures ?? 20_000);
-  if (total > maxTotal) {
-    const result = {
-      data: { type: "FeatureCollection", features: [] } as FeatureCollection,
-      loaded: 0,
-      total,
-      complete: false,
-      truncated: true,
-    };
-    opts.onProgress?.(result);
-    return result;
-  }
-
   const pageSize = Math.max(1, Math.min(2_000, opts.pageSize ?? 2_000));
-  const offsets = Array.from(
-    { length: Math.ceil(total / pageSize) },
-    (_, index) => index * pageSize,
-  );
-  const pages = new Map<number, FeatureCollection["features"]>();
-  let nextPage = 0;
-  let completedPages = 0;
-  let lastMergedCount = 0;
+  const features: FeatureCollection["features"] = [];
+  const identities = new Set<string>();
+  let offset = 0;
+  let complete = false;
   let stalled = false;
 
-  const mergedFeatures = () => {
-    const merged: FeatureCollection["features"] = [];
-    const identities = new Set<string>();
-    for (const offset of offsets) {
-      for (const feature of pages.get(offset) ?? []) {
-        const identity = featureIdentity(feature);
-        if (identity && identities.has(identity)) continue;
-        if (identity) identities.add(identity);
-        merged.push(feature);
-      }
+  while (features.length < maxTotal && !complete && !stalled) {
+    const requested = Math.min(pageSize, maxTotal - features.length);
+    const page = await fetchRemoteGeoJSON(url, {
+      ...opts,
+      maxFeatures: requested,
+      resultOffset: offset,
+    });
+    if (page.features.length === 0) {
+      complete = true;
+      break;
     }
-    return merged;
-  };
-
-  const worker = async () => {
-    while (nextPage < offsets.length && !stalled) {
-      const offset = offsets[nextPage++];
-      if (offset === undefined) return;
-      const requested = Math.min(pageSize, total - offset);
-      const page = await fetchRemoteGeoJSON(url, {
-        ...opts,
-        maxFeatures: requested,
-        resultOffset: offset,
-      });
-      if (page.features.length === 0 && requested > 0) stalled = true;
-      pages.set(offset, page.features);
-      completedPages += 1;
-      const features = mergedFeatures();
-      if (page.features.length > 0 && features.length === lastMergedCount) stalled = true;
-      lastMergedCount = features.length;
-      const complete = completedPages === offsets.length && !stalled;
-      opts.onProgress?.({
-        data: { type: "FeatureCollection", features },
-        loaded: features.length,
-        total,
-        complete,
-        truncated: stalled,
-      });
+    const countBefore = features.length;
+    for (const feature of page.features) {
+      const identity = featureIdentity(feature);
+      if (identity && identities.has(identity)) continue;
+      if (identity) identities.add(identity);
+      features.push(feature);
     }
-  };
+    stalled = features.length === countBefore;
+    offset += page.features.length;
+    complete = page.features.length < requested;
+    const truncated = stalled || (!complete && features.length >= maxTotal);
+    opts.onProgress?.({
+      data: { type: "FeatureCollection", features: [...features] },
+      loaded: features.length,
+      ...(complete ? { total: features.length } : {}),
+      complete,
+      truncated,
+    });
+  }
 
-  const concurrency = Math.min(3, offsets.length);
-  await Promise.all(Array.from({ length: concurrency }, () => worker()));
-  const features = mergedFeatures();
-  const complete = completedPages === offsets.length && !stalled;
+  const truncated = stalled || !complete;
   return {
     data: { type: "FeatureCollection", features },
     loaded: features.length,
-    total,
+    ...(complete ? { total: features.length } : {}),
     complete,
-    truncated: stalled || !complete,
+    truncated,
   };
 }

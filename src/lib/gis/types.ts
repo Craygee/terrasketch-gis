@@ -57,6 +57,7 @@ export type LayerSource =
       minZoom?: number;
       refreshMinutes?: number;
       lastRefreshedAt?: number;
+      refreshToken?: number;
       loading?: boolean;
       loadStatus?: "idle" | "loading" | "complete" | "zoom-in" | "error";
       loadedFeatures?: number;
