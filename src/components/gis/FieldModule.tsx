@@ -721,30 +721,46 @@ export function FieldModule({ active = true }: { active?: boolean }) {
       <div className="pointer-events-none absolute inset-x-3 top-[calc(4.75rem+env(safe-area-inset-top))] z-20 flex items-start justify-between gap-2">
         <button
           onClick={locate}
-          title={gpsMessage || "Use this device’s current location"}
-          className="float-surface pointer-events-auto flex max-w-[13rem] items-center gap-2 rounded-2xl px-3 py-2 text-left"
-        >
-          {gpsStatus === "requesting" ? (
-            <Loader2 className={cn("size-4 shrink-0 animate-spin", accuracyTone)} />
-          ) : (
-            <Gauge className={cn("size-4 shrink-0", accuracyTone)} />
+          aria-label={
+            location
+              ? `Center map on current location. GPS accuracy plus or minus ${Math.round(location.accuracy)} meters.`
+              : "Enable device GPS location"
+          }
+          title={
+            location
+              ? `Center on current location · GPS ±${Math.round(location.accuracy)} m · ${location.lat.toFixed(5)}, ${location.lng.toFixed(5)}`
+              : gpsMessage || "Use this device’s current location"
+          }
+          className={cn(
+            "float-surface pointer-events-auto flex items-center gap-2 text-left transition-[width,height,padding,border-radius]",
+            location
+              ? "size-10 justify-center rounded-full p-0"
+              : "max-w-[13rem] rounded-2xl px-3 py-2",
           )}
-          <span className="min-w-0">
-            <strong className="block text-[11px]">
-              {location
-                ? `GPS ±${Math.round(location.accuracy)} m`
-                : gpsStatus === "requesting"
-                  ? "Locating…"
-                  : gpsStatus === "error" || gpsStatus === "denied"
-                    ? "Retry GPS"
-                    : "Enable GPS"}
-            </strong>
-            <span className="block truncate text-[9px] text-muted-foreground">
-              {location
-                ? `${location.lat.toFixed(5)}, ${location.lng.toFixed(5)}`
-                : gpsMessage || "Tap to locate"}
-            </span>
-          </span>
+        >
+          {location ? (
+            <LocateFixed className={cn("size-5", accuracyTone)} />
+          ) : (
+            <>
+              {gpsStatus === "requesting" ? (
+                <Loader2 className={cn("size-4 shrink-0 animate-spin", accuracyTone)} />
+              ) : (
+                <Gauge className={cn("size-4 shrink-0", accuracyTone)} />
+              )}
+              <span className="min-w-0">
+                <strong className="block text-[11px]">
+                  {gpsStatus === "requesting"
+                    ? "Locating…"
+                    : gpsStatus === "error" || gpsStatus === "denied"
+                      ? "Retry GPS"
+                      : "Enable GPS"}
+                </strong>
+                <span className="block truncate text-[9px] text-muted-foreground">
+                  {gpsMessage || "Tap to locate"}
+                </span>
+              </span>
+            </>
+          )}
         </button>
         <button
           onClick={toggleParcels}
