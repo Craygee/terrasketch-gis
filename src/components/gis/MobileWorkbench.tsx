@@ -33,6 +33,7 @@ import { cn } from "@/lib/utils";
 import { LandDraftMark } from "@/components/brand/LandDraftMark";
 import { FeatureDestinationDialog } from "./FeatureDestinationDialog";
 import { TourProvider, useTours } from "./TourProvider";
+import { ConnectionManager } from "./ConnectionManager";
 
 const AiAssistant = lazy(() =>
   import("./AiAssistant").then((module) => ({ default: module.AiAssistant })),
@@ -53,6 +54,7 @@ export default function MobileWorkbench() {
             <MobileShell />
             <RemoteLayerManager />
             <FeatureDestinationDialog />
+            <ConnectionManager />
             <Toaster />
           </TourProvider>
         </MapRefProvider>
@@ -329,12 +331,22 @@ function NavButton({
 function MobileTourMenu({ onDone }: { onDone: () => void }) {
   const { startTour, featureTips, setFeatureTips } = useTours();
   const auth = useAuth();
+  const { setConnectionsOpen } = useMapRef();
   const launch = (kind: "basic" | "advanced" | "print") => {
     onDone();
     startTour(kind);
   };
   return (
     <div className="space-y-2 p-4 text-xs">
+      <button
+        onClick={() => {
+          onDone();
+          setConnectionsOpen(true);
+        }}
+        className="flex w-full items-center gap-2 rounded-xl border border-border bg-card px-4 py-3 text-left font-semibold"
+      >
+        <Database className="size-4" /> API connections
+      </button>
       <button
         onClick={() => launch("basic")}
         className="flex w-full items-center gap-2 rounded-xl bg-primary px-4 py-3 font-semibold text-primary-foreground"

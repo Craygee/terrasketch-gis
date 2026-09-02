@@ -715,7 +715,7 @@ function helpAnswer(prompt: string): string | null {
   if (/\b(measure|area|acre|distance|length)\b/.test(prompt))
     return "Choose the area or distance measurement tool in the drawing toolbar, click points on the map, then double-click or press Enter to finish. Use the unit selectors to switch among acres, square feet, hectares, miles, feet, meters, or kilometers.";
   if (/\b(broken|failed|repair|reconnect|api|connection)\b/.test(prompt))
-    return "Open Public data → Connections. For a failed or fallback connection, choose Find replacement. LandDraft checks trusted alternatives, the publisher page, and public GIS services, fills the best verified URL, and waits for you to select Test & use before changing the project.";
+    return "Open the Info menu → API connections. LandDraft checks live sources when a project opens and safely applies verified replacements before reporting a break. Expand any source to open it, edit its URL, find a replacement, or select Test & use.";
   if (/\b(basemap|satellite|street map|dark map|topo)\b/.test(prompt))
     return "Open the basemap selector at the lower-right of the map and choose Street, Satellite, Topo, Dark, or OSM. The zoom level appears directly beneath the selector.";
   return null;

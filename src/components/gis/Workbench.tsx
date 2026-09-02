@@ -17,6 +17,7 @@ import { AuthGate } from "@/lib/auth";
 import { FeatureDestinationDialog } from "./FeatureDestinationDialog";
 import { TourProvider } from "./TourProvider";
 import { SharedLayerPanel } from "./SharedLayerPanel";
+import { ConnectionManager } from "./ConnectionManager";
 
 const AiAssistant = lazy(() =>
   import("./AiAssistant").then((module) => ({ default: module.AiAssistant })),
@@ -37,6 +38,7 @@ export default function Workbench() {
             <WorkbenchShell />
             <RemoteLayerManager />
             <FeatureDestinationDialog />
+            <ConnectionManager />
             <Toaster />
           </TourProvider>
         </MapRefProvider>

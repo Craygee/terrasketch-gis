@@ -7,6 +7,8 @@ export interface Basemap {
   style: StyleSpecification | string;
   /** Small request used by the sign-in connection check. */
   healthUrl: string;
+  /** Editable style or tile URL shown in connection settings. */
+  connectionUrl: string;
   /** Equivalent keyless style used only when the preferred provider is unavailable. */
   fallbackStyle?: StyleSpecification | string;
   fallbackHealthUrl?: string;
@@ -35,6 +37,7 @@ export const basemaps: Basemap[] = [
     label: "Street",
     blurb: "Clean roads & places",
     style: "https://tiles.openfreemap.org/styles/liberty",
+    connectionUrl: "https://tiles.openfreemap.org/styles/liberty",
     healthUrl: "https://tiles.openfreemap.org/styles/liberty",
     fallbackStyle: raster(
       ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
@@ -57,6 +60,8 @@ export const basemaps: Basemap[] = [
     ),
     healthUrl:
       "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/0/0/0",
+    connectionUrl:
+      "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
   },
   {
     id: "topo",
@@ -68,12 +73,14 @@ export const basemaps: Basemap[] = [
       17,
     ),
     healthUrl: "https://tile.opentopomap.org/0/0/0.png",
+    connectionUrl: "https://tile.opentopomap.org/{z}/{x}/{y}.png",
   },
   {
     id: "dark",
     label: "Dark",
     blurb: "Night mode canvas",
     style: "https://tiles.openfreemap.org/styles/dark",
+    connectionUrl: "https://tiles.openfreemap.org/styles/dark",
     healthUrl: "https://tiles.openfreemap.org/styles/dark",
     fallbackStyle: "https://tiles.openfreemap.org/styles/fiord",
     fallbackHealthUrl: "https://tiles.openfreemap.org/styles/fiord",
@@ -88,6 +95,7 @@ export const basemaps: Basemap[] = [
       19,
     ),
     healthUrl: "https://tile.openstreetmap.org/0/0/0.png",
+    connectionUrl: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
   },
 ];
 

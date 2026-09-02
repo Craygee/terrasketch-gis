@@ -26,6 +26,8 @@ interface MapRefApi {
   setPrintOpen: (open: boolean) => void;
   analysisOpen: boolean;
   setAnalysisOpen: (open: boolean) => void;
+  connectionsOpen: boolean;
+  setConnectionsOpen: (open: boolean) => void;
   pendingCatalogQuery: string;
   setPendingCatalogQuery: (q: string) => void;
   lastPoint: { lng: number; lat: number } | null;
@@ -46,6 +48,7 @@ export function MapRefProvider({ children }: { children: ReactNode }) {
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [printOpen, setPrintOpen] = useState(false);
   const [analysisOpen, setAnalysisOpen] = useState(false);
+  const [connectionsOpen, setConnectionsOpen] = useState(false);
   const [pendingCatalogQuery, setPendingCatalogQuery] = useState("");
   const [lastPoint, setLastPoint] = useState<{ lng: number; lat: number } | null>(null);
   const [pendingFeatureSave, setPendingFeatureSave] = useState<PendingFeatureSave | null>(null);
@@ -68,6 +71,8 @@ export function MapRefProvider({ children }: { children: ReactNode }) {
       setPrintOpen,
       analysisOpen,
       setAnalysisOpen,
+      connectionsOpen,
+      setConnectionsOpen,
       pendingCatalogQuery,
       setPendingCatalogQuery,
       lastPoint,
@@ -84,6 +89,7 @@ export function MapRefProvider({ children }: { children: ReactNode }) {
       assistantOpen,
       printOpen,
       analysisOpen,
+      connectionsOpen,
       pendingCatalogQuery,
       lastPoint,
       pendingFeatureSave,

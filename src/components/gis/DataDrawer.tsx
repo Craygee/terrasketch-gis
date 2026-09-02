@@ -107,12 +107,6 @@ export function DataDrawer() {
     }
   }, []);
 
-  useEffect(() => {
-    if (!wb.projectReady || !wb.projectId) return;
-    const timer = window.setTimeout(() => void verifyConnections(true), 900);
-    return () => window.clearTimeout(timer);
-  }, [wb.projectId, wb.projectReady, verifyConnections]);
-
   const viewportBbox = (): [number, number, number, number] | undefined => {
     if (!map) return undefined;
     const b = map.getBounds();

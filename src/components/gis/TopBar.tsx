@@ -45,6 +45,7 @@ export function TopBar({
     setPrintOpen,
     analysisOpen,
     setAnalysisOpen,
+    setConnectionsOpen,
   } = useMapRef();
   const { startTour, featureTips, setFeatureTips } = useTours();
   const [showAbout, setShowAbout] = useState(false);
@@ -277,6 +278,22 @@ export function TopBar({
               </span>
             </span>
           </label>
+
+          <button
+            onClick={() => {
+              setShowAbout(false);
+              setConnectionsOpen(true);
+            }}
+            className="mt-3 flex w-full items-center gap-3 rounded-xl border border-border bg-card px-3 py-2.5 text-left hover:bg-accent"
+          >
+            <Database className="size-4 text-primary" />
+            <span className="min-w-0 flex-1">
+              <strong className="block font-semibold">API connections</strong>
+              <span className="block text-[10px] text-muted-foreground">
+                Check sources, repair links, or enter a URL
+              </span>
+            </span>
+          </button>
 
           <h3 className="mb-1 mt-4 border-t border-border pt-3 text-sm font-semibold">
             About LandDraft

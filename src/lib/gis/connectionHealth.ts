@@ -1,6 +1,6 @@
 import { basemapProbeUrl, basemaps, saveBasemapUrlOverride, setBasemapFallback } from "./basemaps";
 import { catalog, type CatalogEntry } from "./catalog";
-import { classifyUrl, normalizeArcgisLayerUrl } from "./arcgis";
+import { normalizeArcgisLayerUrl } from "./arcgis";
 import type { ConnectionRecoveryHint, GisLayer } from "./types";
 
 export type ConnectionKind = "basemap" | "public-data" | "project-layer";
@@ -13,6 +13,7 @@ export interface ConnectionResult {
   status: ConnectionStatus;
   url: string;
   effectiveUrl?: string;
+  configuredUrl?: string;
   sourcePage?: string;
   basemapId?: string;
   message: string;
@@ -23,6 +24,8 @@ export interface ConnectionReplacement {
   notes: string;
   title: string;
   source: "trusted alternative" | "publisher page" | "public GIS directory" | "existing URL";
+  /** Only high-confidence matches are applied silently during the sign-in health check. */
+  safeToAutoApply: boolean;
 }
 
 interface ConnectionTarget {
@@ -30,6 +33,7 @@ interface ConnectionTarget {
   name: string;
   kind: ConnectionKind;
   url: string;
+  configuredUrl?: string;
   fallbackUrl?: string;
   sourcePage?: string;
   basemapId?: string;
@@ -49,18 +53,21 @@ const trustedBasemapCandidates: Record<string, Array<Omit<ReplacementCandidate, 
       title: "Detailed street map",
       notes: "Current keyless street style with roads, boundaries and place labels.",
       source: "trusted alternative",
+      safeToAutoApply: true,
     },
     {
       url: "https://tiles.openfreemap.org/styles/bright",
       title: "Bright street map",
       notes: "Keyless street style with a lighter visual treatment.",
       source: "trusted alternative",
+      safeToAutoApply: true,
     },
     {
       url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
       title: "Standard street tiles",
       notes: "Community street tiles; normal interactive viewing and attribution are required.",
       source: "trusted alternative",
+      safeToAutoApply: true,
     },
   ],
   satellite: [
@@ -69,12 +76,14 @@ const trustedBasemapCandidates: Record<string, Array<Omit<ReplacementCandidate, 
       title: "Global satellite imagery",
       notes: "Current global cached imagery service.",
       source: "trusted alternative",
+      safeToAutoApply: true,
     },
     {
       url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
       title: "Global satellite imagery alternate host",
       notes: "Equivalent global imagery endpoint on the alternate official host.",
       source: "trusted alternative",
+      safeToAutoApply: true,
     },
   ],
   topo: [
@@ -83,12 +92,14 @@ const trustedBasemapCandidates: Record<string, Array<Omit<ReplacementCandidate, 
       title: "Topographic map",
       notes: "Keyless topographic tiles with terrain and contours.",
       source: "trusted alternative",
+      safeToAutoApply: true,
     },
     {
       url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}",
       title: "Global topographic map",
       notes: "Global cached topographic map on an alternate official service.",
       source: "trusted alternative",
+      safeToAutoApply: true,
     },
   ],
   dark: [
@@ -97,12 +108,14 @@ const trustedBasemapCandidates: Record<string, Array<Omit<ReplacementCandidate, 
       title: "Dark map",
       notes: "Current keyless dark vector style.",
       source: "trusted alternative",
+      safeToAutoApply: true,
     },
     {
       url: "https://tiles.openfreemap.org/styles/fiord",
       title: "Muted dark map",
       notes: "Keyless low-light vector style and the closest visual fallback.",
       source: "trusted alternative",
+      safeToAutoApply: true,
     },
   ],
   osm: [
@@ -111,12 +124,14 @@ const trustedBasemapCandidates: Record<string, Array<Omit<ReplacementCandidate, 
       title: "Standard community street map",
       notes: "Standard community tiles; normal interactive viewing and attribution are required.",
       source: "trusted alternative",
+      safeToAutoApply: true,
     },
     {
       url: "https://tiles.openfreemap.org/styles/bright",
       title: "Bright vector street map",
       notes: "Keyless vector alternative based on the same open street data.",
       source: "trusted alternative",
+      safeToAutoApply: true,
     },
   ],
 };
@@ -389,6 +404,7 @@ async function candidatesFromPublicGisSearch(name: string): Promise<ReplacementC
         title,
         notes: `Reachable public GIS result${owner ? ` published by ${owner}` : ""}. Review the publisher before using it.`,
         source: "public GIS directory",
+        safeToAutoApply: false,
         score: similarityScore(name, item),
       });
     }
@@ -448,6 +464,7 @@ export async function findConnectionReplacement(
       title: result.name,
       notes: clueNotes.trim() || `Reachable service found from the ${source}.`,
       source,
+      safeToAutoApply: source !== "existing URL" || url === result.configuredUrl,
       score,
     });
   };
@@ -480,6 +497,7 @@ export async function checkProjectConnections(
       name: `${basemap.label} basemap`,
       kind: "basemap",
       url: override?.verified ? basemapProbeUrl(override.url) : basemap.healthUrl,
+      configuredUrl: override?.verified ? override.url : basemap.connectionUrl,
       ...(basemap.fallbackHealthUrl ? { fallbackUrl: basemap.fallbackHealthUrl } : {}),
       basemapId: basemap.id,
     };
@@ -494,18 +512,19 @@ export async function checkProjectConnections(
       name: entry.name,
       kind: "public-data",
       url,
+      configuredUrl: url,
       ...(entry.sourcePage ? { sourcePage: entry.sourcePage } : {}),
     });
   }
 
   for (const layer of layers) {
     if (layer.source.kind !== "remote" || layer.source.catalogId) continue;
-    if (classifyUrl(layer.source.url) !== "arcgis") continue;
     targets.push({
       id: `layer:${layer.id}`,
       name: layer.name,
       kind: "project-layer",
       url: layer.source.url,
+      configuredUrl: layer.source.url,
     });
   }
 
