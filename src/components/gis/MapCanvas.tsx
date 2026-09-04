@@ -37,6 +37,7 @@ import {
   fillId,
   lineId,
   lineHitId,
+  markerIconId,
   pointId,
 } from "@/lib/gis/mapStyle";
 import { composeLabel } from "@/lib/gis/labels";
@@ -87,11 +88,12 @@ const sourcePerformanceOptions = (layer: GisLayer, featureCount: number) => {
 };
 
 function renderedLayerId(styleLayerId: string): string {
-  return styleLayerId.replace(/^(line-hit|hl-point|fill|line|point|label|hl)-/, "");
+  return styleLayerId.replace(/^(line-hit|hl-point|fill|line|point|marker|label|hl)-/, "");
 }
 
 const selectableLayerIds = (layerId: string) => [
   pointId(layerId),
+  markerIconId(layerId),
   lineHitId(layerId),
   lineId(layerId),
   fillId(layerId),

@@ -6,6 +6,7 @@ export const fillId = (layerId: string) => `fill-${layerId}`;
 export const lineId = (layerId: string) => `line-${layerId}`;
 export const lineHitId = (layerId: string) => `line-hit-${layerId}`;
 export const pointId = (layerId: string) => `point-${layerId}`;
+export const markerIconId = (layerId: string) => `marker-${layerId}`;
 export const labelId = (layerId: string) => `label-${layerId}`;
 export const highlightId = (layerId: string) => `hl-${layerId}`;
 export const highlightPointId = (layerId: string) => `hl-point-${layerId}`;
@@ -181,6 +182,28 @@ export function buildLayerSpecs(layer: GisLayer, map: MlMap): LayerSpecification
       ...zoomRange,
     },
     {
+      id: markerIconId(layer.id),
+      type: "symbol",
+      source: src,
+      filter: geometryFilter([
+        "all",
+        ["==", ["geometry-type"], "Point"],
+        ["has", "MARKER_ICON"],
+      ]) as never,
+      layout: {
+        "text-field": ["coalesce", ["get", "MARKER_ICON"], "●"],
+        "text-size": Math.max(13, s.pointSize * 1.55),
+        "text-allow-overlap": true,
+        "text-ignore-placement": true,
+      },
+      paint: {
+        "text-color": "#ffffff",
+        "text-halo-color": categorized?.fallbackColor ?? s.strokeColor,
+        "text-halo-width": 1.2,
+      },
+      ...zoomRange,
+    },
+    {
       id: highlightId(layer.id),
       type: "line",
       source: src,
@@ -235,6 +258,12 @@ export function buildLayerSpecs(layer: GisLayer, map: MlMap): LayerSpecification
           18,
         ],
         "text-anchor": "center",
+        "text-offset": [
+          "case",
+          ["has", "MARKER_ICON"],
+          ["literal", [0, 1.65]],
+          ["literal", [0, 0]],
+        ] as never,
         "text-allow-overlap": false,
         "text-max-width": 12,
         "symbol-placement": "point",
@@ -256,6 +285,7 @@ export const allLayerIds = (layerId: string) => [
   labelId(layerId),
   highlightPointId(layerId),
   highlightId(layerId),
+  markerIconId(layerId),
   pointId(layerId),
   lineHitId(layerId),
   lineId(layerId),

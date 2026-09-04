@@ -248,7 +248,24 @@
   border: 3px solid white;
   border-radius: 9999px;
   background: #1685f8;
-  box-shadow: 0 0 0 7px rgb(22 133 248 / 18%), 0 2px 8px rgb(0 0 0 / 28%);
+  box-shadow:
+    0 0 0 7px rgb(22 133 248 / 18%),
+    0 2px 8px rgb(0 0 0 / 28%);
+}
+
+.field-pending-marker {
+  display: flex;
+  width: 2rem;
+  height: 2rem;
+  align-items: center;
+  justify-content: center;
+  border: 3px solid #ffffff;
+  border-radius: 9999px;
+  background: #1e6f43;
+  color: #ffffff;
+  font-size: 1rem;
+  line-height: 1;
+  box-shadow: 0 4px 14px rgb(20 49 31 / 35%);
 }
 
 .app-scroll-viewport {

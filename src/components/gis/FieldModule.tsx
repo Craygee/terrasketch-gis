@@ -5,6 +5,7 @@ import {
   Car,
   ChevronDown,
   CircleStop,
+  Copy,
   Crosshair,
   Footprints,
   Gauge,
@@ -75,6 +76,12 @@ const PARCEL_FIELDS = [
   "SITUS_ADDR",
   "MAIL_ADDR",
 ];
+const MARKER_OPTIONS = [
+  { symbol: "●", label: "Dot" },
+  { symbol: "◆", label: "Diamond" },
+  { symbol: "★", label: "Star" },
+  { symbol: "▲", label: "Direction" },
+] as const;
 
 const rad = (value: number) => (value * Math.PI) / 180;
 const segmentMeters = (a: Position, b: Position) => {
@@ -149,6 +156,7 @@ export function FieldModule({ active = true }: { active?: boolean }) {
   const wbRef = useRef(wb);
   wbRef.current = wb;
   const markerRef = useRef<Marker | null>(null);
+  const pendingMarkerRef = useRef<Marker | null>(null);
   const activeRef = useRef(active);
   activeRef.current = active;
   const mapInstanceRef = useRef(map);
@@ -337,6 +345,8 @@ export function FieldModule({ active = true }: { active?: boolean }) {
       if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current);
       markerRef.current?.remove();
       markerRef.current = null;
+      pendingMarkerRef.current?.remove();
+      pendingMarkerRef.current = null;
       releaseWakeLock();
     },
     [releaseWakeLock],
@@ -377,6 +387,30 @@ export function FieldModule({ active = true }: { active?: boolean }) {
       console.warn("[field] Current-location marker could not be displayed", error);
     }
   }, [location, map]);
+
+  useEffect(() => {
+    pendingMarkerRef.current?.remove();
+    pendingMarkerRef.current = null;
+    if (!map || pending?.kind !== "point" || pending.geometry.type !== "Point") return;
+    const [lng, lat] = pending.geometry.coordinates;
+    if (!Number.isFinite(Number(lng)) || !Number.isFinite(Number(lat))) return;
+    const element = document.createElement("div");
+    element.className = "field-pending-marker";
+    element.textContent = String(pending.properties["MARKER_ICON"] ?? MARKER_OPTIONS[0].symbol);
+    element.title = captureNameValue || pending.suggestedName;
+    try {
+      pendingMarkerRef.current = new Marker({ element, anchor: "center" })
+        .setLngLat([Number(lng), Number(lat)])
+        .addTo(map);
+    } catch (error) {
+      pendingMarkerRef.current = null;
+      console.warn("[field] Pending marker could not be displayed", error);
+    }
+    return () => {
+      pendingMarkerRef.current?.remove();
+      pendingMarkerRef.current = null;
+    };
+  }, [captureNameValue, map, pending]);
 
   useEffect(() => {
     if (!map) return;
@@ -523,6 +557,7 @@ export function FieldModule({ active = true }: { active?: boolean }) {
           LON: Number(sample.lng.toFixed(7)),
           ACCURACY_M: Math.round(sample.accuracy),
           ALTITUDE_M: sample.altitude === null ? null : Number(sample.altitude.toFixed(1)),
+          MARKER_ICON: MARKER_OPTIONS[0].symbol,
           CAPTURED: new Date().toISOString(),
           FIELD_SOURCE: "GPS point",
         },
@@ -619,9 +654,15 @@ export function FieldModule({ active = true }: { active?: boolean }) {
     const existing = current.layers.find(
       (layer) => layer.groupId === groupId && layer.name === layerName,
     );
-    if (existing) current.appendFeature(existing.id, feature);
-    else
-      current.addLayer({
+    let selectedLayerId: string;
+    let selectedIndex: number;
+    if (existing) {
+      selectedLayerId = existing.id;
+      selectedIndex = existing.data.features.length;
+      current.appendFeature(existing.id, feature);
+      current.setActiveLayer(existing.id);
+    } else {
+      const created = current.addLayer({
         name: layerName,
         data: { type: "FeatureCollection", features: [feature] },
         groupId,
@@ -650,6 +691,10 @@ export function FieldModule({ active = true }: { active?: boolean }) {
                   labelMinZoom: 13,
                 },
       });
+      selectedLayerId = created.id;
+      selectedIndex = 0;
+    }
+    current.setSelectedFeatures([{ layerId: selectedLayerId, index: selectedIndex }]);
     setPending(null);
     toast.success(`${layerName} saved to ${current.projectName}`);
     window.setTimeout(() => void wbRef.current.saveProject("manual"), 300);
@@ -745,16 +790,36 @@ export function FieldModule({ active = true }: { active?: boolean }) {
     });
   };
 
-  const openDirections = (feature: Feature) => {
+  const openDirections = (feature: Feature, direction: "to" | "from" = "to") => {
     const destination = featureDestination(feature.geometry);
     if (!destination) return;
     const [lng, lat] = destination;
+    if (direction === "from") {
+      window.open(
+        `https://www.google.com/maps/dir/${encodeURIComponent(`${lat},${lng}`)}/`,
+        "_blank",
+        "noopener,noreferrer",
+      );
+      return;
+    }
     const params = new URLSearchParams({
       api: "1",
       destination: `${lat},${lng}`,
       travelmode: activity,
     });
     window.open(`https://www.google.com/maps/dir/?${params}`, "_blank", "noopener,noreferrer");
+  };
+
+  const copyCoordinates = async (feature: Feature) => {
+    const coordinate = featureDestination(feature.geometry);
+    if (!coordinate) return;
+    const [lng, lat] = coordinate;
+    try {
+      await navigator.clipboard.writeText(`${lat.toFixed(7)}, ${lng.toFixed(7)}`);
+      toast.success("Marker coordinates copied");
+    } catch {
+      toast.error("Coordinates could not be copied");
+    }
   };
 
   const accuracyTone = !location
@@ -849,18 +914,44 @@ export function FieldModule({ active = true }: { active?: boolean }) {
               <p className="text-[10px] text-muted-foreground">{selected.layer.name}</p>
             </div>
             <button
-              onClick={() => openDirections(selected.feature)}
-              className="flex items-center gap-1 rounded-xl bg-primary px-2.5 py-2 text-[10px] font-semibold text-primary-foreground"
-            >
-              <Navigation className="size-3.5" /> Directions
-            </button>
-            <button
               onClick={() => wb.setSelectedFeatures([])}
               aria-label="Close selected feature"
               className="rounded-lg p-2 hover:bg-accent"
             >
               <X className="size-4" />
             </button>
+          </div>
+          <div
+            className={cn(
+              "mt-2 grid gap-2",
+              selected.feature.geometry.type === "Point" ? "grid-cols-3" : "grid-cols-1",
+            )}
+          >
+            <button
+              type="button"
+              onClick={() => openDirections(selected.feature)}
+              className="flex items-center justify-center gap-1 rounded-xl bg-primary px-2 py-2 text-[10px] font-semibold text-primary-foreground"
+            >
+              <Navigation className="size-3.5" /> Directions
+            </button>
+            {selected.feature.geometry.type === "Point" && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => openDirections(selected.feature, "from")}
+                  className="flex items-center justify-center gap-1 rounded-xl bg-secondary px-2 py-2 text-[10px] font-semibold"
+                >
+                  <Route className="size-3.5" /> Start here
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void copyCoordinates(selected.feature)}
+                  className="flex items-center justify-center gap-1 rounded-xl bg-secondary px-2 py-2 text-[10px] font-semibold"
+                >
+                  <Copy className="size-3.5" /> Copy GPS
+                </button>
+              </>
+            )}
           </div>
           <button
             onClick={() => setAttributesOpen((value) => !value)}
@@ -1004,6 +1095,45 @@ export function FieldModule({ active = true }: { active?: boolean }) {
                 className="mt-1 w-full resize-none rounded-xl border border-border bg-card px-3 py-2.5 text-sm text-foreground outline-none focus:border-primary"
               />
             </label>
+            {pending.kind === "point" && (
+              <div className="mt-3">
+                <p className="text-[10px] font-semibold text-muted-foreground">Marker icon</p>
+                <div className="mt-1 grid grid-cols-4 gap-1.5">
+                  {MARKER_OPTIONS.map((option) => {
+                    const active = pending.properties["MARKER_ICON"] === option.symbol;
+                    return (
+                      <button
+                        key={option.label}
+                        type="button"
+                        onClick={() =>
+                          setPending((current) =>
+                            current
+                              ? {
+                                  ...current,
+                                  properties: {
+                                    ...current.properties,
+                                    MARKER_ICON: option.symbol,
+                                  },
+                                }
+                              : current,
+                          )
+                        }
+                        aria-pressed={active}
+                        className={cn(
+                          "flex flex-col items-center gap-0.5 rounded-xl border px-1 py-2 text-[9px] font-semibold",
+                          active
+                            ? "border-primary bg-primary text-primary-foreground"
+                            : "border-border bg-secondary",
+                        )}
+                      >
+                        <span className="text-base leading-none">{option.symbol}</span>
+                        {option.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
             <div className="mt-3 flex gap-2">
               <button
                 onClick={() => setPending(null)}
