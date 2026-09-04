@@ -69,7 +69,7 @@ export const TOUR_REGISTRY: Record<TourKind, TourStep[]> = {
       id: "layer-organization",
       target: "layer-panel",
       title: "Groups, subgroups and styling",
-      body: "Drag layers to control drawing order, nest groups, apply a shared group style, label from attributes and keep advanced options collapsed until needed.",
+      body: "Drag a layer or an entire group by its six-dot handle to control drawing order. Groups keep their subgroups and layers together. You can also apply shared styles and label from attributes.",
     },
     {
       id: "attributes",

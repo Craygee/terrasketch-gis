@@ -277,6 +277,7 @@ export interface WorkbenchApi extends WorkbenchState {
   moveLayer: (id: string, direction: -1 | 1) => void;
   moveLayerToEdge: (id: string, edge: "front" | "back") => void;
   reorderLayer: (id: string, targetGroupId: string, beforeLayerId?: string) => void;
+  reorderGroup: (id: string, targetGroupId: string, position: "before" | "after") => void;
   setLayerGroup: (id: string, groupId: string) => void;
   addGroup: (name: string) => string;
   addSubgroup: (parentId: string, name: string) => void;
@@ -384,6 +385,23 @@ const descendantGroupIds = (groupId: string, groups: LayerGroup[]): Set<string> 
     }
   }
   return ids;
+};
+
+const flattenedGroupIds = (groups: LayerGroup[]): string[] => {
+  const ordered: string[] = [];
+  const visited = new Set<string>();
+  const visit = (group: LayerGroup) => {
+    if (visited.has(group.id)) return;
+    visited.add(group.id);
+    ordered.push(group.id);
+    groups.filter((item) => item.parentId === group.id).forEach(visit);
+  };
+
+  groups
+    .filter((group) => !group.parentId || !groups.some((item) => item.id === group.parentId))
+    .forEach(visit);
+  groups.filter((group) => !visited.has(group.id)).forEach(visit);
+  return ordered;
 };
 
 export function WorkbenchProvider({ children }: { children: ReactNode }) {
@@ -606,6 +624,36 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
     },
     [],
   );
+
+  const reorderGroup = useCallback<WorkbenchApi["reorderGroup"]>((id, targetGroupId, position) => {
+    setState((s) => {
+      const source = s.groups.find((group) => group.id === id);
+      const target = s.groups.find((group) => group.id === targetGroupId);
+      if (!source || !target || source.id === target.id) return s;
+      if ((source.parentId ?? null) !== (target.parentId ?? null)) return s;
+
+      const groups = s.groups.filter((group) => group.id !== id);
+      const targetIndex = groups.findIndex((group) => group.id === targetGroupId);
+      if (targetIndex < 0) return s;
+      groups.splice(targetIndex + (position === "after" ? 1 : 0), 0, source);
+
+      // Keep every group's complete layer stack together while preserving
+      // the existing order of the layers within each group.
+      const groupRank = new Map(
+        flattenedGroupIds(groups).map((groupId, index) => [groupId, index]),
+      );
+      const layers = s.layers
+        .map((layer, index) => ({ layer, index }))
+        .sort((a, b) => {
+          const aRank = groupRank.get(a.layer.groupId) ?? Number.MAX_SAFE_INTEGER;
+          const bRank = groupRank.get(b.layer.groupId) ?? Number.MAX_SAFE_INTEGER;
+          return aRank - bRank || a.index - b.index;
+        })
+        .map(({ layer }) => layer);
+
+      return { ...s, groups, layers };
+    });
+  }, []);
 
   const toggleVisible = useCallback<WorkbenchApi["toggleVisible"]>((id) => {
     setState((s) => ({
@@ -1266,6 +1314,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       moveLayer,
       moveLayerToEdge,
       reorderLayer,
+      reorderGroup,
       setLayerGroup,
       addGroup,
       addSubgroup,
@@ -1341,6 +1390,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       moveLayer,
       moveLayerToEdge,
       reorderLayer,
+      reorderGroup,
       setLayerGroup,
       addGroup,
       addSubgroup,

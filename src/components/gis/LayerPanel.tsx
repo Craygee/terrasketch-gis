@@ -62,6 +62,7 @@ const remoteLoadLabel = (layer: GisLayer) => {
 };
 
 type LayerDropPosition = "before" | "after";
+type GroupDropPosition = "before" | "after";
 
 export function LayerPanel() {
   const wb = useWorkbench();
@@ -77,6 +78,11 @@ export function LayerPanel() {
   const draggedPointerRef = useRef<number | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const dropTargetRef = useRef<string | null>(null);
+  const [draggedGroupId, setDraggedGroupId] = useState<string | null>(null);
+  const draggedGroupRef = useRef<string | null>(null);
+  const draggedGroupPointerRef = useRef<number | null>(null);
+  const [groupDropTarget, setGroupDropTarget] = useState<string | null>(null);
+  const groupDropTargetRef = useRef<string | null>(null);
   const layerListRef = useRef<HTMLDivElement>(null);
   const [duplicateTargets, setDuplicateTargets] = useState<Record<string, string>>({});
   const [groupStyleFor, setGroupStyleFor] = useState<string | null>(null);
@@ -172,6 +178,82 @@ export function LayerPanel() {
     draggedPointerRef.current = event.pointerId;
     setDraggedLayerId(layerId);
     updateDropTarget(null);
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const updateGroupDropTarget = (target: string | null) => {
+    if (groupDropTargetRef.current === target) return;
+    groupDropTargetRef.current = target;
+    setGroupDropTarget(target);
+  };
+
+  const resetGroupDrag = () => {
+    draggedGroupRef.current = null;
+    draggedGroupPointerRef.current = null;
+    groupDropTargetRef.current = null;
+    setDraggedGroupId(null);
+    setGroupDropTarget(null);
+  };
+
+  const updatePointerGroupDropTarget = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (draggedGroupPointerRef.current !== event.pointerId) return;
+    event.preventDefault();
+
+    const list = layerListRef.current;
+    if (list) {
+      const bounds = list.getBoundingClientRect();
+      if (event.clientY < bounds.top + 36) list.scrollBy({ top: -14 });
+      else if (event.clientY > bounds.bottom - 36) list.scrollBy({ top: 14 });
+    }
+
+    const hit = document.elementFromPoint(event.clientX, event.clientY);
+    const targetHeader = hit?.closest<HTMLElement>("[data-group-header-id]");
+    if (!targetHeader) {
+      updateGroupDropTarget(null);
+      return;
+    }
+    const targetGroupId = targetHeader.dataset["groupHeaderId"];
+    const dragged = wb.groups.find((group) => group.id === draggedGroupRef.current);
+    const target = wb.groups.find((group) => group.id === targetGroupId);
+    if (
+      !dragged ||
+      !target ||
+      dragged.id === target.id ||
+      (dragged.parentId ?? null) !== (target.parentId ?? null)
+    ) {
+      updateGroupDropTarget(null);
+      return;
+    }
+
+    const bounds = targetHeader.getBoundingClientRect();
+    const position: GroupDropPosition =
+      event.clientY < bounds.top + bounds.height / 2 ? "before" : "after";
+    updateGroupDropTarget(`${target.id}:${position}`);
+  };
+
+  const finishGroupDrag = () => {
+    const dragged = draggedGroupRef.current;
+    const target = groupDropTargetRef.current;
+    if (!dragged || !target) {
+      resetGroupDrag();
+      return;
+    }
+    const separator = target.lastIndexOf(":");
+    const targetGroupId = target.slice(0, separator);
+    const position = target.slice(separator + 1) as GroupDropPosition;
+    wb.reorderGroup(dragged, targetGroupId, position);
+    toast.success("Layer group reordered");
+    resetGroupDrag();
+  };
+
+  const startPointerGroupDrag = (event: ReactPointerEvent<HTMLButtonElement>, groupId: string) => {
+    if (!event.isPrimary || event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    draggedGroupRef.current = groupId;
+    draggedGroupPointerRef.current = event.pointerId;
+    setDraggedGroupId(groupId);
+    updateGroupDropTarget(null);
     event.currentTarget.setPointerCapture(event.pointerId);
   };
 
@@ -306,9 +388,16 @@ export function LayerPanel() {
               className={cn(
                 "mb-2 rounded-xl transition-colors",
                 dropTarget === `group:${group.id}` && "bg-accent/70 ring-2 ring-primary/60",
+                draggedGroupId === group.id && "opacity-40",
+                groupDropTarget === `${group.id}:before` &&
+                  "shadow-[0_-3px_0_0_hsl(var(--primary))]",
+                groupDropTarget === `${group.id}:after` && "shadow-[0_3px_0_0_hsl(var(--primary))]",
               )}
             >
-              <div className="flex items-center rounded-lg text-muted-foreground hover:bg-sidebar-accent">
+              <div
+                data-group-header-id={group.id}
+                className="flex items-center rounded-lg text-muted-foreground hover:bg-sidebar-accent"
+              >
                 <button
                   onClick={() => wb.toggleGroup(group.id)}
                   className="flex min-w-0 flex-1 items-center gap-1 px-2 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wide"
@@ -353,6 +442,33 @@ export function LayerPanel() {
                   className="mr-1 rounded p-1 hover:bg-accent hover:text-foreground"
                 >
                   <FolderPlus className="size-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onPointerDown={(event) => startPointerGroupDrag(event, group.id)}
+                  onPointerMove={updatePointerGroupDropTarget}
+                  onPointerUp={(event) => {
+                    if (draggedGroupPointerRef.current !== event.pointerId) return;
+                    updatePointerGroupDropTarget(event);
+                    if (event.currentTarget.hasPointerCapture(event.pointerId))
+                      event.currentTarget.releasePointerCapture(event.pointerId);
+                    finishGroupDrag();
+                  }}
+                  onPointerCancel={resetGroupDrag}
+                  aria-label={`Drag ${group.name} group to reorder`}
+                  title={
+                    depth === 0
+                      ? "Drag to reorder this group and its complete layer stack"
+                      : "Drag to reorder this subgroup within its parent"
+                  }
+                  className={cn(
+                    "mr-0.5 flex size-7 shrink-0 touch-none select-none items-center justify-center rounded hover:bg-accent hover:text-foreground",
+                    draggedGroupId === group.id
+                      ? "cursor-grabbing bg-accent text-foreground"
+                      : "cursor-grab",
+                  )}
+                >
+                  <GripVertical className="pointer-events-none size-4" />
                 </button>
               </div>
               {groupStyleFor === group.id && (

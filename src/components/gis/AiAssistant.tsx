@@ -695,7 +695,7 @@ function helpAnswer(prompt: string): string | null {
   if (/\b(color|colour|symbolog|categor)\b/.test(prompt))
     return "Expand a layer, open Style, then choose Color features by attribute. Pick a field and set each distinct value’s color or visibility.";
   if (/\b(group|subgroup|folder|sublayer|feature list)\b/.test(prompt))
-    return "Use folder-plus for groups and subgroups. Expand a layer, then Advanced layer options → Features as sublayers to search, select, zoom, rename, hide, or remove features.";
+    return "Use folder-plus for groups and subgroups. Drag a group by the six-dot handle on its header to move its complete layer stack. Expand a layer, then Advanced layer options → Features as sublayers to search, select, zoom, rename, hide, or remove features.";
   if (/\b(vertex|vertices|reshape|edit geometry)\b/.test(prompt))
     return "Select one feature, turn on Edit vertices, then drag a square vertex. Click a faint midpoint to add a vertex. Points can be dragged; lines and polygons reshaped.";
   if (/\b(multiple|multi-select|box select|select many)\b/.test(prompt))
