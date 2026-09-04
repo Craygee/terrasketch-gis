@@ -14,6 +14,7 @@ import {
   LogOut,
   UserRound,
   Map,
+  Monitor,
   Navigation,
 } from "lucide-react";
 import { Toaster } from "@/components/ui/sonner";
@@ -134,6 +135,20 @@ function MobileShell() {
               </option>
             ))}
           </select>
+          <button
+            onClick={() => {
+              const params = new URLSearchParams(window.location.search);
+              params.set("desktop", "1");
+              window.sessionStorage.setItem("landdraft.force-desktop.v1", "1");
+              const query = params.toString();
+              window.location.assign(`/${query ? `?${query}` : ""}${window.location.hash}`);
+            }}
+            aria-label="Open main desktop view"
+            title="Open the full main map view"
+            className="flex size-7 shrink-0 items-center justify-center rounded-lg border border-border text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          >
+            <Monitor className="size-3.5" />
+          </button>
         </div>
         <div className="float-surface pointer-events-auto ml-auto grid grid-cols-2 rounded-2xl p-1">
           <button

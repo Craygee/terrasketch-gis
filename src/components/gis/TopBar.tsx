@@ -73,6 +73,23 @@ export function TopBar({
         <PanelLeft className="size-4" />
       </button>
 
+      <button
+        onClick={() => {
+          window.sessionStorage.removeItem("landdraft.force-desktop.v1");
+          window.localStorage.setItem("landdraft.mobile-mode.v1", "field");
+          const params = new URLSearchParams(window.location.search);
+          params.delete("desktop");
+          window.location.assign(
+            `/mobile${params.size ? `?${params}` : ""}${window.location.hash}`,
+          );
+        }}
+        aria-label="Open field notes view"
+        title="Open the streamlined field notes and GPS view"
+        className="flex size-8 shrink-0 items-center justify-center rounded-xl bg-secondary text-secondary-foreground transition-colors hover:bg-accent"
+      >
+        <Navigation className="size-4" />
+      </button>
+
       <div className="flex items-center gap-2">
         <span className="flex size-8 items-center justify-center rounded-xl bg-primary text-primary-foreground">
           <LandDraftMark className="size-5" />
@@ -102,18 +119,6 @@ export function TopBar({
           </select>
         </label>
       )}
-
-      <button
-        onClick={() => {
-          window.localStorage.setItem("landdraft.mobile-mode.v1", "field");
-          window.location.assign("/mobile");
-        }}
-        aria-label="Open field notes view"
-        title="Open the streamlined field notes and GPS view"
-        className="hidden size-8 shrink-0 items-center justify-center rounded-xl bg-secondary text-secondary-foreground transition-colors hover:bg-accent md:flex"
-      >
-        <Navigation className="size-4" />
-      </button>
 
       <div className="ml-auto flex items-center gap-1">
         <BarBtn

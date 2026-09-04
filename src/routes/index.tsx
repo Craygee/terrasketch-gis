@@ -1,4 +1,4 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { ClientOnly } from "@tanstack/react-router";
 import { LandDraftMark } from "@/components/brand/LandDraftMark";
@@ -37,14 +37,53 @@ function MapSkeleton() {
   );
 }
 
+function isMobileDevice() {
+  const nav = navigator as Navigator & {
+    userAgentData?: { mobile?: boolean };
+  };
+
+  if (nav.userAgentData?.mobile === true) return true;
+
+  return (
+    /Android|iPhone|iPod|IEMobile|Opera Mini|Mobile/i.test(navigator.userAgent) ||
+    (/Macintosh/i.test(navigator.userAgent) && navigator.maxTouchPoints > 1)
+  );
+}
+
+function DesktopGate() {
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const forceDesktop =
+      params.get("desktop") === "1" ||
+      window.sessionStorage.getItem("landdraft.force-desktop.v1") === "1";
+
+    if (!forceDesktop && isMobileDevice()) {
+      params.delete("desktop");
+      const query = params.toString();
+      window.location.replace(`/mobile${query ? `?${query}` : ""}${window.location.hash}`);
+      return;
+    }
+
+    setReady(true);
+  }, []);
+
+  if (!ready) return <MapSkeleton />;
+
+  return (
+    <Suspense fallback={<MapSkeleton />}>
+      <Workbench />
+    </Suspense>
+  );
+}
+
 function Index() {
   return (
     <>
       <h1 className="sr-only">LandDraft map workbench</h1>
       <ClientOnly fallback={<MapSkeleton />}>
-        <Suspense fallback={<MapSkeleton />}>
-          <Workbench />
-        </Suspense>
+        <DesktopGate />
       </ClientOnly>
     </>
   );
