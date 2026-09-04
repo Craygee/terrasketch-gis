@@ -14,6 +14,7 @@ import {
   LogOut,
   UserRound,
   Share2,
+  Navigation,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -101,6 +102,18 @@ export function TopBar({
           </select>
         </label>
       )}
+
+      <button
+        onClick={() => {
+          window.localStorage.setItem("landdraft.mobile-mode.v1", "field");
+          window.location.assign("/mobile");
+        }}
+        aria-label="Open field notes view"
+        title="Open the streamlined field notes and GPS view"
+        className="hidden size-8 shrink-0 items-center justify-center rounded-xl bg-secondary text-secondary-foreground transition-colors hover:bg-accent md:flex"
+      >
+        <Navigation className="size-4" />
+      </button>
 
       <div className="ml-auto flex items-center gap-1">
         <BarBtn
