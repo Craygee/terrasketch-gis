@@ -79,3 +79,58 @@ choice.
 3. Verify a second account cannot read or modify the first account's project through the REST API.
 4. Test password recovery and confirmation redirects on production and preview URLs.
 5. Check database size, egress, authentication usage, and backup status monthly.
+
+## Production email intake and SMTP
+
+LandDraft uses Resend for the first production email integration because one verified provider can
+handle both inbound project records and Supabase Auth SMTP while Name.com continues to host DNS.
+Inbound mail uses the isolated `inbound.landdraft.net` subdomain so it cannot replace or interfere
+with a future normal mailbox on `@landdraft.net`.
+
+### Repository foundation
+
+- Run `supabase/migrations/202609040001_project_email_intake.sql` in the production project. It
+  creates opaque account/project aliases, inbound email and attachment metadata, owner-only RLS,
+  idempotent provider IDs, and guarded assignment/import functions.
+- Deploy `supabase/functions/resend-inbound`. This endpoint deliberately disables Supabase JWT
+  verification because Resend is the caller; the function instead verifies the raw request with
+  the Resend/Svix signing secret before doing any work.
+- Set `RESEND_API_KEY` and `RESEND_WEBHOOK_SECRET` only in Supabase Edge Function secrets. Never add
+  either value to GitHub, Lovable, browser variables, or `.env.example`.
+- Set the deployment's public `VITE_INBOUND_EMAIL_DOMAIN` to `inbound.landdraft.net` only after the
+  domain, MX record, webhook, migration, and function have all passed an end-to-end test.
+
+### Provider and DNS steps
+
+1. Create the LandDraft Resend account and a restricted API key.
+2. Add and verify a sending subdomain such as `notify.landdraft.net`; copy Resend's exact DKIM,
+   SPF/return-path, and optional DMARC records into Name.com DNS.
+3. Add `inbound.landdraft.net` as the receiving domain. Copy the exact MX host, value, and priority
+   shown by Resend into Name.com. Do not put the receiving MX record on the root domain.
+4. Deploy the Edge Function at
+   `https://txgbeskieqvvptgtjyou.supabase.co/functions/v1/resend-inbound` and add that endpoint as a
+   Resend webhook subscribed to `email.received`.
+5. Copy the webhook signing secret and API key into Supabase Edge Function secrets, then send a test
+   email to a generated project alias. Confirm the message and attachments appear in Project
+   records → Email and can be added to the project.
+6. In Supabase Authentication → Email → SMTP Settings, use host `smtp.resend.com`, port `465`,
+   username `resend`, the Resend API key as the password, and a verified LandDraft sender such as
+   `LandDraft <accounts@notify.landdraft.net>`.
+7. Test signup confirmation, password reset, Google sign-in return, share invitation delivery, one
+   project-specific intake address, the account inbox, duplicate webhook delivery, an invalid
+   signature, and an attachment near the 50 MB per-file limit.
+
+### Intake security and retention defaults
+
+- Intake aliases contain 120 bits of randomness and do not expose a project UUID or user email.
+- Provider events are unique by provider email ID, so webhook retries cannot create duplicates.
+- The signed webhook is the only unauthenticated entry point. Database tables remain owner-only in
+  the browser, and the provider/Supabase secret keys never reach client code.
+- Each attachment is limited to 50 MB and the stored original plus extracted attachments are
+  limited to 75 MB per message. Over-limit files are recorded as skipped instead of accepted
+  silently.
+- HTML is archived privately but never rendered in the LandDraft interface; the UI shows plain text
+  to avoid untrusted email scripts and tracking content.
+- Resend is transport/retry storage, not the LandDraft archive. The function copies accepted mail
+  into private Supabase Storage; normal project/account deletion remains the authoritative removal
+  path. Establish a written customer retention period before public onboarding.

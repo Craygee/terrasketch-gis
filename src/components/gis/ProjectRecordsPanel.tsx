@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Archive,
   Clock3,
@@ -12,6 +12,7 @@ import {
   Paperclip,
   Plus,
   Printer,
+  RefreshCw,
   Search,
   Trash2,
   Upload,
@@ -30,6 +31,15 @@ import {
   uploadProjectAsset,
 } from "@/lib/gis/projectRecords";
 import { useWorkbench } from "@/lib/gis/store";
+import {
+  assignInboundEmail,
+  ensureAccountEmailAlias,
+  ensureProjectEmailAlias,
+  listInboundProjectEmails,
+  markInboundEmailImported,
+  type InboundProjectEmail,
+  type ProjectEmailAlias,
+} from "@/lib/gis/inboundEmail";
 import type { ProjectDocument, ProjectEventType, ProjectRecords } from "@/lib/gis/types";
 import { cn } from "@/lib/utils";
 
@@ -93,9 +103,43 @@ export function ProjectRecordsPanel() {
   const [eventType, setEventType] = useState<"all" | ProjectEventType>("all");
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
+  const [emailBusy, setEmailBusy] = useState(false);
+  const [emailSetupError, setEmailSetupError] = useState("");
+  const [projectEmailAlias, setProjectEmailAlias] = useState<ProjectEmailAlias | null>(null);
+  const [accountEmailAlias, setAccountEmailAlias] = useState<ProjectEmailAlias | null>(null);
+  const [inboundEmails, setInboundEmails] = useState<InboundProjectEmail[]>([]);
   const fileInput = useRef<HTMLInputElement>(null);
   const emailInput = useRef<HTMLInputElement>(null);
   const records = wb.records;
+
+  const refreshInboundEmail = async () => {
+    if (!auth.user || !auth.cloudEnabled) return;
+    setEmailBusy(true);
+    setEmailSetupError("");
+    try {
+      const [projectAlias, accountAlias, messages] = await Promise.all([
+        ensureProjectEmailAlias(wb.projectId),
+        ensureAccountEmailAlias(),
+        listInboundProjectEmails(wb.projectId),
+      ]);
+      setProjectEmailAlias(projectAlias);
+      setAccountEmailAlias(accountAlias);
+      setInboundEmails(messages);
+    } catch (error) {
+      setEmailSetupError(
+        error instanceof Error ? error.message : "Project email intake is unavailable",
+      );
+    } finally {
+      setEmailBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    if (tab !== "email") return;
+    void refreshInboundEmail();
+    // Project changes recreate the scoped intake address and message list.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [auth.user?.id, tab, wb.projectId]);
 
   const update = (patch: Partial<ProjectRecords>) => wb.setProjectRecords({ ...records, ...patch });
 
@@ -247,6 +291,70 @@ export function ProjectRecordsPanel() {
     }
   };
 
+  const addInboundEmailToProject = async (email: InboundProjectEmail) => {
+    if (!auth.user) return;
+    setEmailBusy(true);
+    try {
+      if (!email.projectId) await assignInboundEmail(email.id, wb.projectId);
+      const createdAt = email.receivedAt || Date.now();
+      const uploadedBy = email.fromAddress || "Inbound email";
+      const candidates: ProjectDocument[] = [];
+      if (email.rawStoragePath)
+        candidates.push({
+          id: `inbound-email-${email.id}`,
+          name: `${email.subject || "Email"}.eml`.replace(/[\\/:*?"<>|]+/g, "_"),
+          storagePath: email.rawStoragePath,
+          mimeType: "message/rfc822",
+          size: 0,
+          folderId: "email",
+          source: "email",
+          createdAt,
+          uploadedBy,
+          includeInPacket: true,
+          email: {
+            from: email.fromAddress,
+            to: email.toAddresses.join(", "),
+            subject: email.subject,
+            sentAt: new Date(createdAt).toISOString(),
+            ...(email.textBody ? { preview: email.textBody.slice(0, 4_000) } : {}),
+          },
+        });
+      for (const attachment of email.attachments) {
+        if (attachment.status !== "ready" || !attachment.storagePath) continue;
+        candidates.push({
+          id: `inbound-attachment-${attachment.id}`,
+          name: attachment.fileName,
+          storagePath: attachment.storagePath,
+          mimeType: attachment.contentType,
+          size: attachment.byteSize,
+          folderId: "email",
+          source: "email",
+          createdAt,
+          uploadedBy,
+          includeInPacket: true,
+        });
+      }
+      const existingPaths = new Set(records.documents.map((document) => document.storagePath));
+      const additions = candidates.filter((document) => !existingPaths.has(document.storagePath));
+      if (additions.length) update({ documents: [...additions, ...records.documents] });
+      await markInboundEmailImported(email.id, wb.projectId);
+      wb.addProjectEvent({
+        type: "email",
+        title: `Added email: ${email.subject}`,
+        detail: `${email.fromAddress || "Unknown sender"} · ${additions.length} stored file${additions.length === 1 ? "" : "s"}`,
+        relatedId: email.id,
+      });
+      toast.success("Email added to this project's records");
+      await refreshInboundEmail();
+    } catch (error) {
+      toast.error("Email could not be added", {
+        description: error instanceof Error ? error.message : "Cloud email intake is unavailable",
+      });
+    } finally {
+      setEmailBusy(false);
+    }
+  };
+
   const packetHtml = async () => {
     const notes = records.notes.filter((note) => note.includeInPacket);
     const documents = records.documents.filter((document) => document.includeInPacket);
@@ -318,10 +426,11 @@ export function ProjectRecordsPanel() {
 
   const inboundDomain = (import.meta.env as Record<string, string | undefined>)[
     "VITE_INBOUND_EMAIL_DOMAIN"
-  ];
-  const inboundAddress = inboundDomain
-    ? `project-${wb.projectId.slice(0, 8)}@${inboundDomain}`
-    : null;
+  ]?.trim();
+  const projectInboundAddress =
+    inboundDomain && projectEmailAlias ? `${projectEmailAlias.localPart}@${inboundDomain}` : null;
+  const accountInboundAddress =
+    inboundDomain && accountEmailAlias ? `${accountEmailAlias.localPart}@${inboundDomain}` : null;
 
   return (
     <div className="app-overlay-viewport fixed inset-0 z-[95] flex justify-end bg-foreground/20 backdrop-blur-[2px]">
@@ -599,25 +708,60 @@ export function ProjectRecordsPanel() {
               <section className="rounded-2xl border border-border bg-secondary/40 p-4">
                 <div className="flex items-center gap-2">
                   <Mail className="size-4 text-primary" />
-                  <h3 className="text-sm font-semibold">Project email intake</h3>
-                </div>
-                {inboundAddress ? (
-                  <>
-                    <p className="mt-2 text-xs text-muted-foreground">
-                      BCC or forward project email to this private intake address:
-                    </p>
+                  <h3 className="min-w-0 flex-1 text-sm font-semibold">Project email intake</h3>
+                  {auth.cloudEnabled && (
                     <button
-                      onClick={() => void navigator.clipboard.writeText(inboundAddress)}
-                      className="num mt-2 w-full rounded-xl border border-border bg-card px-3 py-2 text-left text-xs font-semibold"
+                      type="button"
+                      disabled={emailBusy}
+                      onClick={() => void refreshInboundEmail()}
+                      className="rounded-lg p-2 hover:bg-accent disabled:opacity-50"
+                      aria-label="Refresh project email"
+                      title="Refresh project email"
                     >
-                      {inboundAddress}
+                      <RefreshCw className={cn("size-3.5", emailBusy && "animate-spin")} />
                     </button>
-                  </>
+                  )}
+                </div>
+                {projectInboundAddress && accountInboundAddress ? (
+                  <div className="mt-3 grid gap-2">
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        Send directly to this project
+                      </p>
+                      <button
+                        onClick={() => {
+                          void navigator.clipboard.writeText(projectInboundAddress);
+                          toast.success("Project intake address copied");
+                        }}
+                        className="num mt-1 w-full break-all rounded-xl border border-border bg-card px-3 py-2 text-left text-xs font-semibold"
+                      >
+                        {projectInboundAddress}
+                      </button>
+                    </div>
+                    <details className="rounded-xl border border-border bg-card px-3 py-2">
+                      <summary className="cursor-pointer text-xs font-semibold">
+                        Account inbox for sorting later
+                      </summary>
+                      <p className="mt-2 text-[10px] text-muted-foreground">
+                        Email this address when you have not chosen a project. Messages can be added
+                        to the current project below.
+                      </p>
+                      <button
+                        onClick={() => {
+                          void navigator.clipboard.writeText(accountInboundAddress);
+                          toast.success("Account inbox address copied");
+                        }}
+                        className="num mt-2 w-full break-all rounded-lg bg-secondary px-2 py-2 text-left text-[10px] font-semibold"
+                      >
+                        {accountInboundAddress}
+                      </button>
+                    </details>
+                  </div>
                 ) : (
                   <p className="mt-2 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
-                    The secure inbox workflow is ready for a receiving domain, but inbound mail
-                    routing is not connected yet. Until it is configured, upload exported .eml files
-                    below; they are parsed, searchable, and packet-ready.
+                    {emailSetupError
+                      ? `Production intake setup is not complete yet: ${emailSetupError}`
+                      : "The secure inbox is being connected to its receiving domain. Until it is live, upload exported .eml files below; they remain searchable and packet-ready."}
                   </p>
                 )}
                 <button
@@ -636,6 +780,72 @@ export function ProjectRecordsPanel() {
                   onChange={(event) => void uploadFiles(event.target.files, true)}
                 />
               </section>
+
+              {!!inboundEmails.length && (
+                <section className="space-y-2">
+                  <div className="flex items-center justify-between gap-2 px-1">
+                    <h3 className="text-xs font-semibold">Received email</h3>
+                    <span className="rounded-full bg-secondary px-2 py-0.5 text-[9px]">
+                      {inboundEmails.length} recent
+                    </span>
+                  </div>
+                  {inboundEmails.map((email) => {
+                    const importedHere = email.importedProjectId === wb.projectId;
+                    return (
+                      <article key={email.id} className="rounded-2xl border border-border p-3">
+                        <div className="flex items-start gap-2">
+                          <span
+                            className={cn(
+                              "mt-1 size-2 shrink-0 rounded-full",
+                              email.status === "ready"
+                                ? "bg-emerald-500"
+                                : email.status === "processing"
+                                  ? "bg-amber-500"
+                                  : "bg-red-500",
+                            )}
+                            title={`Intake status: ${email.status}`}
+                          />
+                          <div className="min-w-0 flex-1">
+                            <h4 className="truncate text-xs font-semibold">{email.subject}</h4>
+                            <p className="truncate text-[10px] text-muted-foreground">
+                              {email.projectId ? "Project inbox" : "Account inbox"} · From{" "}
+                              {email.fromAddress || "unknown sender"}
+                            </p>
+                            <p className="text-[9px] text-muted-foreground">
+                              {new Date(email.receivedAt).toLocaleString()} ·{" "}
+                              {email.attachments.filter((item) => item.status === "ready").length}{" "}
+                              attachment
+                              {email.attachments.filter((item) => item.status === "ready")
+                                .length === 1
+                                ? ""
+                                : "s"}
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            disabled={emailBusy || importedHere || email.status === "processing"}
+                            onClick={() => void addInboundEmailToProject(email)}
+                            className="shrink-0 rounded-xl bg-primary px-3 py-2 text-[10px] font-semibold text-primary-foreground disabled:bg-secondary disabled:text-muted-foreground"
+                          >
+                            {importedHere ? "Added" : "Add to this project"}
+                          </button>
+                        </div>
+                        {email.textBody && (
+                          <p className="mt-2 line-clamp-4 whitespace-pre-wrap text-[10px] leading-relaxed">
+                            {email.textBody}
+                          </p>
+                        )}
+                        {email.errorMessage && (
+                          <p className="mt-2 rounded-lg bg-amber-50 px-2 py-1.5 text-[9px] text-amber-900">
+                            {email.errorMessage}
+                          </p>
+                        )}
+                      </article>
+                    );
+                  })}
+                </section>
+              )}
+
               {records.documents
                 .filter((item) => item.source === "email")
                 .map((document) => (

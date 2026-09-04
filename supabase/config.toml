@@ -1,0 +1,5 @@
+project_id = "landdraft"
+
+[functions.resend-inbound]
+verify_jwt = false
+
