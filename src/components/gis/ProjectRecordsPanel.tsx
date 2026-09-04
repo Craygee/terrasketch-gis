@@ -424,9 +424,9 @@ export function ProjectRecordsPanel() {
     }
   };
 
-  const inboundDomain = (import.meta.env as Record<string, string | undefined>)[
-    "VITE_INBOUND_EMAIL_DOMAIN"
-  ]?.trim();
+  const inboundDomain =
+    (import.meta.env as Record<string, string | undefined>)["VITE_INBOUND_EMAIL_DOMAIN"]?.trim() ||
+    "inbound.landdraft.net";
   const projectInboundAddress =
     inboundDomain && projectEmailAlias ? `${projectEmailAlias.localPart}@${inboundDomain}` : null;
   const accountInboundAddress =
