@@ -83,6 +83,31 @@ const MARKER_OPTIONS = [
   { symbol: "▲", label: "Direction" },
 ] as const;
 
+const prefersAppleMaps = () => {
+  const userAgent = navigator.userAgent;
+  return (
+    /iPhone|iPad|iPod/i.test(userAgent) ||
+    (/Macintosh/i.test(userAgent) && navigator.maxTouchPoints > 1)
+  );
+};
+
+const directionsUrl = (lat: number, lng: number, direction: "to" | "from", activity: Activity) => {
+  const coordinate = `${lat},${lng}`;
+  if (prefersAppleMaps()) {
+    const params = new URLSearchParams({
+      [direction === "from" ? "saddr" : "daddr"]: coordinate,
+      dirflg: activity === "walking" ? "w" : "d",
+    });
+    return `https://maps.apple.com/?${params}`;
+  }
+  const params = new URLSearchParams({
+    api: "1",
+    [direction === "from" ? "origin" : "destination"]: coordinate,
+    travelmode: activity,
+  });
+  return `https://www.google.com/maps/dir/?${params}`;
+};
+
 const rad = (value: number) => (value * Math.PI) / 180;
 const segmentMeters = (a: Position, b: Position) => {
   const lat1 = rad(Number(a[1]));
@@ -883,20 +908,7 @@ export function FieldModule({ active = true }: { active?: boolean }) {
     const destination = featureDestination(feature.geometry);
     if (!destination) return;
     const [lng, lat] = destination;
-    if (direction === "from") {
-      window.open(
-        `https://www.google.com/maps/dir/${encodeURIComponent(`${lat},${lng}`)}/`,
-        "_blank",
-        "noopener,noreferrer",
-      );
-      return;
-    }
-    const params = new URLSearchParams({
-      api: "1",
-      destination: `${lat},${lng}`,
-      travelmode: activity,
-    });
-    window.open(`https://www.google.com/maps/dir/?${params}`, "_blank", "noopener,noreferrer");
+    window.location.assign(directionsUrl(lat, lng, direction, activity));
   };
 
   const copyCoordinates = async (feature: Feature) => {
