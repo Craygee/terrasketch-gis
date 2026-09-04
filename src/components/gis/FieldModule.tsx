@@ -36,6 +36,7 @@ interface FieldLocation {
   lng: number;
   lat: number;
   accuracy: number;
+  altitude: number | null;
   speed: number | null;
   heading: number | null;
   timestamp: number;
@@ -195,6 +196,7 @@ export function FieldModule({ active = true }: { active?: boolean }) {
       lng: position.coords.longitude,
       lat: position.coords.latitude,
       accuracy: position.coords.accuracy,
+      altitude: position.coords.altitude,
       speed: position.coords.speed,
       heading: position.coords.heading,
       timestamp: position.timestamp,
@@ -472,28 +474,41 @@ export function FieldModule({ active = true }: { active?: boolean }) {
       toast.error("Location is not available in this browser");
       return;
     }
-    const stagePoint = (position: GeolocationPosition) => {
-      updateLocation(position);
+    const stagePoint = (sample: FieldLocation) => {
       const suggestedName = captureName("Field point");
       setPending({
         kind: "point",
         geometry: {
           type: "Point",
-          coordinates: [position.coords.longitude, position.coords.latitude],
+          coordinates: [sample.lng, sample.lat],
         },
         suggestedName,
         properties: {
-          LAT: Number(position.coords.latitude.toFixed(7)),
-          LON: Number(position.coords.longitude.toFixed(7)),
-          ACCURACY_M: Math.round(position.coords.accuracy),
-          ALTITUDE_M:
-            position.coords.altitude === null ? null : Number(position.coords.altitude.toFixed(1)),
+          LAT: Number(sample.lat.toFixed(7)),
+          LON: Number(sample.lng.toFixed(7)),
+          ACCURACY_M: Math.round(sample.accuracy),
+          ALTITUDE_M: sample.altitude === null ? null : Number(sample.altitude.toFixed(1)),
           CAPTURED: new Date().toISOString(),
           FIELD_SOURCE: "GPS point",
         },
       });
       setCaptureNameValue(suggestedName);
       setCaptureNotes("");
+      toast.success("GPS point ready", {
+        description: `Accuracy ±${Math.round(sample.accuracy)} m. Add a name or note, then save.`,
+      });
+    };
+    const stagePosition = (position: GeolocationPosition) => {
+      updateLocation(position);
+      stagePoint({
+        lng: position.coords.longitude,
+        lat: position.coords.latitude,
+        accuracy: position.coords.accuracy,
+        altitude: position.coords.altitude,
+        speed: position.coords.speed,
+        heading: position.coords.heading,
+        timestamp: position.timestamp,
+      });
     };
     const failPoint = (error: GeolocationPositionError) => {
       const message =
@@ -504,17 +519,21 @@ export function FieldModule({ active = true }: { active?: boolean }) {
       setGpsMessage(message);
       toast.error("A GPS point could not be captured", { description: message });
     };
+    if (location && Date.now() - location.timestamp <= 60_000 && location.accuracy <= 100) {
+      stagePoint(location);
+      return;
+    }
     setGpsStatus("requesting");
     setGpsMessage("Finding an accurate point…");
     navigator.geolocation.getCurrentPosition(
-      stagePoint,
+      stagePosition,
       (error) => {
         if (error.code === 1) {
           failPoint(error);
           return;
         }
         setGpsMessage("Trying a faster location fix…");
-        navigator.geolocation.getCurrentPosition(stagePoint, failPoint, {
+        navigator.geolocation.getCurrentPosition(stagePosition, failPoint, {
           enableHighAccuracy: false,
           maximumAge: 30_000,
           timeout: 12_000,
