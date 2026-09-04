@@ -21,6 +21,10 @@ import {
   type AssistantConversation,
   type ConnectionRecoveryHint,
   type MapViewState,
+  type ProjectRecords,
+  type ProjectEvent,
+  type ProjectEventType,
+  emptyProjectRecords,
 } from "./types";
 import {
   workspaceProjectStore,
@@ -78,6 +82,7 @@ interface WorkbenchState {
   printComposition: PrintComposition | undefined;
   assistant: AssistantConversation;
   connectionHints: Record<string, ConnectionRecoveryHint>;
+  records: ProjectRecords;
 }
 
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -118,6 +123,7 @@ const initialState = (): WorkbenchState => ({
   printComposition: undefined,
   assistant: { messages: [], actions: [] },
   connectionHints: {},
+  records: emptyProjectRecords(),
 });
 
 const blankProjectState = (name: string): ProjectState => ({
@@ -137,6 +143,7 @@ const blankProjectState = (name: string): ProjectState => ({
   derivedLayerGroupId: "working",
   parentProjectId: null,
   enabledSubprojectIds: [],
+  records: emptyProjectRecords(),
 });
 
 const normalizedLayer = (layer: GisLayer, index: number): GisLayer => {
@@ -221,6 +228,16 @@ const normalizedProject = (
     printComposition: stored.printComposition,
     assistant: stored.assistant ?? { messages: [], actions: [] },
     connectionHints: stored.connectionHints ?? {},
+    records: {
+      ...emptyProjectRecords(),
+      ...(stored.records ?? {}),
+      notes: stored.records?.notes ?? [],
+      folders: stored.records?.folders?.length
+        ? stored.records.folders
+        : emptyProjectRecords().folders,
+      documents: stored.records?.documents ?? [],
+      events: stored.records?.events ?? [],
+    },
   };
 };
 
@@ -239,6 +256,7 @@ const stateToProject = (state: WorkbenchState): ProjectState => ({
   ...(state.printComposition ? { printComposition: state.printComposition } : {}),
   assistant: state.assistant,
   connectionHints: state.connectionHints,
+  records: state.records,
   ...(state.shareSource ? { shareSource: state.shareSource } : {}),
 });
 
@@ -286,6 +304,13 @@ export interface WorkbenchApi extends WorkbenchState {
   removeFeatures: (layerId: string, indexes: number[]) => void;
   setAssistantConversation: (conversation: AssistantConversation) => void;
   setConnectionHint: (id: string, hint: ConnectionRecoveryHint) => void;
+  setProjectRecords: (records: ProjectRecords) => void;
+  addProjectEvent: (input: {
+    type: ProjectEventType;
+    title: string;
+    detail?: string;
+    relatedId?: string;
+  }) => void;
   saveProject: (reason?: SaveReason) => Promise<ProjectVersion | undefined>;
   createProject: (name: string) => Promise<void>;
   createSubproject: (name: string, parentProjectId?: string) => Promise<void>;
@@ -445,30 +470,58 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
-  const addLayer = useCallback<WorkbenchApi["addLayer"]>((input) => {
-    const existing = stateRef.current.layers;
-    const style =
-      input.source.kind === "derived"
-        ? derivedStyle(input.source.sourceLayerId, existing, input.style)
-        : { ...defaultStyle(Math.floor(Math.random() * 6)), ...input.style };
-    const layer: GisLayer = {
-      id: uid(),
-      name: input.name,
-      groupId: input.groupId,
-      visible: true,
-      data: input.data,
-      style,
-      source: input.source,
-      createdAt: Date.now(),
-    };
-    setState((s) => ({
-      ...s,
-      layers: [layer, ...s.layers],
-      activeLayerId: layer.id,
-      selectedLayerIds: [layer.id],
-    }));
-    return layer;
-  }, []);
+  const addLayer = useCallback<WorkbenchApi["addLayer"]>(
+    (input) => {
+      const existing = stateRef.current.layers;
+      const style =
+        input.source.kind === "derived"
+          ? derivedStyle(input.source.sourceLayerId, existing, input.style)
+          : { ...defaultStyle(Math.floor(Math.random() * 6)), ...input.style };
+      const layer: GisLayer = {
+        id: uid(),
+        name: input.name,
+        groupId: input.groupId,
+        visible: true,
+        data: input.data,
+        style,
+        source: input.source,
+        createdAt: Date.now(),
+      };
+      setState((s) => {
+        const type: ProjectEventType =
+          input.source.kind === "remote"
+            ? "public-data"
+            : input.source.kind === "import"
+              ? "import"
+              : "map";
+        const event: ProjectEvent = {
+          id: uid(),
+          type: s.accessRole === "admin" ? "remote-change" : type,
+          title: `Added ${input.name}`,
+          detail:
+            input.source.kind === "remote"
+              ? "Connected public or remote data layer"
+              : input.source.kind === "import"
+                ? `Imported ${input.source.fileName}`
+                : "Created a project map layer",
+          createdAt: Date.now(),
+          actor: auth.user?.name || auth.user?.email || "LandDraft user",
+          projectId: s.projectId,
+          projectName: s.projectName,
+          relatedId: layer.id,
+        };
+        return {
+          ...s,
+          layers: [layer, ...s.layers],
+          activeLayerId: layer.id,
+          selectedLayerIds: [layer.id],
+          records: { ...s.records, events: [event, ...s.records.events].slice(0, 1000) },
+        };
+      });
+      return layer;
+    },
+    [auth.user?.email, auth.user?.name],
+  );
 
   const updateLayer = useCallback<WorkbenchApi["updateLayer"]>((id, p) => {
     setState((s) => ({
@@ -727,6 +780,36 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
   const setAssistantConversation = useCallback<WorkbenchApi["setAssistantConversation"]>(
     (assistant) => patch({ assistant }),
     [patch],
+  );
+
+  const setProjectRecords = useCallback<WorkbenchApi["setProjectRecords"]>(
+    (records) => patch({ records }),
+    [patch],
+  );
+
+  const addProjectEvent = useCallback<WorkbenchApi["addProjectEvent"]>(
+    (input) =>
+      setState((current) => {
+        const event: ProjectEvent = {
+          id: uid(),
+          type: input.type,
+          title: input.title,
+          detail: input.detail ?? "",
+          createdAt: Date.now(),
+          actor: auth.user?.name || auth.user?.email || "LandDraft user",
+          projectId: current.projectId,
+          projectName: current.projectName,
+          ...(input.relatedId ? { relatedId: input.relatedId } : {}),
+        };
+        return {
+          ...current,
+          records: {
+            ...current.records,
+            events: [event, ...current.records.events].slice(0, 1000),
+          },
+        };
+      }),
+    [auth.user?.email, auth.user?.name],
   );
 
   const toProjectState = useCallback<WorkbenchApi["toProjectState"]>(
@@ -1153,6 +1236,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
     state.printComposition,
     state.assistant,
     state.connectionHints,
+    state.records,
     state.units,
     state.accessRole,
   ]);
@@ -1207,6 +1291,8 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       removeFeatures,
       setAssistantConversation,
       setConnectionHint,
+      setProjectRecords,
+      addProjectEvent,
       saveProject,
       createProject,
       createSubproject,
@@ -1254,6 +1340,8 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       removeFeatures,
       setAssistantConversation,
       setConnectionHint,
+      setProjectRecords,
+      addProjectEvent,
       saveProject,
       createProject,
       createSubproject,

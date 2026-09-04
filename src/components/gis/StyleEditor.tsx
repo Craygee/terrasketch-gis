@@ -8,6 +8,7 @@ import {
   propertyKeys,
 } from "@/lib/gis/labels";
 import { cn } from "@/lib/utils";
+import { markerIcons } from "@/lib/gis/markerIcons";
 
 const patterns: FillPattern[] = [
   "solid",
@@ -50,6 +51,7 @@ export function StyleEditor({ layer }: { layer: GisLayer }) {
     s.labelFields?.length > 0 ? s.labelFields : labelFieldsFromTemplate(s.labelTemplate);
   const separator = s.labelSeparator || " · ";
   const categorized = s.categorized;
+  const categorizedIcons = s.categorizedIcons;
 
   const applyCategoryField = (field: string) => {
     if (!field) {
@@ -85,6 +87,33 @@ export function StyleEditor({ layer }: { layer: GisLayer }) {
       labelSeparator: nextSeparator,
       labelTemplate: buildLabelTemplate(unique, nextSeparator),
       labelEnabled: unique.length > 0,
+    });
+  };
+
+  const applyIconField = (field: string) => {
+    if (!field) {
+      if (categorizedIcons)
+        wb.updateStyle(layer.id, {
+          categorizedIcons: { ...categorizedIcons, enabled: false },
+        });
+      return;
+    }
+    const existing = new Map(categorizedIcons?.rules.map((rule) => [rule.value, rule]));
+    const values = categoryValues(layer, field);
+    wb.updateStyle(layer.id, {
+      categorizedIcons: {
+        enabled: true,
+        field,
+        rules: values.map(
+          (value, index) =>
+            existing.get(value) ?? {
+              value,
+              label: value || "No value",
+              icon: markerIcons[index % markerIcons.length]?.symbol ?? "●",
+            },
+        ),
+        fallbackIcon: categorizedIcons?.fallbackIcon ?? s.pointIcon ?? "●",
+      },
     });
   };
 
@@ -350,6 +379,116 @@ export function StyleEditor({ layer }: { layer: GisLayer }) {
           Advanced symbology
         </summary>
         <div className="mt-3 space-y-3">
+          <Field label="Point icon">
+            <select
+              value={s.pointIcon ?? ""}
+              onChange={(event) => wb.updateStyle(layer.id, { pointIcon: event.target.value })}
+              className="w-full rounded-lg border border-border bg-card px-2 py-1.5 text-xs"
+            >
+              <option value="">Circle only</option>
+              {Array.from(new Set(markerIcons.map((icon) => icon.category))).map((category) => (
+                <optgroup key={category} label={category}>
+                  {markerIcons
+                    .filter((icon) => icon.category === category)
+                    .map((icon) => (
+                      <option key={icon.id} value={icon.symbol}>
+                        {icon.symbol} {icon.label}
+                      </option>
+                    ))}
+                </optgroup>
+              ))}
+            </select>
+          </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Icon color">
+              <div className="flex items-center gap-2">
+                <input
+                  type="color"
+                  value={s.pointIconColor ?? s.fillColor}
+                  disabled={s.pointIconColor === null}
+                  onChange={(event) =>
+                    wb.updateStyle(layer.id, { pointIconColor: event.target.value })
+                  }
+                  className="h-8 min-w-0 flex-1 rounded-lg border border-border bg-card disabled:opacity-40"
+                />
+                <label className="flex items-center gap-1 text-[9px]">
+                  <input
+                    type="checkbox"
+                    checked={s.pointIconColor === null}
+                    onChange={(event) =>
+                      wb.updateStyle(layer.id, {
+                        pointIconColor: event.target.checked ? null : s.fillColor,
+                      })
+                    }
+                    className="accent-primary"
+                  />
+                  Fill
+                </label>
+              </div>
+            </Field>
+            <Field label={`Icon size ${s.pointIconSize ?? 18}px`}>
+              <input
+                type="range"
+                min={10}
+                max={48}
+                step={1}
+                value={s.pointIconSize ?? 18}
+                onChange={(event) =>
+                  wb.updateStyle(layer.id, { pointIconSize: Number(event.target.value) })
+                }
+                className="w-full accent-primary"
+              />
+            </Field>
+          </div>
+          <Field label="Icons by attribute">
+            <select
+              value={categorizedIcons?.enabled ? categorizedIcons.field : ""}
+              onChange={(event) => applyIconField(event.target.value)}
+              className="w-full rounded-lg border border-border bg-card px-2 py-1.5 text-xs"
+            >
+              <option value="">One icon for the layer</option>
+              {keys.map((field) => (
+                <option key={field} value={field}>
+                  {field}
+                </option>
+              ))}
+            </select>
+          </Field>
+          {categorizedIcons?.enabled && (
+            <details className="group rounded-lg border border-border bg-card/70">
+              <summary className="flex cursor-pointer list-none items-center gap-1 px-2 py-1.5 text-[11px] font-medium">
+                <ChevronRight className="size-3.5 transition-transform group-open:rotate-90" />
+                {categorizedIcons.rules.length} value icons
+              </summary>
+              <div className="max-h-64 space-y-1 overflow-y-auto border-t border-border p-2">
+                {categorizedIcons.rules.map((rule, index) => (
+                  <div key={rule.value} className="flex items-center gap-2">
+                    <span className="min-w-0 flex-1 truncate text-[10px]">{rule.label}</span>
+                    <select
+                      value={rule.icon}
+                      onChange={(event) =>
+                        wb.updateStyle(layer.id, {
+                          categorizedIcons: {
+                            ...categorizedIcons,
+                            rules: categorizedIcons.rules.map((item, itemIndex) =>
+                              itemIndex === index ? { ...item, icon: event.target.value } : item,
+                            ),
+                          },
+                        })
+                      }
+                      className="w-36 rounded-lg border border-border bg-secondary px-2 py-1 text-[10px]"
+                    >
+                      {markerIcons.map((icon) => (
+                        <option key={icon.id} value={icon.symbol}>
+                          {icon.symbol} {icon.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ))}
+              </div>
+            </details>
+          )}
           <Field label="Stroke pattern">
             <div className="grid grid-cols-3 gap-1">
               {strokePatterns.map((pattern) => (

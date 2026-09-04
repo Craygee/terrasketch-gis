@@ -13,6 +13,9 @@ LandDraft is a browser-based GIS workbench for public data, field files, sketchi
 - Polygon, line, and point drawing with area, distance, and coordinate measurements.
 - GeoJSON, KML, KMZ, and zipped Shapefile export.
 - Secure cloud accounts, cross-device projects, autosave, and 25 restore points.
+- Project/subproject notes, timestamped activity, private document folders, email-file intake,
+  printable/downloadable record packets, and saved map copies.
+- Search-result markers plus layer-, feature-, and attribute-driven marker icons, colors, and sizes.
 - Project backup workflows for portable offline copies.
 
 ## Development

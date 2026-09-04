@@ -87,6 +87,8 @@ export function buildLayerSpecs(layer: GisLayer, map: MlMap): LayerSpecification
   const labelMinZoom = s.labelMinZoom ?? 4;
   const labelMaxZoom = s.labelMaxZoom ?? 24;
   const categorized = s.categorized?.enabled && s.categorized.field ? s.categorized : undefined;
+  const categorizedIcons =
+    s.categorizedIcons?.enabled && s.categorizedIcons.field ? s.categorizedIcons : undefined;
   const patternId = categorized ? null : ensurePatternImage(map, s.fillPattern, s.fillColor);
   const zoomRange =
     layer.source.kind === "remote" && layer.source.minZoom !== undefined
@@ -116,6 +118,19 @@ export function buildLayerSpecs(layer: GisLayer, map: MlMap): LayerSpecification
           categorized.fallbackVisible ? opacity : 0,
         ]
       : opacity;
+  const iconValue = categorizedIcons
+    ? ["to-string", ["coalesce", ["get", categorizedIcons.field], ""]]
+    : undefined;
+  const categoryIcon =
+    categorizedIcons && iconValue
+      ? [
+          "match",
+          iconValue,
+          ...categorizedIcons.rules.flatMap((rule) => [rule.value, rule.icon]),
+          categorizedIcons.fallbackIcon,
+        ]
+      : (s.pointIcon ?? "");
+  const markerText = ["coalesce", ["get", "MARKER_ICON"], categoryIcon, ""];
   const shownFilter = ["!", ["boolean", ["get", "__hidden"], false]];
   const geometryFilter = (filter: unknown[]) => ["all", filter, shownFilter];
   const fillPaint: Record<string, unknown> = patternId
@@ -188,18 +203,26 @@ export function buildLayerSpecs(layer: GisLayer, map: MlMap): LayerSpecification
       filter: geometryFilter([
         "all",
         ["==", ["geometry-type"], "Point"],
-        ["has", "MARKER_ICON"],
+        ["!=", markerText, ""],
       ]) as never,
       layout: {
-        "text-field": ["coalesce", ["get", "MARKER_ICON"], "●"],
-        "text-size": Math.max(13, s.pointSize * 1.55),
+        "text-field": markerText as never,
+        "text-size": [
+          "to-number",
+          ["coalesce", ["get", "MARKER_SIZE"], s.pointIconSize ?? 18],
+          s.pointIconSize ?? 18,
+        ],
         "text-allow-overlap": true,
         "text-ignore-placement": true,
       },
       paint: {
-        "text-color": "#ffffff",
-        "text-halo-color": categorized?.fallbackColor ?? s.strokeColor,
-        "text-halo-width": 1.2,
+        "text-color": [
+          "coalesce",
+          ["get", "MARKER_COLOR"],
+          s.pointIconColor ?? categoryMatch(categorized?.fallbackColor ?? s.fillColor),
+        ] as never,
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 1.6,
       },
       ...zoomRange,
     },
@@ -260,7 +283,7 @@ export function buildLayerSpecs(layer: GisLayer, map: MlMap): LayerSpecification
         "text-anchor": "center",
         "text-offset": [
           "case",
-          ["has", "MARKER_ICON"],
+          ["!=", markerText, ""],
           ["literal", [0, 1.65]],
           ["literal", [0, 0]],
         ] as never,

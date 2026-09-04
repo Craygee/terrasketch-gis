@@ -28,6 +28,9 @@ const PrintComposer = lazy(() =>
 const SpatialAnalysisPanel = lazy(() =>
   import("./SpatialAnalysisPanel").then((module) => ({ default: module.SpatialAnalysisPanel })),
 );
+const ProjectRecordsPanel = lazy(() =>
+  import("./ProjectRecordsPanel").then((module) => ({ default: module.ProjectRecordsPanel })),
+);
 
 export default function Workbench() {
   return (
@@ -50,7 +53,7 @@ export default function Workbench() {
 function WorkbenchShell() {
   const [panelOpen, setPanelOpen] = useState(true);
   const wb = useWorkbench();
-  const { assistantOpen, printOpen, analysisOpen } = useMapRef();
+  const { assistantOpen, printOpen, analysisOpen, recordsOpen } = useMapRef();
 
   useEffect(() => {
     if (window.innerWidth < 768) setPanelOpen(false);
@@ -142,6 +145,11 @@ function WorkbenchShell() {
       {printOpen && (
         <Suspense fallback={null}>
           <PrintComposer />
+        </Suspense>
+      )}
+      {recordsOpen && wb.canEditProject && (
+        <Suspense fallback={null}>
+          <ProjectRecordsPanel />
         </Suspense>
       )}
     </div>

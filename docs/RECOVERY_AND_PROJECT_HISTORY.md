@@ -229,3 +229,23 @@ debounced RPC updates the latter after map movement, independent of the autosave
 center, zoom, bearing, and pitch follow the account across devices. `projects.last_opened_at` controls
 which project opens after sign-in. Shared-map assets use the private path pattern
 `<uploader>/<project>/shares/<share>/state.json`; storage RLS checks the share ID before download.
+
+## Project records and marker-symbol release
+
+The project state now includes a `ProjectRecords` collection. Every main project and subproject has
+its own notes, nested document folders, private file metadata, summary brief, and timestamped event
+history. File content is stored in the existing private `project-assets` bucket under
+`<user>/<project>/documents/...`; project JSON contains only metadata. The Project records panel
+supports selected-note/file packets, printable email previews, downloadable ZIP packets with the
+original files, basic MIME attachment extraction from imported `.eml` messages, and map copies in a
+dedicated Maps folder. A real BCC/forwarding inbox still requires an inbound-mail provider, domain
+DNS routing, and a secure webhook; the interface does not claim that routing is live until
+`VITE_INBOUND_EMAIL_DOMAIN` is configured.
+
+Print compositions can independently show selected project notes and can store PNG/PDF map copies
+without changing the live project map. Search results can be added directly to a Working layer.
+Point symbology supports a compact built-in icon catalog, custom color or inherited fill color,
+size, per-feature overrides, and attribute-driven icon rules rendered through MapLibre expressions.
+The project summary, packet selections, saved maps, emails, and documents form the structured input
+for a future server-side presentation generator; no external AI or presentation service is implied
+until its authenticated server connection exists.

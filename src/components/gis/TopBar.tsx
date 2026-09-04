@@ -15,6 +15,7 @@ import {
   UserRound,
   Share2,
   Navigation,
+  NotebookTabs,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -47,6 +48,8 @@ export function TopBar({
     analysisOpen,
     setAnalysisOpen,
     setConnectionsOpen,
+    recordsOpen,
+    setRecordsOpen,
   } = useMapRef();
   const { startTour, featureTips, setFeatureTips } = useTours();
   const [showAbout, setShowAbout] = useState(false);
@@ -194,6 +197,15 @@ export function TopBar({
               setShowExport(false);
             }}
             tourId="top-projects"
+          />
+        )}
+        {wb.canEditProject && (
+          <BarBtn
+            icon={<NotebookTabs className="size-4" />}
+            label="Records"
+            help="Project notes, documents, activity, email, and packets"
+            onClick={() => setRecordsOpen(!recordsOpen)}
+            tourId="top-records"
           />
         )}
         {wb.canEditProject && (

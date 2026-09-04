@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState } from "react";
-import { Search, Loader2, LocateFixed, X } from "lucide-react";
+import { Search, Loader2, LocateFixed, MapPinPlus, X } from "lucide-react";
 import { toast } from "sonner";
 import { searchPlaces, type PlaceResult } from "@/lib/gis/geocode";
 import { useMapRef } from "@/lib/gis/mapRef";
+import { useWorkbench } from "@/lib/gis/store";
+import { defaultMarkerIcon } from "@/lib/gis/markerIcons";
 
 export function SearchBox() {
   const { map } = useMapRef();
+  const wb = useWorkbench();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<PlaceResult[]>([]);
   const [loading, setLoading] = useState(false);
@@ -62,6 +65,58 @@ export function SearchBox() {
     );
   };
 
+  const addMarker = (place: PlaceResult) => {
+    const feature = {
+      type: "Feature" as const,
+      geometry: { type: "Point" as const, coordinates: [place.lng, place.lat] },
+      properties: {
+        NAME: place.label,
+        TYPE: place.type,
+        LAT: Number(place.lat.toFixed(7)),
+        LON: Number(place.lng.toFixed(7)),
+        MARKER_ICON: defaultMarkerIcon.symbol,
+        SOURCE: "Place search",
+      },
+    };
+    const existing = wb.layers.find(
+      (layer) => layer.groupId === "working" && layer.name === "Search markers",
+    );
+    if (existing) {
+      const index = existing.data.features.length;
+      wb.appendFeature(existing.id, feature);
+      wb.setActiveLayer(existing.id);
+      wb.setSelectedFeatures([{ layerId: existing.id, index }]);
+      wb.addProjectEvent({
+        type: "map",
+        title: `Marked ${place.label}`,
+        detail: `${place.lat.toFixed(6)}, ${place.lng.toFixed(6)}`,
+        relatedId: existing.id,
+      });
+    } else {
+      const layer = wb.addLayer({
+        name: "Search markers",
+        data: { type: "FeatureCollection", features: [feature] },
+        groupId: "working",
+        source: { kind: "draw" },
+        style: {
+          fillColor: "#2f7d4f",
+          strokeColor: "#ffffff",
+          pointIcon: defaultMarkerIcon.symbol,
+          pointIconSize: 20,
+          labelEnabled: true,
+          labelTemplate: "{NAME}",
+          labelFields: ["NAME"],
+          labelMinZoom: 12,
+        },
+      });
+      wb.setSelectedFeatures([{ layerId: layer.id, index: 0 }]);
+    }
+    goTo(place);
+    toast.success("Search result added to Working layers", {
+      description: "Select the marker to change its icon, color, or size.",
+    });
+  };
+
   return (
     <div className="w-full sm:w-[22rem]">
       <div className="float-surface flex items-center gap-2 rounded-2xl px-3 py-2">
@@ -93,14 +148,29 @@ export function SearchBox() {
       {open && results.length > 0 && (
         <div className="float-surface mt-2 max-h-72 overflow-auto rounded-2xl p-1">
           {results.map((r) => (
-            <button
+            <div
               key={r.id + r.label}
-              onClick={() => goTo(r)}
-              className="block w-full rounded-xl px-3 py-2 text-left text-sm transition-colors hover:bg-accent hover:text-accent-foreground"
+              className="flex items-center gap-1 rounded-xl hover:bg-accent"
             >
-              <div className="line-clamp-2">{r.label}</div>
-              <div className="text-[11px] text-muted-foreground">{r.type}</div>
-            </button>
+              <button
+                onClick={() => goTo(r)}
+                className="min-w-0 flex-1 px-3 py-2 text-left text-sm transition-colors hover:text-accent-foreground"
+              >
+                <div className="line-clamp-2">{r.label}</div>
+                <div className="text-[11px] text-muted-foreground">{r.type}</div>
+              </button>
+              {wb.canEditProject && (
+                <button
+                  type="button"
+                  onClick={() => addMarker(r)}
+                  title="Add this location as a project marker"
+                  aria-label={`Add ${r.label} as a marker`}
+                  className="mr-1 flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground"
+                >
+                  <MapPinPlus className="size-4" />
+                </button>
+              )}
+            </div>
           ))}
           <div className="px-3 py-1 text-[10px] text-muted-foreground">
             Place search by OpenStreetMap Nominatim

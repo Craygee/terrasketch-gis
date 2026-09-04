@@ -4,6 +4,30 @@ import type { Feature } from "geojson";
 
 export type MapPaper = "letter" | "a4";
 
+export async function createMapSnapshotBlob(
+  map: MlMap,
+  format: "png" | "pdf" = "pdf",
+): Promise<Blob> {
+  const source = map.getCanvas();
+  if (format === "png")
+    return new Promise<Blob>((resolve, reject) =>
+      source.toBlob(
+        (value) => (value ? resolve(value) : reject(new Error("Map image could not be created"))),
+        "image/png",
+      ),
+    );
+  const canvas = document.createElement("canvas");
+  canvas.width = source.width;
+  canvas.height = source.height;
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("Map PDF canvas is unavailable");
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.drawImage(source, 0, 0);
+  const jpeg = await canvasToJpeg(canvas);
+  return buildSingleImagePdf(jpeg, canvas.width, canvas.height);
+}
+
 export async function exportMapPdf(
   map: MlMap,
   projectName: string,

@@ -11,6 +11,19 @@ export interface CategoryStyleRule {
   visible: boolean;
 }
 
+export interface IconStyleRule {
+  value: string;
+  label: string;
+  icon: string;
+}
+
+export interface CategorizedIconStyle {
+  enabled: boolean;
+  field: string;
+  rules: IconStyleRule[];
+  fallbackIcon: string;
+}
+
 export interface CategorizedStyle {
   enabled: boolean;
   field: string;
@@ -28,6 +41,10 @@ export interface LayerStyle {
   strokeOpacity: number;
   strokePattern: StrokePattern;
   pointSize: number;
+  pointIcon: string;
+  pointIconColor: string | null;
+  pointIconSize: number;
+  categorizedIcons?: CategorizedIconStyle;
   labelTemplate: string;
   labelFields: string[];
   labelSeparator: string;
@@ -153,6 +170,8 @@ export interface PrintComposition {
   showScale: boolean;
   showDate: boolean;
   showAttribution: boolean;
+  showProjectNotes?: boolean;
+  includedNoteIds?: string[];
   frameBorder: boolean;
   frame: { x: number; y: number; width: number; height: number };
   furniture: Record<PrintFurnitureKey, PrintFurniturePosition>;
@@ -161,6 +180,80 @@ export interface PrintComposition {
   annotations: PrintAnnotation[];
   mapView?: { center: [number, number]; zoom: number; bearing: number; pitch: number };
 }
+
+export type ProjectEventType =
+  "note" | "upload" | "email" | "map" | "import" | "public-data" | "remote-change" | "project";
+
+export interface ProjectNote {
+  id: string;
+  title: string;
+  body: string;
+  createdAt: number;
+  updatedAt: number;
+  author: string;
+  includeInPacket: boolean;
+}
+
+export interface ProjectFolder {
+  id: string;
+  name: string;
+  parentId: string | null;
+  createdAt: number;
+}
+
+export interface EmailDocumentDetails {
+  from?: string;
+  to?: string;
+  subject?: string;
+  sentAt?: string;
+  preview?: string;
+}
+
+export interface ProjectDocument {
+  id: string;
+  name: string;
+  storagePath: string;
+  mimeType: string;
+  size: number;
+  folderId: string;
+  source: "upload" | "email" | "map";
+  createdAt: number;
+  uploadedBy: string;
+  includeInPacket: boolean;
+  email?: EmailDocumentDetails;
+}
+
+export interface ProjectEvent {
+  id: string;
+  type: ProjectEventType;
+  title: string;
+  detail: string;
+  createdAt: number;
+  actor: string;
+  projectId: string;
+  projectName: string;
+  relatedId?: string;
+}
+
+export interface ProjectRecords {
+  notes: ProjectNote[];
+  folders: ProjectFolder[];
+  documents: ProjectDocument[];
+  events: ProjectEvent[];
+  summary: string;
+}
+
+export const emptyProjectRecords = (): ProjectRecords => ({
+  notes: [],
+  folders: [
+    { id: "general", name: "General", parentId: null, createdAt: Date.now() },
+    { id: "maps", name: "Maps", parentId: null, createdAt: Date.now() },
+    { id: "email", name: "Email", parentId: null, createdAt: Date.now() },
+  ],
+  documents: [],
+  events: [],
+  summary: "",
+});
 
 export interface ProjectState {
   version: 1;
@@ -177,6 +270,7 @@ export interface ProjectState {
   printComposition?: PrintComposition;
   assistant?: AssistantConversation;
   connectionHints?: Record<string, ConnectionRecoveryHint>;
+  records?: ProjectRecords;
   shareSource?: {
     shareId: string;
     sourceProjectId: string;
@@ -233,6 +327,9 @@ export const defaultStyle = (seed = 0): LayerStyle => {
     strokeOpacity: 1,
     strokePattern: "solid",
     pointSize: 6,
+    pointIcon: "",
+    pointIconColor: null,
+    pointIconSize: 18,
     labelTemplate: "",
     labelFields: [],
     labelSeparator: " · ",

@@ -9,6 +9,7 @@ import {
   Minus,
   Pentagon,
   Pencil,
+  Palette,
   Table2,
   X,
 } from "lucide-react";
@@ -17,6 +18,7 @@ import { toast } from "sonner";
 import { useMapRef } from "@/lib/gis/mapRef";
 import { useWorkbench } from "@/lib/gis/store";
 import { cn } from "@/lib/utils";
+import { markerIcons } from "@/lib/gis/markerIcons";
 
 function featureName(properties: Record<string, unknown>, fallback: string): string {
   for (const key of ["NAME", "name", "OWNER_NAME", "owner_name", "Prop_ID", "GEO_ID"]) {
@@ -39,6 +41,11 @@ export function SelectionToolbar({ mobile = false }: { mobile?: boolean }) {
   const [showField, setShowField] = useState(false);
   const [fieldName, setFieldName] = useState("");
   const [fieldValue, setFieldValue] = useState("");
+  const [showMarkerStyle, setShowMarkerStyle] = useState(false);
+  const [markerIcon, setMarkerIcon] = useState("●");
+  const [markerColor, setMarkerColor] = useState("#2f7d4f");
+  const [markerSize, setMarkerSize] = useState(18);
+  const [useLayerColor, setUseLayerColor] = useState(true);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const selected = useMemo(
@@ -56,6 +63,7 @@ export function SelectionToolbar({ mobile = false }: { mobile?: boolean }) {
   const preview = Object.entries(first.feature.properties ?? {})
     .filter(([key]) => !key.startsWith("__") && key !== "ATTACHMENTS")
     .slice(0, 4);
+  const pointSelections = selected.filter(({ feature }) => feature.geometry.type === "Point");
 
   const createCombinedLayer = () => {
     setPendingFeatureSave({
@@ -119,6 +127,22 @@ export function SelectionToolbar({ mobile = false }: { mobile?: boolean }) {
     setFieldName("");
     setFieldValue("");
     setShowField(false);
+  };
+
+  const applyMarkerStyle = () => {
+    for (const { selection } of pointSelections)
+      wb.updateFeatureProperties(selection.layerId, selection.index, {
+        MARKER_ICON: markerIcon,
+        MARKER_COLOR: useLayerColor ? null : markerColor,
+        MARKER_SIZE: markerSize,
+      });
+    wb.addProjectEvent({
+      type: "map",
+      title: `Styled ${pointSelections.length} marker${pointSelections.length === 1 ? "" : "s"}`,
+      detail: `${markerIcon} · ${markerSize}px${useLayerColor ? " · layer fill color" : ""}`,
+    });
+    setShowMarkerStyle(false);
+    toast.success("Marker style applied");
   };
 
   const attachFile = async (file: File | undefined) => {
@@ -223,6 +247,16 @@ export function SelectionToolbar({ mobile = false }: { mobile?: boolean }) {
           onClick={() => setShowField((value) => !value)}
         />
         <Action icon={<FileUp />} label="Attach file" onClick={() => fileRef.current?.click()} />
+        {pointSelections.length > 0 && (
+          <Action
+            icon={<Palette />}
+            label="Marker style"
+            onClick={() => {
+              setShowMarkerStyle((value) => !value);
+              setShowField(false);
+            }}
+          />
+        )}
         <Action
           icon={<Database />}
           label="Find data"
@@ -254,6 +288,57 @@ export function SelectionToolbar({ mobile = false }: { mobile?: boolean }) {
           />
           <button
             onClick={addField}
+            className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground"
+          >
+            Apply
+          </button>
+        </div>
+      )}
+      {showMarkerStyle && (
+        <div className="mt-2 grid gap-2 border-t border-border pt-2 sm:grid-cols-[1fr_auto_auto_auto]">
+          <select
+            value={markerIcon}
+            onChange={(event) => setMarkerIcon(event.target.value)}
+            aria-label="Marker icon"
+            className="min-w-0 rounded-lg border border-border bg-card px-2 py-1.5 text-xs"
+          >
+            {markerIcons.map((icon) => (
+              <option key={icon.id} value={icon.symbol}>
+                {icon.symbol} {icon.label}
+              </option>
+            ))}
+          </select>
+          <label className="flex items-center gap-1 rounded-lg border border-border px-2 text-[10px]">
+            <input
+              type="checkbox"
+              checked={useLayerColor}
+              onChange={(event) => setUseLayerColor(event.target.checked)}
+              className="accent-primary"
+            />
+            Layer color
+          </label>
+          <label className="flex items-center gap-2 rounded-lg border border-border px-2 text-[10px]">
+            <input
+              type="color"
+              value={markerColor}
+              disabled={useLayerColor}
+              onChange={(event) => setMarkerColor(event.target.value)}
+              className="h-7 w-8 disabled:opacity-40"
+              aria-label="Marker color"
+            />
+            <input
+              type="range"
+              min={10}
+              max={48}
+              value={markerSize}
+              onChange={(event) => setMarkerSize(Number(event.target.value))}
+              aria-label="Marker size"
+              className="w-20 accent-primary"
+            />
+            {markerSize}px
+          </label>
+          <button
+            onClick={applyMarkerStyle}
             className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground"
           >
             Apply

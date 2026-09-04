@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowRight,
+  Archive,
   Crosshair,
   LocateFixed,
   MapPin,
@@ -13,6 +14,7 @@ import {
   Type,
   X,
 } from "lucide-react";
+import { toast } from "sonner";
 import { Map as MlMap, Marker, NavigationControl, type GeoJSONSource } from "maplibre-gl";
 import type { Feature, FeatureCollection } from "geojson";
 
@@ -29,6 +31,9 @@ import type {
   PrintFurnitureKey,
 } from "@/lib/gis/types";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/lib/auth";
+import { createMapSnapshotBlob } from "@/lib/gis/mapPdf";
+import { uploadProjectAsset } from "@/lib/gis/projectRecords";
 
 const uid = () => window.crypto.randomUUID();
 
@@ -57,6 +62,7 @@ const defaultComposition = (
   showScale: true,
   showDate: false,
   showAttribution: true,
+  showProjectNotes: false,
   frameBorder: true,
   frame: defaultPrintFrame("letter", "landscape"),
   furniture: {
@@ -75,6 +81,7 @@ const defaultComposition = (
 
 export function PrintComposer() {
   const wb = useWorkbench();
+  const auth = useAuth();
   const { map: liveMap, lastPoint, setPrintOpen } = useMapRef();
   const liveView = liveMap
     ? {
@@ -127,6 +134,8 @@ export function PrintComposer() {
   const [mapReady, setMapReady] = useState(false);
   const [mapBearing, setMapBearing] = useState(liveView?.bearing ?? 0);
   const [mapRevision, setMapRevision] = useState(0);
+  const [saveMapCopy, setSaveMapCopy] = useState(false);
+  const [mapCopyFormat, setMapCopyFormat] = useState<"png" | "pdf">("pdf");
   const setSavedComposition = wb.setPrintComposition;
 
   const selected = composition.annotations.find((item) => item.id === selectedId);
@@ -137,6 +146,12 @@ export function PrintComposer() {
   const legendLayers = useMemo(
     () => wb.displayLayers.filter((layer) => composition.legendItems[layer.id]?.visible),
     [composition.legendItems, wb.displayLayers],
+  );
+  const selectedProjectNotes = wb.records.notes.filter((note) =>
+    (composition.includedNoteIds !== undefined
+      ? composition.includedNoteIds
+      : wb.records.notes.filter((item) => item.includeInPacket).map((item) => item.id)
+    ).includes(note.id),
   );
   const furnitureScale = Math.max(
     0.55,
@@ -583,6 +598,60 @@ export function PrintComposer() {
     setPrintOpen(false);
   };
 
+  const saveMapToRecords = async () => {
+    const map = printMapRef.current;
+    if (!map) throw new Error("The print map is not ready yet");
+    if (!auth.user) throw new Error("Sign in before saving a map to Project records");
+    const blob = await createMapSnapshotBlob(map, mapCopyFormat);
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const fileName = `${composition.title || wb.projectName}-${stamp}.${mapCopyFormat}`;
+    const document = await uploadProjectAsset({
+      userId: auth.user.id,
+      projectId: wb.projectId,
+      folderId: "maps",
+      fileName,
+      data: blob,
+      source: "map",
+      uploadedBy: auth.user.name || auth.user.email,
+    });
+    wb.setProjectRecords({
+      ...wb.records,
+      documents: [document, ...wb.records.documents],
+    });
+    wb.addProjectEvent({
+      type: "map",
+      title: `Saved map ${fileName}`,
+      detail: "Stored in Project records / Maps",
+      relatedId: document.id,
+    });
+    window.setTimeout(() => void wb.saveProject("manual"), 300);
+    toast.success("Map saved to Project records / Maps");
+  };
+
+  const saveMapToRecordsSafely = async () => {
+    try {
+      await saveMapToRecords();
+    } catch (error) {
+      toast.error("The map copy could not be stored", {
+        description: error instanceof Error ? error.message : "Cloud storage is unavailable",
+      });
+    }
+  };
+
+  const printMap = async () => {
+    if (saveMapCopy) {
+      try {
+        await saveMapToRecords();
+      } catch (error) {
+        toast.error("The map copy could not be stored", {
+          description: error instanceof Error ? error.message : "Cloud storage is unavailable",
+        });
+        return;
+      }
+    }
+    window.print();
+  };
+
   const pageRatio = pageAspect(composition.paper, composition.orientation);
   const furnitureKeys: PrintFurnitureKey[] = ["legend", "compass", "scale", "attribution"];
   const furnitureVisible = (key: PrintFurnitureKey) =>
@@ -696,8 +765,13 @@ export function PrintComposer() {
             }}
           />
           <ComposerButton icon={<RotateCcw />} label="Project view" onClick={resetView} />
+          <ComposerButton
+            icon={<Archive />}
+            label="Save to Maps"
+            onClick={() => void saveMapToRecordsSafely()}
+          />
           <button
-            onClick={() => window.print()}
+            onClick={() => void printMap()}
             data-tour="print-output"
             className="ml-1 flex shrink-0 items-center gap-1.5 rounded-xl bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground"
           >
@@ -759,6 +833,76 @@ export function PrintComposer() {
               />
             ))}
           </div>
+
+          <details className="group mt-3 rounded-xl border border-border">
+            <summary className="cursor-pointer list-none px-3 py-2 font-semibold">
+              Project notes & repository
+            </summary>
+            <div className="space-y-2 border-t border-border p-3">
+              <CheckOption
+                checked={composition.showProjectNotes ?? false}
+                label="Show selected notes on map"
+                onChange={(showProjectNotes) => update({ showProjectNotes })}
+              />
+              {(composition.showProjectNotes ?? false) && (
+                <div className="max-h-36 space-y-1 overflow-y-auto rounded-lg bg-secondary p-2">
+                  {wb.records.notes.map((note) => {
+                    const checked = (
+                      composition.includedNoteIds !== undefined
+                        ? composition.includedNoteIds
+                        : wb.records.notes
+                            .filter((item) => item.includeInPacket)
+                            .map((item) => item.id)
+                    ).includes(note.id);
+                    return (
+                      <label key={note.id} className="flex items-center gap-2 text-[10px]">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(event) => {
+                            const current =
+                              composition.includedNoteIds !== undefined
+                                ? composition.includedNoteIds
+                                : wb.records.notes
+                                    .filter((item) => item.includeInPacket)
+                                    .map((item) => item.id);
+                            update({
+                              includedNoteIds: event.target.checked
+                                ? Array.from(new Set([...current, note.id]))
+                                : current.filter((id) => id !== note.id),
+                            });
+                          }}
+                          className="accent-primary"
+                        />
+                        <span className="truncate">{note.title}</span>
+                      </label>
+                    );
+                  })}
+                  {!wb.records.notes.length && (
+                    <p className="text-[10px] text-muted-foreground">
+                      Add notes in Project records first.
+                    </p>
+                  )}
+                </div>
+              )}
+              <div className="grid grid-cols-[1fr_auto] gap-2">
+                <CheckOption
+                  checked={saveMapCopy}
+                  label="Save copy to Maps when printing"
+                  onChange={setSaveMapCopy}
+                />
+                <select
+                  value={mapCopyFormat}
+                  onChange={(event) => setMapCopyFormat(event.target.value as "png" | "pdf")}
+                  className="rounded-lg border border-border bg-card px-2 text-[10px]"
+                  aria-label="Saved map format"
+                >
+                  <option value="pdf">PDF</option>
+                  <option value="png">PNG</option>
+                </select>
+              </div>
+            </div>
+          </details>
 
           <details className="group mt-3 rounded-xl border border-border">
             <summary className="cursor-pointer list-none px-3 py-2 font-semibold">
@@ -1218,6 +1362,19 @@ export function PrintComposer() {
               <div className="absolute bottom-[2%] right-[5%] text-[clamp(6px,.65vw,9px)] text-slate-500">
                 {new Date().toLocaleDateString()}
               </div>
+            )}
+            {(composition.showProjectNotes ?? false) && selectedProjectNotes.length > 0 && (
+              <aside className="absolute bottom-[3%] left-[5%] z-40 max-h-[20%] w-[42%] overflow-hidden rounded-md border border-slate-300 bg-white/95 p-[1.2%] shadow-sm">
+                <strong className="block text-[clamp(7px,.8vw,11px)]">Project notes</strong>
+                <div className="mt-1 space-y-1">
+                  {selectedProjectNotes.slice(0, 4).map((note) => (
+                    <div key={note.id} className="text-[clamp(6px,.62vw,9px)] leading-tight">
+                      <strong>{note.title}:</strong> {note.body.slice(0, 180)}
+                      {note.body.length > 180 ? "…" : ""}
+                    </div>
+                  ))}
+                </div>
+              </aside>
             )}
             {placementMode && (
               <div
