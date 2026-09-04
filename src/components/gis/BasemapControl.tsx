@@ -5,7 +5,7 @@ import { useWorkbench } from "@/lib/gis/store";
 import { useMapRef } from "@/lib/gis/mapRef";
 import { cn } from "@/lib/utils";
 
-export function BasemapControl() {
+export function BasemapControl({ dropDirection = "up" }: { dropDirection?: "up" | "down" }) {
   const wb = useWorkbench();
   const { map } = useMapRef();
   const [open, setOpen] = useState(false);
@@ -42,7 +42,12 @@ export function BasemapControl() {
         Zoom {zoom.toFixed(1)}×
       </span>
       {open && (
-        <div className="float-surface absolute bottom-full right-0 mb-2 w-56 overflow-hidden rounded-2xl p-1">
+        <div
+          className={cn(
+            "float-surface absolute right-0 z-40 max-h-[calc(100dvh-13rem)] w-56 overflow-y-auto rounded-2xl p-1",
+            dropDirection === "down" ? "top-full mt-2" : "bottom-full mb-2",
+          )}
+        >
           {basemaps.map((b) => (
             <button
               key={b.id}

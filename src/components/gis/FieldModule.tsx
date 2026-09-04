@@ -378,15 +378,36 @@ export function FieldModule({ active = true }: { active?: boolean }) {
         const element = document.createElement("div");
         element.className = "field-location-dot";
         element.title = "Current GPS location";
-        markerRef.current = new Marker({ element }).addTo(map);
+        markerRef.current = new Marker({ element, anchor: "center" })
+          .setLngLat([location.lng, location.lat])
+          .addTo(map);
+      } else {
+        markerRef.current.setLngLat([location.lng, location.lat]);
       }
-      markerRef.current.setLngLat([location.lng, location.lat]);
     } catch (error) {
       markerRef.current?.remove();
       markerRef.current = null;
       console.warn("[field] Current-location marker could not be displayed", error);
     }
   }, [location, map]);
+
+  useEffect(() => {
+    if (!map || !active) return;
+    const stopFollowing = (event: { originalEvent?: unknown }) => {
+      if (event.originalEvent) {
+        followRef.current = false;
+        setFollow(false);
+      }
+    };
+    map.on("dragstart", stopFollowing);
+    map.on("zoomstart", stopFollowing);
+    map.on("rotatestart", stopFollowing);
+    return () => {
+      map.off("dragstart", stopFollowing);
+      map.off("zoomstart", stopFollowing);
+      map.off("rotatestart", stopFollowing);
+    };
+  }, [active, map]);
 
   useEffect(() => {
     pendingMarkerRef.current?.remove();
@@ -457,6 +478,7 @@ export function FieldModule({ active = true }: { active?: boolean }) {
   }, [map, track?.kind, trackPoints]);
 
   const locate = () => {
+    followRef.current = true;
     setFollow(true);
     if (!ensureWatch(gpsStatus === "error" || gpsStatus === "denied")) return;
     if (location && map) {
@@ -480,6 +502,7 @@ export function FieldModule({ active = true }: { active?: boolean }) {
     setTrackPoints([]);
     setTrackDistance(0);
     setTrack(session);
+    followRef.current = true;
     setFollow(true);
     void requestWakeLock();
     if (!ensureWatch()) {
@@ -907,7 +930,7 @@ export function FieldModule({ active = true }: { active?: boolean }) {
       </div>
 
       {selected && (
-        <section className="panel-surface pointer-events-auto absolute left-3 right-3 top-[calc(8.5rem+env(safe-area-inset-top))] z-30 max-h-[34dvh] overflow-y-auto rounded-2xl p-3 shadow-float">
+        <section className="field-selection-card panel-surface pointer-events-auto absolute left-3 right-3 top-[calc(8.5rem+env(safe-area-inset-top))] z-30 overflow-y-auto rounded-2xl p-3 shadow-float">
           <div className="flex items-start gap-2">
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-semibold">{selectedName}</p>
@@ -1039,7 +1062,12 @@ export function FieldModule({ active = true }: { active?: boolean }) {
                 </button>
               </div>
               <button
-                onClick={() => setFollow((value) => !value)}
+                onClick={() => {
+                  if (follow) {
+                    followRef.current = false;
+                    setFollow(false);
+                  } else locate();
+                }}
                 aria-pressed={follow}
                 className={cn(
                   "flex items-center gap-1 rounded-xl px-3 py-2 text-[10px] font-semibold",

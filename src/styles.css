@@ -268,6 +268,11 @@
   box-shadow: 0 4px 14px rgb(20 49 31 / 35%);
 }
 
+.field-selection-card {
+  max-height: calc(100vh - 16rem);
+  max-height: min(34dvh, calc(100dvh - 16rem));
+}
+
 .app-scroll-viewport {
   position: fixed;
   inset: 0;
@@ -312,6 +317,23 @@
 
 .mobile-layer-height {
   height: 54vh;
+}
+
+@media (max-width: 47.999rem) {
+  .mobile-field-mode .maplibregl-ctrl-bottom-right,
+  .mobile-field-mode .maplibregl-ctrl-bottom-left {
+    bottom: calc(7.25rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  .mobile-map-mode .maplibregl-ctrl-bottom-right,
+  .mobile-map-mode .maplibregl-ctrl-bottom-left {
+    bottom: calc(4.5rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  .mobile-map-mode.mobile-has-selection .maplibregl-ctrl-bottom-right,
+  .mobile-map-mode.mobile-has-selection .maplibregl-ctrl-bottom-left {
+    bottom: calc(11rem + env(safe-area-inset-bottom, 0px));
+  }
 }
 
 @supports (height: 100dvh) {

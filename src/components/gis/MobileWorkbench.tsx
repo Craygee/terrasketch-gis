@@ -114,7 +114,13 @@ function MobileShell() {
     );
 
   return (
-    <div className="app-viewport relative bg-background">
+    <div
+      className={cn(
+        "app-viewport relative bg-background",
+        fieldMode ? "mobile-field-mode" : "mobile-map-mode",
+        wb.selectedFeatures.length > 0 && "mobile-has-selection",
+      )}
+    >
       <MapCanvas />
       {!fieldMode && <SelectionToolbar mobile />}
 
@@ -175,16 +181,19 @@ function MobileShell() {
             <Map className="size-3.5" /> <span className="hidden min-[370px]:inline">Map</span>
           </button>
         </div>
-        {!fieldMode && (
-          <>
-            <div data-tour="map-search" className="pointer-events-auto hidden sm:block">
-              <SearchBox />
-            </div>
+      </header>
+
+      {!fieldMode && (
+        <div className="pointer-events-none absolute inset-x-3 top-[calc(4.5rem+env(safe-area-inset-top))] z-20 flex min-w-0 items-start gap-2">
+          <div data-tour="map-search" className="pointer-events-auto hidden min-w-0 sm:block">
+            <SearchBox />
+          </div>
+          <div className="pointer-events-auto ml-auto flex shrink-0 gap-2">
             <button
               onClick={() => setSheet(sheet === "help" ? null : "help")}
               aria-label="Help, tours, and account"
               title="Help, tours, and account"
-              className="float-surface pointer-events-auto rounded-2xl p-3"
+              className="float-surface rounded-2xl p-3"
             >
               <Info className="size-4" />
             </button>
@@ -192,24 +201,23 @@ function MobileShell() {
               onClick={() => setSheet(sheet === "projects" ? null : "projects")}
               aria-label="Projects and account"
               title="Open projects and account settings"
-              className="float-surface pointer-events-auto rounded-2xl p-3"
+              className="float-surface rounded-2xl p-3"
               data-tour="top-projects"
             >
               <FolderOpen className="size-4" />
             </button>
-          </>
-        )}
-      </header>
+          </div>
+        </div>
+      )}
 
-      <div
-        data-tour="basemap-control"
-        className={cn(
-          "pointer-events-auto absolute right-14 z-20",
-          fieldMode ? "top-[calc(8.75rem+env(safe-area-inset-top))]" : "bottom-20",
-        )}
-      >
-        <BasemapControl />
-      </div>
+      {!(fieldMode && wb.selectedFeatures.length > 0) && (
+        <div
+          data-tour="basemap-control"
+          className="pointer-events-auto absolute right-3 top-[calc(8.25rem+env(safe-area-inset-top))] z-20"
+        >
+          <BasemapControl dropDirection="down" />
+        </div>
+      )}
 
       <div className={fieldMode ? undefined : "hidden"}>
         <FieldModule active={fieldMode} />
