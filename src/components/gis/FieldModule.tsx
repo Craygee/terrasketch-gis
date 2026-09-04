@@ -511,6 +511,72 @@ export function FieldModule({ active = true }: { active?: boolean }) {
     }
   };
 
+  const quickMark = () => {
+    if (!wb.canEditProject) {
+      toast.error("This shared map is view only");
+      return;
+    }
+    const sample = location;
+    if (!sample) {
+      ensureWatch();
+      toast.info("Waiting for a GPS fix", {
+        description: "Keep tracking. Quick mark will be ready as soon as your location appears.",
+      });
+      return;
+    }
+    const current = wbRef.current;
+    const session = trackRef.current;
+    const groupId =
+      current.groups.find((group) => group.name.toLowerCase() === "field collection")?.id ??
+      current.addGroup("Field collection");
+    const layerName = "Field GPS points";
+    const feature: Feature = {
+      type: "Feature",
+      geometry: {
+        type: "Point",
+        coordinates: [sample.lng, sample.lat],
+      },
+      properties: {
+        NAME: captureName("Quick mark"),
+        LAT: Number(sample.lat.toFixed(7)),
+        LON: Number(sample.lng.toFixed(7)),
+        ACCURACY_M: Math.round(sample.accuracy),
+        ALTITUDE_M: sample.altitude === null ? null : Number(sample.altitude.toFixed(1)),
+        MARKER_ICON: MARKER_OPTIONS[1].symbol,
+        ACTIVITY: session?.activity ?? activity,
+        TRACK_KIND: session?.kind ?? null,
+        CAPTURED: new Date().toISOString(),
+        FIELD_SOURCE: "Quick mark during GPS track",
+      },
+    };
+    const existing = current.layers.find(
+      (layer) => layer.groupId === groupId && layer.name === layerName,
+    );
+    if (existing) {
+      current.appendFeature(existing.id, feature);
+    } else {
+      current.addLayer({
+        name: layerName,
+        data: { type: "FeatureCollection", features: [feature] },
+        groupId,
+        source: { kind: "draw" },
+        style: {
+          fillColor: "#f2b73d",
+          strokeColor: "#1e6f43",
+          pointSize: 8,
+          labelEnabled: true,
+          labelTemplate: "{NAME}",
+          labelFields: ["NAME"],
+          labelMinZoom: 14,
+        },
+      });
+    }
+    toast.success("Quick mark dropped", {
+      description: "Tracking is still running. Tap the marker later to add details.",
+    });
+    window.setTimeout(() => void wbRef.current.saveProject("manual"), 300);
+  };
+
   const stopTrack = () => {
     const session = trackRef.current;
     const points = pointsRef.current;
@@ -998,7 +1064,7 @@ export function FieldModule({ active = true }: { active?: boolean }) {
         </section>
       )}
 
-      <section className="panel-surface pointer-events-auto absolute inset-x-2 bottom-[max(.5rem,env(safe-area-inset-bottom))] z-30 rounded-3xl p-2 shadow-float">
+      <section className="field-action-dock panel-surface pointer-events-auto absolute inset-x-2 bottom-[max(.5rem,env(safe-area-inset-bottom))] z-30 rounded-3xl p-2 shadow-float">
         {track ? (
           <div className="space-y-2 p-1">
             <div className="flex items-center gap-3 rounded-2xl bg-secondary px-3 py-2">
@@ -1019,22 +1085,33 @@ export function FieldModule({ active = true }: { active?: boolean }) {
                 </p>
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-3 gap-1.5">
               <button
+                type="button"
                 onClick={() => {
                   const next = { ...track, paused: !track.paused };
                   setTrack(next);
                 }}
-                className="flex items-center justify-center gap-2 rounded-2xl bg-secondary py-3 text-xs font-semibold"
+                className="flex items-center justify-center gap-1 rounded-2xl bg-secondary px-1 py-3 text-[10px] font-semibold"
               >
                 {track.paused ? <Play className="size-4" /> : <Pause className="size-4" />}
                 {track.paused ? "Resume" : "Pause"}
               </button>
               <button
-                onClick={stopTrack}
-                className="flex items-center justify-center gap-2 rounded-2xl bg-red-600 py-3 text-xs font-semibold text-white"
+                type="button"
+                onClick={quickMark}
+                title="Drop a GPS point without stopping this track"
+                className="flex items-center justify-center gap-1 rounded-2xl bg-primary px-1 py-3 text-[10px] font-semibold text-primary-foreground"
               >
-                <CircleStop className="size-4" /> Finish & review
+                <MapPinned className="size-4" /> Quick mark
+              </button>
+              <button
+                type="button"
+                onClick={stopTrack}
+                title="Finish and review this track"
+                className="flex items-center justify-center gap-1 rounded-2xl bg-red-600 px-1 py-3 text-[10px] font-semibold text-white"
+              >
+                <CircleStop className="size-4" /> Finish
               </button>
             </div>
           </div>
@@ -1093,7 +1170,7 @@ export function FieldModule({ active = true }: { active?: boolean }) {
 
       {pending && (
         <div className="fixed inset-0 z-[80] flex items-end bg-foreground/25 p-2 pb-[max(.5rem,env(safe-area-inset-bottom))] backdrop-blur-[2px]">
-          <section className="w-full rounded-3xl border border-border bg-card p-4 shadow-float">
+          <section className="field-capture-sheet w-full rounded-3xl border border-border bg-card p-4 shadow-float">
             <div className="flex items-center justify-between">
               <div>
                 <h2 className="text-sm font-semibold">Save field capture</h2>

@@ -273,6 +273,26 @@
   max-height: min(34dvh, calc(100dvh - 16rem));
 }
 
+.field-action-dock {
+  max-height: calc(100vh - 5rem);
+  max-height: calc(100dvh - 5rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.field-action-dock button {
+  touch-action: manipulation;
+}
+
+.field-capture-sheet {
+  max-height: calc(100vh - 1rem - env(safe-area-inset-top, 0px));
+  max-height: calc(100dvh - 1rem - env(safe-area-inset-top, 0px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
 .app-scroll-viewport {
   position: fixed;
   inset: 0;
@@ -320,6 +340,12 @@
 }
 
 @media (max-width: 47.999rem) {
+  /* iOS Safari zooms the page when a focused field renders below 16px. */
+  .field-capture-sheet input,
+  .field-capture-sheet textarea {
+    font-size: 16px;
+  }
+
   .mobile-field-mode .maplibregl-ctrl-bottom-right,
   .mobile-field-mode .maplibregl-ctrl-bottom-left {
     bottom: calc(7.25rem + env(safe-area-inset-bottom, 0px));
