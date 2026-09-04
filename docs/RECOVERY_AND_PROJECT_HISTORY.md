@@ -252,9 +252,10 @@ until its authenticated server connection exists.
 
 ## Outstanding production integrations to keep visible
 
-- Email intake code is now staged in `202609040001_project_email_intake.sql` and the
-  `resend-inbound` Edge Function. Complete the Resend account, Name.com records, Supabase migration,
-  deployment/secrets, end-to-end test, and written retention policy before showing live addresses.
+- Email intake migration `202609040001_project_email_intake.sql` and the `resend-inbound` Edge
+  Function were deployed to LandDraft Production on September 4, 2026. Complete the Resend account,
+  Name.com records, function secrets, end-to-end test, and written retention policy before showing
+  live addresses.
 - Configure production SMTP for account confirmation, password reset, and sharing notifications.
 - Add a secure server-side AI provider connection before describing the assistant or future
   presentation builder as a general-purpose AI service.
