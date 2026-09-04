@@ -124,6 +124,25 @@ const captureName = (prefix: string) =>
     minute: "2-digit",
   })}`;
 
+const locationFromPosition = (position: GeolocationPosition): FieldLocation | null => {
+  const lng = Number(position.coords.longitude);
+  const lat = Number(position.coords.latitude);
+  if (!Number.isFinite(lng) || !Number.isFinite(lat)) return null;
+  const optionalNumber = (value: number | null) =>
+    value !== null && Number.isFinite(Number(value)) ? Number(value) : null;
+  const accuracy = Number(position.coords.accuracy);
+  const timestamp = Number(position.timestamp);
+  return {
+    lng,
+    lat,
+    accuracy: Number.isFinite(accuracy) ? Math.max(0, accuracy) : 999,
+    altitude: optionalNumber(position.coords.altitude),
+    speed: optionalNumber(position.coords.speed),
+    heading: optionalNumber(position.coords.heading),
+    timestamp: Number.isFinite(timestamp) ? timestamp : Date.now(),
+  };
+};
+
 export function FieldModule({ active = true }: { active?: boolean }) {
   const wb = useWorkbench();
   const { map } = useMapRef();
@@ -192,31 +211,32 @@ export function FieldModule({ active = true }: { active?: boolean }) {
   }, []);
 
   const updateLocation = useCallback((position: GeolocationPosition) => {
-    const next: FieldLocation = {
-      lng: position.coords.longitude,
-      lat: position.coords.latitude,
-      accuracy: position.coords.accuracy,
-      altitude: position.coords.altitude,
-      speed: position.coords.speed,
-      heading: position.coords.heading,
-      timestamp: position.timestamp,
-    };
+    const next = locationFromPosition(position);
+    if (!next) {
+      setGpsStatus("error");
+      setGpsMessage("The device returned an invalid location. Try again outdoors.");
+      return;
+    }
     locationErrorShown.current = false;
     setGpsStatus("active");
     setGpsMessage("");
     setLocation(next);
     const currentMap = mapInstanceRef.current;
     if (currentMap && followRef.current && activeRef.current) {
-      currentMap.easeTo({
-        center: [next.lng, next.lat],
-        zoom: Math.max(currentMap.getZoom(), 16),
-        duration: 500,
-      });
+      try {
+        currentMap.easeTo({
+          center: [next.lng, next.lat],
+          zoom: Math.max(currentMap.getZoom(), 16),
+          duration: 500,
+        });
+      } catch (error) {
+        console.warn("[field] Map could not center on the GPS fix", error);
+      }
     }
     const session = trackRef.current;
     if (!session || session.paused || next.accuracy > 80) return;
     const coordinate: Position = [next.lng, next.lat];
-    const previous = pointsRef.current.at(-1);
+    const previous = pointsRef.current[pointsRef.current.length - 1];
     if (!previous) {
       pointsRef.current = [coordinate];
       lastAcceptedAtRef.current = next.timestamp;
@@ -343,47 +363,57 @@ export function FieldModule({ active = true }: { active?: boolean }) {
       markerRef.current = null;
       return;
     }
-    if (!markerRef.current) {
-      const element = document.createElement("div");
-      element.className = "field-location-dot";
-      element.title = "Current GPS location";
-      markerRef.current = new Marker({ element }).addTo(map);
+    try {
+      if (!markerRef.current) {
+        const element = document.createElement("div");
+        element.className = "field-location-dot";
+        element.title = "Current GPS location";
+        markerRef.current = new Marker({ element }).addTo(map);
+      }
+      markerRef.current.setLngLat([location.lng, location.lat]);
+    } catch (error) {
+      markerRef.current?.remove();
+      markerRef.current = null;
+      console.warn("[field] Current-location marker could not be displayed", error);
     }
-    markerRef.current.setLngLat([location.lng, location.lat]);
   }, [location, map]);
 
   useEffect(() => {
     if (!map) return;
     const drawPreview = () => {
-      if (!map.isStyleLoaded()) return;
-      const geometry: Geometry =
-        track?.kind === "area" && trackPoints.length >= 3
-          ? { type: "Polygon", coordinates: [[...trackPoints, trackPoints[0]!]] }
-          : { type: "LineString", coordinates: trackPoints };
-      const data = {
-        type: "FeatureCollection" as const,
-        features: trackPoints.length
-          ? [{ type: "Feature" as const, properties: {}, geometry }]
-          : [],
-      };
-      const source = map.getSource(FIELD_PREVIEW_SOURCE) as GeoJSONSource | undefined;
-      if (source) source.setData(data);
-      else map.addSource(FIELD_PREVIEW_SOURCE, { type: "geojson", data });
-      if (!map.getLayer(FIELD_PREVIEW_FILL))
-        map.addLayer({
-          id: FIELD_PREVIEW_FILL,
-          type: "fill",
-          source: FIELD_PREVIEW_SOURCE,
-          filter: ["==", ["geometry-type"], "Polygon"],
-          paint: { "fill-color": "#f2b73d", "fill-opacity": 0.22 },
-        });
-      if (!map.getLayer(FIELD_PREVIEW_LINE))
-        map.addLayer({
-          id: FIELD_PREVIEW_LINE,
-          type: "line",
-          source: FIELD_PREVIEW_SOURCE,
-          paint: { "line-color": "#f2b73d", "line-width": 5, "line-opacity": 0.95 },
-        });
+      try {
+        if (!map.isStyleLoaded()) return;
+        const geometry: Geometry =
+          track?.kind === "area" && trackPoints.length >= 3
+            ? { type: "Polygon", coordinates: [[...trackPoints, trackPoints[0]!]] }
+            : { type: "LineString", coordinates: trackPoints };
+        const data = {
+          type: "FeatureCollection" as const,
+          features: trackPoints.length
+            ? [{ type: "Feature" as const, properties: {}, geometry }]
+            : [],
+        };
+        const source = map.getSource(FIELD_PREVIEW_SOURCE) as GeoJSONSource | undefined;
+        if (source) source.setData(data);
+        else map.addSource(FIELD_PREVIEW_SOURCE, { type: "geojson", data });
+        if (!map.getLayer(FIELD_PREVIEW_FILL))
+          map.addLayer({
+            id: FIELD_PREVIEW_FILL,
+            type: "fill",
+            source: FIELD_PREVIEW_SOURCE,
+            filter: ["==", ["geometry-type"], "Polygon"],
+            paint: { "fill-color": "#f2b73d", "fill-opacity": 0.22 },
+          });
+        if (!map.getLayer(FIELD_PREVIEW_LINE))
+          map.addLayer({
+            id: FIELD_PREVIEW_LINE,
+            type: "line",
+            source: FIELD_PREVIEW_SOURCE,
+            paint: { "line-color": "#f2b73d", "line-width": 5, "line-opacity": 0.95 },
+          });
+      } catch (error) {
+        console.warn("[field] Track preview could not be refreshed", error);
+      }
     };
     drawPreview();
     map.on("styledata", drawPreview);
@@ -395,8 +425,13 @@ export function FieldModule({ active = true }: { active?: boolean }) {
   const locate = () => {
     setFollow(true);
     if (!ensureWatch(gpsStatus === "error" || gpsStatus === "denied")) return;
-    if (location)
-      map?.easeTo({ center: [location.lng, location.lat], zoom: Math.max(map.getZoom(), 16) });
+    if (location && map) {
+      try {
+        map.easeTo({ center: [location.lng, location.lat], zoom: Math.max(map.getZoom(), 16) });
+      } catch (error) {
+        console.warn("[field] Map could not center on the saved GPS fix", error);
+      }
+    }
   };
 
   const startTrack = (kind: TrackKind) => {
@@ -499,16 +534,15 @@ export function FieldModule({ active = true }: { active?: boolean }) {
       });
     };
     const stagePosition = (position: GeolocationPosition) => {
+      const sample = locationFromPosition(position);
+      if (!sample) {
+        setGpsStatus("error");
+        setGpsMessage("The device returned an invalid location. Try again outdoors.");
+        toast.error("A GPS point could not be captured");
+        return;
+      }
       updateLocation(position);
-      stagePoint({
-        lng: position.coords.longitude,
-        lat: position.coords.latitude,
-        accuracy: position.coords.accuracy,
-        altitude: position.coords.altitude,
-        speed: position.coords.speed,
-        heading: position.coords.heading,
-        timestamp: position.timestamp,
-      });
+      stagePoint(sample);
     };
     const failPoint = (error: GeolocationPositionError) => {
       const message =
@@ -525,26 +559,40 @@ export function FieldModule({ active = true }: { active?: boolean }) {
     }
     setGpsStatus("requesting");
     setGpsMessage("Finding an accurate point…");
-    navigator.geolocation.getCurrentPosition(
-      stagePosition,
-      (error) => {
-        if (error.code === 1) {
-          failPoint(error);
-          return;
-        }
-        setGpsMessage("Trying a faster location fix…");
-        navigator.geolocation.getCurrentPosition(stagePosition, failPoint, {
-          enableHighAccuracy: false,
-          maximumAge: 30_000,
-          timeout: 12_000,
-        });
-      },
-      {
-        enableHighAccuracy: true,
-        maximumAge: 2_000,
-        timeout: 18_000,
-      },
-    );
+    try {
+      navigator.geolocation.getCurrentPosition(
+        stagePosition,
+        (error) => {
+          if (error.code === 1) {
+            failPoint(error);
+            return;
+          }
+          setGpsMessage("Trying a faster location fix…");
+          try {
+            navigator.geolocation.getCurrentPosition(stagePosition, failPoint, {
+              enableHighAccuracy: false,
+              maximumAge: 30_000,
+              timeout: 12_000,
+            });
+          } catch (caught) {
+            const message = caught instanceof Error ? caught.message : "Location is unavailable";
+            setGpsStatus("error");
+            setGpsMessage(message);
+            toast.error("A GPS point could not be captured", { description: message });
+          }
+        },
+        {
+          enableHighAccuracy: true,
+          maximumAge: 2_000,
+          timeout: 18_000,
+        },
+      );
+    } catch (caught) {
+      const message = caught instanceof Error ? caught.message : "Location is unavailable";
+      setGpsStatus("error");
+      setGpsMessage(message);
+      toast.error("A GPS point could not be captured", { description: message });
+    }
   };
 
   const saveCapture = () => {
@@ -988,7 +1036,16 @@ function FieldAction({
 }) {
   return (
     <button
-      onClick={onClick}
+      type="button"
+      onClick={() => {
+        try {
+          onClick();
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "The field tool could not start";
+          console.error(`[field] ${label} failed`, error);
+          toast.error(`${label} could not start`, { description: message });
+        }
+      }}
       className="flex min-h-14 flex-col items-center justify-center gap-1 rounded-2xl bg-secondary px-1 text-[10px] font-semibold active:bg-accent"
     >
       <span className="[&>svg]:size-5">{icon}</span>
