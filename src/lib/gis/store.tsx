@@ -275,6 +275,7 @@ export interface WorkbenchApi extends WorkbenchState {
   duplicateLayer: (id: string, targetGroupId?: string) => void;
   toggleVisible: (id: string) => void;
   moveLayer: (id: string, direction: -1 | 1) => void;
+  moveLayerToEdge: (id: string, edge: "front" | "back") => void;
   reorderLayer: (id: string, targetGroupId: string, beforeLayerId?: string) => void;
   setLayerGroup: (id: string, groupId: string) => void;
   addGroup: (name: string) => string;
@@ -623,6 +624,17 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       if (!moved) return s;
       layers.splice(target, 0, moved);
       return { ...s, layers };
+    });
+  }, []);
+
+  const moveLayerToEdge = useCallback<WorkbenchApi["moveLayerToEdge"]>((id, edge) => {
+    setState((s) => {
+      const moved = s.layers.find((layer) => layer.id === id);
+      if (!moved) return s;
+      const layers = s.layers.filter((layer) => layer.id !== id);
+      if (edge === "front") layers.unshift(moved);
+      else layers.push(moved);
+      return { ...s, layers, activeLayerId: id, selectedLayerIds: [id] };
     });
   }, []);
 
@@ -1252,6 +1264,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       duplicateLayer,
       toggleVisible,
       moveLayer,
+      moveLayerToEdge,
       reorderLayer,
       setLayerGroup,
       addGroup,
@@ -1326,6 +1339,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       duplicateLayer,
       toggleVisible,
       moveLayer,
+      moveLayerToEdge,
       reorderLayer,
       setLayerGroup,
       addGroup,

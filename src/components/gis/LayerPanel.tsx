@@ -19,6 +19,8 @@ import {
   Tag,
   Pencil,
   Search,
+  ArrowUpToLine,
+  ArrowDownToLine,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -539,6 +541,16 @@ export function LayerPanel() {
                                 label="Duplicate in this category"
                                 onClick={() => wb.duplicateLayer(layer.id)}
                                 icon={<Copy className="size-3.5" />}
+                              />
+                              <IconBtn
+                                label="Bring to front"
+                                onClick={() => wb.moveLayerToEdge(layer.id, "front")}
+                                icon={<ArrowUpToLine className="size-3.5" />}
+                              />
+                              <IconBtn
+                                label="Send to back"
+                                onClick={() => wb.moveLayerToEdge(layer.id, "back")}
+                                icon={<ArrowDownToLine className="size-3.5" />}
                               />
                               <IconBtn
                                 label="Delete"

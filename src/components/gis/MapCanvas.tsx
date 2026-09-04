@@ -240,12 +240,9 @@ export function MapCanvas() {
 
   /* ---------------- layer sync ---------------- */
   const prepared = useMemo(() => {
-    const ordered = [
-      ...wb.groups.flatMap((group) =>
-        wb.displayLayers.filter((layer) => layer.groupId === group.id),
-      ),
-      ...wb.displayLayers.filter((layer) => !wb.groups.some((group) => group.id === layer.groupId)),
-    ];
+    // Project layer-array order is the global draw stack, independent of category/group.
+    // The first layer is frontmost and the final layer is backmost.
+    const ordered = wb.displayLayers;
     const nextCache = new Map<string, PreparedCacheEntry>();
     const result = ordered.map((layer) => {
       const labelKey = layer.style.labelTemplate;
@@ -270,7 +267,7 @@ export function MapCanvas() {
     });
     preparedCacheRef.current = nextCache;
     return result;
-  }, [wb.groups, wb.displayLayers]);
+  }, [wb.displayLayers]);
 
   useEffect(() => {
     const map = mapObj.current;

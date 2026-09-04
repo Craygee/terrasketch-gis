@@ -249,3 +249,14 @@ size, per-feature overrides, and attribute-driven icon rules rendered through Ma
 The project summary, packet selections, saved maps, emails, and documents form the structured input
 for a future server-side presentation generator; no external AI or presentation service is implied
 until its authenticated server connection exists.
+
+## Outstanding production integrations to keep visible
+
+- Configure a LandDraft inbound-email subdomain, MX/DNS records, receiving provider, signed webhook,
+  attachment limits, and retention policy before showing live project BCC addresses.
+- Configure production SMTP for account confirmation, password reset, and sharing notifications.
+- Add a secure server-side AI provider connection before describing the assistant or future
+  presentation builder as a general-purpose AI service.
+- Finish Apple identity-provider enrollment and credentials if Apple sign-in is required.
+- Confirm automated database/storage backups, error monitoring, and public-data connection alerts
+  before broader customer onboarding.
