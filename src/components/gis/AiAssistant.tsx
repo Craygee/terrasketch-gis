@@ -705,7 +705,8 @@ export function AiAssistant() {
             </button>
           </div>
           <p className="mt-1.5 text-center text-[9px] text-muted-foreground">
-            Review assistant selections and public records before relying on them.
+            Shared free AI capacity resets daily; no paid fallback. Review results before relying on
+            them.
           </p>
         </form>
       </aside>

@@ -1,4 +1,5 @@
 const OPENAI_RESPONSES_API = "https://api.openai.com/v1/responses";
+const GROQ_RESPONSES_API = "https://api.groq.com/openai/v1/responses";
 const NOMINATIM_API = "https://nominatim.openstreetmap.org";
 const OVERPASS_API = "https://overpass-api.de/api/interpreter";
 const APP_USER_AGENT = "LandDraft/1.0 (https://landdraft.net)";
@@ -14,7 +15,7 @@ interface AssistantRequest {
   context?: Record<string, unknown>;
 }
 
-interface OpenAiOutputItem {
+interface AiOutputItem {
   type?: string;
   name?: string;
   arguments?: string;
@@ -25,11 +26,31 @@ interface OpenAiOutputItem {
   }>;
 }
 
-interface OpenAiResponse {
+interface AiResponse {
   id?: string;
   output_text?: string;
-  output?: OpenAiOutputItem[];
+  output?: AiOutputItem[];
   error?: { message?: string };
+  usage?: { total_tokens?: number };
+}
+
+type AiProviderName = "groq" | "openai";
+
+interface AiProvider {
+  name: AiProviderName;
+  label: string;
+  endpoint: string;
+  apiKey: string;
+  model: string;
+  browserTool: "browser_search" | "web_search";
+}
+
+interface AiQuota {
+  allowed: boolean;
+  userRequestsRemaining: number;
+  globalRequestsRemaining: number;
+  userTokensRemaining: number;
+  globalTokensRemaining: number;
 }
 
 interface PlaceResult {
@@ -58,6 +79,11 @@ const headers = (request: Request) => ({
 const json = (request: Request, body: unknown, status = 200) =>
   Response.json(body, { status, headers: headers(request) });
 
+const positiveInteger = (value: string | undefined, fallback: number, maximum: number) => {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? Math.min(parsed, maximum) : fallback;
+};
+
 const readPublicKey = () => {
   const direct = Deno.env.get("SUPABASE_ANON_KEY") ?? Deno.env.get("SUPABASE_PUBLISHABLE_KEY");
   if (direct) return direct;
@@ -81,6 +107,115 @@ const authenticate = async (request: Request) => {
   if (!response.ok) return null;
   const user = (await response.json()) as { id?: string };
   return user.id ? user : null;
+};
+
+const configuredProvider = (): AiProvider | null => {
+  const requested = (Deno.env.get("AI_PROVIDER") ?? "groq").trim().toLowerCase();
+  if (requested === "disabled") return null;
+  if (requested === "openai") {
+    const apiKey = Deno.env.get("OPENAI_API_KEY")?.trim() ?? "";
+    return apiKey
+      ? {
+          name: "openai",
+          label: "OpenAI",
+          endpoint: OPENAI_RESPONSES_API,
+          apiKey,
+          model: Deno.env.get("OPENAI_MODEL")?.trim() || "gpt-5-mini",
+          browserTool: "web_search",
+        }
+      : null;
+  }
+  if (requested !== "groq") throw new Error(`Unsupported AI provider: ${requested}`);
+  const apiKey = Deno.env.get("GROQ_API_KEY")?.trim() ?? "";
+  return apiKey
+    ? {
+        name: "groq",
+        label: "Groq free AI",
+        endpoint: GROQ_RESPONSES_API,
+        apiKey,
+        model: Deno.env.get("GROQ_MODEL")?.trim() || "openai/gpt-oss-120b",
+        browserTool: "browser_search",
+      }
+    : null;
+};
+
+const consumeAiQuota = async (userId: string, reservedTokens: number): Promise<AiQuota> => {
+  const url = Deno.env.get("SUPABASE_URL") ?? "";
+  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+  if (!url || !serviceRoleKey) throw new Error("The LandDraft AI quota service is unavailable");
+
+  const response = await fetch(`${url}/rest/v1/rpc/consume_ai_daily_quota`, {
+    method: "POST",
+    headers: {
+      apikey: serviceRoleKey,
+      Authorization: `Bearer ${serviceRoleKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      p_user_id: userId,
+      p_reserved_tokens: reservedTokens,
+      p_user_request_limit: positiveInteger(Deno.env.get("AI_DAILY_USER_REQUESTS"), 20, 500),
+      p_global_request_limit: positiveInteger(
+        Deno.env.get("AI_DAILY_GLOBAL_REQUESTS"),
+        200,
+        10_000,
+      ),
+      p_user_token_limit: positiveInteger(Deno.env.get("AI_DAILY_USER_TOKENS"), 40_000, 2_000_000),
+      p_global_token_limit: positiveInteger(
+        Deno.env.get("AI_DAILY_GLOBAL_TOKENS"),
+        180_000,
+        20_000_000,
+      ),
+    }),
+  });
+  if (!response.ok) throw new Error(`The LandDraft AI quota check failed (${response.status})`);
+  const rows = (await response.json()) as Array<{
+    allowed?: boolean;
+    user_requests_remaining?: number;
+    global_requests_remaining?: number;
+    user_tokens_remaining?: number;
+    global_tokens_remaining?: number;
+  }>;
+  const row = rows[0];
+  if (!row) throw new Error("The LandDraft AI quota check returned no result");
+  return {
+    allowed: Boolean(row.allowed),
+    userRequestsRemaining: Number(row.user_requests_remaining ?? 0),
+    globalRequestsRemaining: Number(row.global_requests_remaining ?? 0),
+    userTokensRemaining: Number(row.user_tokens_remaining ?? 0),
+    globalTokensRemaining: Number(row.global_tokens_remaining ?? 0),
+  };
+};
+
+const recordAiUsage = async (userId: string, actualTokens: number) => {
+  if (!Number.isFinite(actualTokens) || actualTokens <= 0) return;
+  const url = Deno.env.get("SUPABASE_URL") ?? "";
+  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+  if (!url || !serviceRoleKey) return;
+  await fetch(`${url}/rest/v1/rpc/record_ai_actual_usage`, {
+    method: "POST",
+    headers: {
+      apikey: serviceRoleKey,
+      Authorization: `Bearer ${serviceRoleKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ p_user_id: userId, p_actual_tokens: Math.round(actualTokens) }),
+  }).catch(() => undefined);
+};
+
+const releaseAiQuota = async (userId: string, reservedTokens: number) => {
+  const url = Deno.env.get("SUPABASE_URL") ?? "";
+  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+  if (!url || !serviceRoleKey) return;
+  await fetch(`${url}/rest/v1/rpc/release_ai_daily_quota`, {
+    method: "POST",
+    headers: {
+      apikey: serviceRoleKey,
+      Authorization: `Bearer ${serviceRoleKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ p_user_id: userId, p_reserved_tokens: reservedTokens }),
+  }).catch(() => undefined);
 };
 
 const LANDDRAFT_MANUAL = `
@@ -411,7 +546,7 @@ const parseArguments = (raw: string | undefined) => {
   }
 };
 
-const collectSources = (response: OpenAiResponse) => {
+const collectSources = (response: AiResponse) => {
   const sources = new Map<string, string>();
   for (const item of response.output ?? []) {
     for (const content of item.content ?? []) {
@@ -424,7 +559,7 @@ const collectSources = (response: OpenAiResponse) => {
   return Array.from(sources, ([url, title]) => ({ title, url })).slice(0, 12);
 };
 
-const responseText = (response: OpenAiResponse) => {
+const responseText = (response: AiResponse) => {
   if (response.output_text?.trim()) return response.output_text.trim();
   return (response.output ?? [])
     .flatMap((item) => item.content ?? [])
@@ -451,13 +586,13 @@ Deno.serve(async (request) => {
     if (directPlace)
       return json(request, await searchPlaces(directPlace.query, directPlace.location));
 
-    const apiKey = Deno.env.get("OPENAI_API_KEY");
-    if (!apiKey)
+    const provider = configuredProvider();
+    if (!provider)
       return json(
         request,
         {
           error:
-            "LandDraft AI is awaiting its server-side OpenAI connection. Add OPENAI_API_KEY to Supabase Edge Function secrets.",
+            "LandDraft’s free AI connection is not configured yet. Map tools and place searches remain available.",
         },
         503,
       );
@@ -468,30 +603,81 @@ Deno.serve(async (request) => {
           (message.role === "assistant" || message.role === "user") &&
           typeof message.text === "string",
       )
-      .slice(-14)
-      .map((message) => ({ role: message.role, content: message.text.slice(0, 2_000) }));
-    const projectContext = JSON.stringify(body.context ?? {}).slice(0, 80_000);
-    const openAiResponse = await fetch(OPENAI_RESPONSES_API, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: Deno.env.get("OPENAI_MODEL") ?? "gpt-5-mini",
-        instructions: `${LANDDRAFT_MANUAL}\nCURRENT LANDDRAFT PROJECT CONTEXT\n${projectContext}`,
-        input: [...messages, { role: "user", content: prompt }],
-        tools: [{ type: "web_search" }, landDraftActionTool, searchPlacesTool],
-        tool_choice: "auto",
-        max_output_tokens: 1_500,
-        store: false,
-        safety_identifier: user.id,
-        include: ["web_search_call.action.sources"],
-      }),
-    });
-    const response = (await openAiResponse.json()) as OpenAiResponse;
-    if (!openAiResponse.ok)
-      throw new Error(response.error?.message ?? `AI service returned ${openAiResponse.status}`);
+      .slice(-8)
+      .map((message) => ({ role: message.role, content: message.text.slice(0, 900) }));
+    const projectContext = JSON.stringify(body.context ?? {}).slice(0, 18_000);
+    const maxOutputTokens = positiveInteger(Deno.env.get("AI_MAX_OUTPUT_TOKENS"), 700, 2_000);
+    const estimatedInputCharacters =
+      LANDDRAFT_MANUAL.length +
+      projectContext.length +
+      prompt.length +
+      messages.reduce((total, message) => total + message.content.length, 0);
+    const reservedTokens = Math.ceil(estimatedInputCharacters / 4) + maxOutputTokens;
+    const quota = await consumeAiQuota(user.id, reservedTokens);
+    if (!quota.allowed)
+      return json(
+        request,
+        {
+          error:
+            "LandDraft’s shared free AI capacity has been reached for today. No paid fallback was used; try again after the daily reset. Map tools and place searches still work.",
+          quota,
+        },
+        429,
+      );
+
+    const providerPayload: Record<string, unknown> = {
+      model: provider.model,
+      instructions: `${LANDDRAFT_MANUAL}\nCURRENT LANDDRAFT PROJECT CONTEXT\n${projectContext}`,
+      input: [...messages, { role: "user", content: prompt }],
+      tools: [{ type: provider.browserTool }, landDraftActionTool, searchPlacesTool],
+      tool_choice: "auto",
+      max_output_tokens: maxOutputTokens,
+    };
+    if (provider.name === "openai") {
+      providerPayload["store"] = false;
+      providerPayload["safety_identifier"] = user.id;
+      providerPayload["include"] = ["web_search_call.action.sources"];
+    } else {
+      providerPayload["reasoning"] = { effort: "low" };
+      providerPayload["user"] = user.id;
+    }
+
+    let aiResponse: Response;
+    try {
+      aiResponse = await fetch(provider.endpoint, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${provider.apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(providerPayload),
+      });
+    } catch (error) {
+      await releaseAiQuota(user.id, reservedTokens);
+      throw error;
+    }
+    let response: AiResponse;
+    try {
+      response = (await aiResponse.json()) as AiResponse;
+    } catch (error) {
+      await releaseAiQuota(user.id, reservedTokens);
+      throw error;
+    }
+    if (!aiResponse.ok) {
+      await releaseAiQuota(user.id, reservedTokens);
+      if (aiResponse.status === 429)
+        return json(
+          request,
+          {
+            error:
+              "LandDraft’s free AI provider is at capacity. No paid fallback was used; please try again later.",
+            quota,
+          },
+          429,
+        );
+      throw new Error(response.error?.message ?? `${provider.label} returned ${aiResponse.status}`);
+    }
+    await recordAiUsage(user.id, response.usage?.total_tokens ?? 0);
 
     const actions: Array<Record<string, unknown>> = [];
     for (const item of response.output ?? []) {
@@ -500,7 +686,12 @@ Deno.serve(async (request) => {
       if (item.name === "search_places") {
         const query = typeof args["query"] === "string" ? args["query"] : "";
         const location = typeof args["location"] === "string" ? args["location"] : "";
-        if (query && location) return json(request, await searchPlaces(query, location));
+        if (query && location)
+          return json(request, {
+            ...(await searchPlaces(query, location)),
+            provider: provider.name,
+            quota,
+          });
       }
       if (item.name === "landdraft_action") {
         const action = typeof args["action"] === "string" ? args["action"] : "";
@@ -517,6 +708,8 @@ Deno.serve(async (request) => {
           : "I could not form a reliable answer from the current project context."),
       actions,
       sources: collectSources(response),
+      provider: provider.name,
+      quota,
     });
   } catch (error) {
     console.error("[gis-assistant]", error);

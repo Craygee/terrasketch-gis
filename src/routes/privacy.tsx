@@ -72,11 +72,12 @@ function Privacy() {
           subject to the publishing agency&apos;s terms and update schedule. When you use LandDraft
           AI, your request, limited recent assistant history, and a size-limited summary of the
           active project&apos;s layers, fields, sample values, and selection are securely sent
-          through LandDraft&apos;s server to OpenAI for an answer or supported map action. Live
-          place searches may also send the requested place/category and area to OpenStreetMap
-          services. Assistant requests are saved with the project so recent changes can be reviewed
-          or reverted. Do not submit secrets or highly sensitive personal information to the
-          assistant.
+          through LandDraft&apos;s server to the configured AI inference provider for an answer or
+          supported map action. The free beta provider is Groq; a different provider may be selected
+          by LandDraft in the future without exposing its credentials to the browser. Live place
+          searches may also send the requested place/category and area to OpenStreetMap services.
+          Assistant requests are saved with the project so recent changes can be reviewed or
+          reverted. Do not submit secrets or highly sensitive personal information to the assistant.
         </p>
       </PublicSection>
       <PublicSection title="Shared maps">

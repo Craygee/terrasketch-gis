@@ -34,6 +34,14 @@ export interface RemoteAssistantResponse {
   answer: string;
   actions: RemoteAssistantAction[];
   sources: Array<{ title: string; url: string }>;
+  provider?: "groq" | "openai";
+  quota?: {
+    allowed: boolean;
+    userRequestsRemaining: number;
+    globalRequestsRemaining: number;
+    userTokensRemaining: number;
+    globalTokensRemaining: number;
+  };
 }
 
 interface AssistantContextInput {
@@ -57,7 +65,7 @@ const featureProperties = (feature: Feature | undefined) => {
   return Object.fromEntries(
     Object.entries(feature.properties)
       .filter(([key]) => !key.startsWith("__"))
-      .slice(0, 30)
+      .slice(0, 20)
       .map(([key, value]) => [key, safeValue(value)]),
   );
 };
@@ -71,16 +79,16 @@ const layerContext = (layer: GisLayer) => {
     geometryCounts[feature.geometry.type] = (geometryCounts[feature.geometry.type] ?? 0) + 1;
   }
   const sampleValues = Object.fromEntries(
-    fields.slice(0, 25).map((field) => [
+    fields.slice(0, 12).map((field) => [
       field,
       Array.from(
         new Set(
           layer.data.features
-            .slice(0, 250)
+            .slice(0, 100)
             .map((feature) => safeValue(feature.properties?.[field]))
             .filter((value) => value !== null && value !== ""),
         ),
-      ).slice(0, 8),
+      ).slice(0, 5),
     ]),
   );
   return {
@@ -115,7 +123,15 @@ export function buildAssistantContext(input: AssistantContextInput) {
         0,
       ),
     },
-    layers: input.layers.slice(0, 100).map(layerContext),
+    layers: Array.from(
+      new Map(
+        [input.activeLayer, ...input.layers]
+          .filter((layer): layer is GisLayer => Boolean(layer))
+          .map((layer) => [layer.id, layer]),
+      ).values(),
+    )
+      .slice(0, 40)
+      .map(layerContext),
     selection: input.selectedFeatures.slice(0, 50).flatMap((selection) => {
       const layer = input.layers.find((item) => item.id === selection.layerId);
       const feature = layer?.data.features[selection.index];
@@ -147,8 +163,8 @@ export async function askLandDraftAssistant(input: {
           message.text.trim() === input.prompt.trim()
         ),
     )
-    .slice(-14)
-    .map(({ role, text }) => ({ role, text: text.slice(0, 2_000) }));
+    .slice(-8)
+    .map(({ role, text }) => ({ role, text: text.slice(0, 900) }));
   return cloudFunctionRequest<RemoteAssistantResponse>("gis-assistant", {
     prompt: input.prompt.slice(0, 4_000),
     messages: recentMessages,

@@ -21,6 +21,8 @@ dist-ssr
 supabase/functions/.env
 supabase/.temp/
 .local-backups/
+.codex-lovable-sync/
+.pnpm-store/
 
 # Wrangler / Cloudflare
 .wrangler/

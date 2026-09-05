@@ -83,21 +83,32 @@ choice.
 ## LandDraft AI and live web research
 
 The browser never receives an AI provider key. LandDraft sends an authenticated, size-limited map
-summary to the `gis-assistant` Supabase Edge Function. That function verifies the signed-in user and
-then uses the OpenAI Responses API for product guidance, current-project questions, supported map
-actions, and live web research. Named place searches use current OpenStreetMap/Nominatim/Overpass
-records and return a reviewable Working-layer draft.
+summary to the `gis-assistant` Supabase Edge Function. That function verifies the signed-in user,
+enforces per-user and site-wide daily limits, and routes open-ended questions to the explicitly
+configured provider. There is no automatic paid fallback. Named place searches use current
+OpenStreetMap/Nominatim/Overpass records and return a reviewable Working-layer draft without using
+the inference quota.
 
-1. Create a restricted OpenAI API project/key for LandDraft and set a monthly usage budget/alert.
-2. Add `OPENAI_API_KEY` to **Supabase → Edge Functions → Secrets**. Optionally set `OPENAI_MODEL`;
-   the function defaults to `gpt-5-mini`.
-3. Deploy `supabase/functions/gis-assistant`. Keep gateway JWT verification enabled, as configured
+1. Run `supabase/migrations/202609050001_ai_usage_quota.sql` in production. Its counters are
+   inaccessible to browser clients and serialize updates so concurrent requests cannot exceed the
+   configured allocation.
+2. For the free beta, create a Groq project/key without adding paid fallback billing. Add
+   `GROQ_API_KEY` and `AI_PROVIDER=groq` to **Supabase → Edge Functions → Secrets**. The default model
+   is `openai/gpt-oss-120b`; `GROQ_MODEL` can explicitly replace it.
+3. Optional server-only limits are `AI_DAILY_USER_REQUESTS` (20), `AI_DAILY_GLOBAL_REQUESTS` (200),
+   `AI_DAILY_USER_TOKENS` (40000), `AI_DAILY_GLOBAL_TOKENS` (180000), and `AI_MAX_OUTPUT_TOKENS`
+   (700). Token reservations, rather than the larger request allowance, normally protect the free
+   organization limit first.
+4. The provider switch also accepts `AI_PROVIDER=disabled`. An OpenAI project can be used only by
+   explicitly setting `AI_PROVIDER=openai` and `OPENAI_API_KEY`; Groq failures never fall through to
+   it automatically.
+5. Deploy `supabase/functions/gis-assistant`. Keep gateway JWT verification enabled, as configured
    in `supabase/config.toml`. The function also validates the current user token against the
    project's Auth service before processing any request.
-4. Test a help question, a current-project question, an attribute selection, and a live place query
+6. Test a help question, a current-project question, an attribute selection, and a live place query
    such as “Show me all libraries in Midland, Texas.” Verify the returned source links and inspect
    imported public records before relying on them.
-5. Never put `OPENAI_API_KEY` in `.env`, `.env.example`, GitHub, Lovable browser variables, or client
+7. Never put any provider key in `.env`, `.env.example`, GitHub, Lovable browser variables, or client
    code. Rotate the key immediately if it is ever exposed.
 
 ## Production email intake and SMTP

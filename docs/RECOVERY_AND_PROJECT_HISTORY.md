@@ -79,8 +79,9 @@ TypeScript 5.8, React 19, Vite 8, MapLibre GL 6, Turf 7, TanStack Start, and Sup
 
 - Supabase project reference: `txgbeskieqvvptgtjyou`.
 - Supabase base URL: `https://txgbeskieqvvptgtjyou.supabase.co`.
-- The authenticated `gis-assistant` Edge Function is the only OpenAI integration point. Its
-  `OPENAI_API_KEY` is a Supabase server secret and must never be committed or exposed to the app.
+- The authenticated `gis-assistant` Edge Function is the only hosted-AI integration point. It uses
+  an explicit provider switch, defaults to Groq's free GPT-OSS service, has no automatic paid
+  fallback, and keeps every provider key in Supabase server secrets.
 - OAuth callback: `https://txgbeskieqvvptgtjyou.supabase.co/auth/v1/callback`.
 - Browser environment keys: `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`.
 - Only the publishable browser key is present in the repository environment. Authorization is
@@ -95,6 +96,9 @@ Database definition and security are versioned in:
 1. `supabase/migrations/202608220001_cloud_workspace.sql`
 2. `supabase/migrations/202608230001_secure_project_creation.sql`
 3. `supabase/migrations/202608230002_project_hierarchy.sql`
+4. `supabase/migrations/202608260001_secure_map_sharing.sql`
+5. `supabase/migrations/202609040001_project_email_intake.sql`
+6. `supabase/migrations/202609050001_ai_usage_quota.sql`
 
 The schema provides private projects, memberships, compressed content-addressed snapshot paths,
 25-entry restore history, project hierarchy, guarded project creation, RLS, and private project
@@ -260,9 +264,10 @@ send whole project files or private stored documents to the model.
   Name.com records, function secrets, end-to-end test, and written retention policy before showing
   live addresses.
 - Configure production SMTP for account confirmation, password reset, and sharing notifications.
-- Deploy the authenticated `gis-assistant` Edge Function, set its server-only `OPENAI_API_KEY`, and
-  verify help, map-action, project-query, and live-web requests before describing it as production
-  ready. The future presentation builder remains a separate integration.
+- Run the AI quota migration, deploy the authenticated `gis-assistant` Edge Function, set
+  `AI_PROVIDER=groq` and its server-only `GROQ_API_KEY`, then verify help, map-action, project-query,
+  and live-web requests. Provider failures must not invoke a paid fallback. The future presentation
+  builder remains a separate integration.
 - Finish Apple identity-provider enrollment and credentials if Apple sign-in is required.
 - Confirm automated database/storage backups, error monitoring, and public-data connection alerts
   before broader customer onboarding.
