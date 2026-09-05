@@ -12,6 +12,7 @@ import {
 import "maplibre-gl/dist/maplibre-gl.css";
 import mapLibreWorkerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
 import type { Feature, FeatureCollection, Geometry, Position } from "geojson";
+import { bbox as turfBbox } from "@turf/turf";
 import { toast } from "sonner";
 import {
   Copy,
@@ -133,6 +134,7 @@ export function MapCanvas() {
   const orderSignatureRef = useRef("");
   const selectedStateRef = useRef(new Map<string, Set<number>>());
   const appliedProjectRef = useRef("");
+  const fittedShareRef = useRef("");
 
   const drawModeRef = useRef(wb.drawMode);
   drawModeRef.current = wb.drawMode;
@@ -211,6 +213,31 @@ export function MapCanvas() {
       pitch: wb.mapView.pitch,
     });
   }, [ready, wb.activeShare?.id, wb.activeShare?.updatedAt, wb.mapView, wb.projectId]);
+
+  useEffect(() => {
+    const map = mapObj.current;
+    const share = wb.activeShare;
+    if (!map || !ready || !share) return;
+    const shareKey = `${share.id}:${share.updatedAt}`;
+    if (fittedShareRef.current === shareKey) return;
+    const features = wb.displayLayers.flatMap((layer) => layer.data.features);
+    if (!features.length) return;
+    const bounds = turfBbox({ type: "FeatureCollection", features });
+    if (bounds.length !== 4 || !bounds.every(Number.isFinite)) return;
+    fittedShareRef.current = shareKey;
+    map.resize();
+    const [west, south, east, north] = bounds;
+    if (west === east && south === north) {
+      map.jumpTo({ center: [west, south], zoom: Math.max(map.getZoom(), 16) });
+      return;
+    }
+    const compact = map.getContainer().clientWidth < 700;
+    map.fitBounds([west, south, east, north], {
+      padding: compact ? 36 : 72,
+      maxZoom: 16,
+      duration: 0,
+    });
+  }, [ready, wb.activeShare, wb.displayLayers]);
 
   useEffect(() => {
     const applyVerifiedBasemap = (event: Event) => {

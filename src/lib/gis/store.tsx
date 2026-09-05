@@ -199,7 +199,13 @@ const normalizedProject = (
     autosave: project.autosave,
     lastSavedAt: project.updatedAt,
     groups,
-    layers: stored.layers.map((layer, index) => durableLayer(normalizedLayer(layer, index))),
+    // Viewer/editor shares contain the exact feature snapshot chosen by the owner. Keep that
+    // snapshot long enough for the first-open map extent to include every shared feature; normal
+    // owner projects still discard viewport caches and reload them efficiently.
+    layers: stored.layers.map((layer, index) => {
+      const normalized = normalizedLayer(layer, index);
+      return activeShare && accessRole !== "admin" ? normalized : durableLayer(normalized);
+    }),
     basemapId: stored.basemapId,
     mapView: activeShare?.mapView ??
       stored.mapView ?? {

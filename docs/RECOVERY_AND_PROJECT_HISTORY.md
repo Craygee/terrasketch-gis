@@ -79,6 +79,8 @@ TypeScript 5.8, React 19, Vite 8, MapLibre GL 6, Turf 7, TanStack Start, and Sup
 
 - Supabase project reference: `txgbeskieqvvptgtjyou`.
 - Supabase base URL: `https://txgbeskieqvvptgtjyou.supabase.co`.
+- The authenticated `gis-assistant` Edge Function is the only OpenAI integration point. Its
+  `OPENAI_API_KEY` is a Supabase server secret and must never be committed or exposed to the app.
 - OAuth callback: `https://txgbeskieqvvptgtjyou.supabase.co/auth/v1/callback`.
 - Browser environment keys: `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`.
 - Only the publishable browser key is present in the repository environment. Authorization is
@@ -247,8 +249,9 @@ without changing the live project map. Search results can be added directly to a
 Point symbology supports a compact built-in icon catalog, custom color or inherited fill color,
 size, per-feature overrides, and attribute-driven icon rules rendered through MapLibre expressions.
 The project summary, packet selections, saved maps, emails, and documents form the structured input
-for a future server-side presentation generator; no external AI or presentation service is implied
-until its authenticated server connection exists.
+for a future server-side presentation generator. The map assistant itself uses only an
+authenticated, size-limited project summary through the `gis-assistant` Edge Function; it does not
+send whole project files or private stored documents to the model.
 
 ## Outstanding production integrations to keep visible
 
@@ -257,8 +260,9 @@ until its authenticated server connection exists.
   Name.com records, function secrets, end-to-end test, and written retention policy before showing
   live addresses.
 - Configure production SMTP for account confirmation, password reset, and sharing notifications.
-- Add a secure server-side AI provider connection before describing the assistant or future
-  presentation builder as a general-purpose AI service.
+- Deploy the authenticated `gis-assistant` Edge Function, set its server-only `OPENAI_API_KEY`, and
+  verify help, map-action, project-query, and live-web requests before describing it as production
+  ready. The future presentation builder remains a separate integration.
 - Finish Apple identity-provider enrollment and credentials if Apple sign-in is required.
 - Confirm automated database/storage backups, error monitoring, and public-data connection alerts
   before broader customer onboarding.

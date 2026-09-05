@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 
 import { PublicPage, PublicSection } from "@/components/brand/PublicPage";
 
-const updated = "August 26, 2026";
+const updated = "September 5, 2026";
 
 export const Route = createFileRoute("/privacy")({
   head: () => ({
@@ -69,10 +69,14 @@ function Privacy() {
       <PublicSection title="Files, public data and assistant requests">
         <p>
           Files you import remain part of your project unless you remove them. Public records remain
-          subject to the publishing agency&apos;s terms and update schedule. LandDraft&apos;s
-          current map assistant processes its supported map commands inside the application;
-          requests are saved with the project so recent assistant changes can be reviewed or
-          reverted.
+          subject to the publishing agency&apos;s terms and update schedule. When you use LandDraft
+          AI, your request, limited recent assistant history, and a size-limited summary of the
+          active project&apos;s layers, fields, sample values, and selection are securely sent
+          through LandDraft&apos;s server to OpenAI for an answer or supported map action. Live
+          place searches may also send the requested place/category and area to OpenStreetMap
+          services. Assistant requests are saved with the project so recent changes can be reviewed
+          or reverted. Do not submit secrets or highly sensitive personal information to the
+          assistant.
         </p>
       </PublicSection>
       <PublicSection title="Shared maps">

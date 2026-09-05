@@ -80,6 +80,25 @@ choice.
 4. Test password recovery and confirmation redirects on production and preview URLs.
 5. Check database size, egress, authentication usage, and backup status monthly.
 
+## LandDraft AI and live web research
+
+The browser never receives an AI provider key. LandDraft sends an authenticated, size-limited map
+summary to the `gis-assistant` Supabase Edge Function. That function verifies the signed-in user and
+then uses the OpenAI Responses API for product guidance, current-project questions, supported map
+actions, and live web research. Named place searches use current OpenStreetMap/Nominatim/Overpass
+records and return a reviewable Working-layer draft.
+
+1. Create a restricted OpenAI API project/key for LandDraft and set a monthly usage budget/alert.
+2. Add `OPENAI_API_KEY` to **Supabase → Edge Functions → Secrets**. Optionally set `OPENAI_MODEL`;
+   the function defaults to `gpt-5-mini`.
+3. Deploy `supabase/functions/gis-assistant`. JWT verification must remain enabled, as configured in
+   `supabase/config.toml`.
+4. Test a help question, a current-project question, an attribute selection, and a live place query
+   such as “Show me all libraries in Midland, Texas.” Verify the returned source links and inspect
+   imported public records before relying on them.
+5. Never put `OPENAI_API_KEY` in `.env`, `.env.example`, GitHub, Lovable browser variables, or client
+   code. Rotate the key immediately if it is ever exposed.
+
 ## Production email intake and SMTP
 
 LandDraft uses Resend for the first production email integration because one verified provider can

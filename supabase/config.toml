@@ -3,3 +3,5 @@ project_id = "landdraft"
 [functions.resend-inbound]
 verify_jwt = false
 
+[functions.gis-assistant]
+verify_jwt = true

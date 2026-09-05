@@ -1,13 +1,21 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowUp, Database, FileText, History, Sparkles, Undo2, X } from "lucide-react";
 import { toast } from "sonner";
+import { bbox as turfBbox } from "@turf/turf";
 
 import { useWorkbench } from "@/lib/gis/store";
 import { useMapRef } from "@/lib/gis/mapRef";
 import { exportAnalysisReportPdf } from "@/lib/gis/mapPdf";
 import type { AssistantAction, AssistantMessage, GisLayer } from "@/lib/gis/types";
 import type { ProjectVersion } from "@/lib/gis/project";
-import { propertyKeys } from "@/lib/gis/labels";
+import { buildLabelTemplate, propertyKeys } from "@/lib/gis/labels";
+import { defaultMarkerIcon } from "@/lib/gis/markerIcons";
+import {
+  askLandDraftAssistant,
+  assistantFeatureCollection,
+  buildAssistantContext,
+  type RemoteAssistantAction,
+} from "@/lib/gis/assistantApi";
 
 type Operator = "contains" | "equals" | "starts" | "greater" | "less";
 
@@ -44,6 +52,7 @@ export function AiAssistant() {
     setTableOpen,
     setAnalysisOpen,
     setPrintOpen,
+    setRecordsOpen,
     map,
   } = useMapRef();
   const [messages, setMessages] = useState<AssistantMessage[]>(
@@ -149,6 +158,143 @@ export function AiAssistant() {
     return { count: matches.length, features: matches.map(({ feature }) => feature) };
   };
 
+  const executeRemoteAction = async (request: string, action: RemoteAssistantAction) => {
+    if (action.type === "add_place_layer") {
+      const collection = assistantFeatureCollection(action.features);
+      if (!collection.features.length) return "No outside map locations were returned.";
+      setPendingFeatureSave({
+        features: collection.features.map((feature) => structuredClone(feature)),
+        suggestedLayerName: action.suggestedLayerName || "Outside place search",
+        defaultGroupId: wb.derivedLayerGroupId,
+        source: {
+          kind: "derived",
+          sourceLayerId: "landdraft-ai:openstreetmap",
+          query: action.query || request,
+        },
+        style: {
+          pointIcon: defaultMarkerIcon.symbol,
+          pointIconSize: 1,
+          labelEnabled: true,
+          labelFields: ["NAME"],
+          labelTemplate: "{NAME}",
+        },
+      });
+      if (map) {
+        const bounds = turfBbox(collection);
+        if (bounds.length === 4 && bounds.every(Number.isFinite)) {
+          const [west, south, east, north] = bounds;
+          if (west === east && south === north) map.flyTo({ center: [west, south], zoom: 16 });
+          else map.fitBounds([west, south, east, north], { padding: 80, maxZoom: 16 });
+        }
+      }
+      return `Prepared ${collection.features.length.toLocaleString()} place result${collection.features.length === 1 ? "" : "s"} as a new Working layer.`;
+    }
+
+    if (action.type === "open_panel") {
+      if (action.panel === "public_data") {
+        setDrawerOpen(true);
+        setPendingCatalogQuery("");
+      } else if (action.panel === "table") setTableOpen(true);
+      else if (action.panel === "analysis") setAnalysisOpen(true);
+      else if (action.panel === "print") setPrintOpen(true);
+      else if (action.panel === "records") setRecordsOpen(true);
+      return action.panel ? `Opened ${action.panel.replace("_", " ")}.` : "";
+    }
+
+    const layer = action.layerName ? findLayerByName(action.layerName, wb.layers) : null;
+    if (!layer) return `I could not match the requested layer “${action.layerName ?? ""}”.`;
+
+    if (action.type === "zoom_to_layer") {
+      if (!map || !layer.data.features.length)
+        return `“${layer.name}” has no loaded features to zoom to.`;
+      const bounds = turfBbox(layer.data);
+      if (bounds.length === 4 && bounds.every(Number.isFinite))
+        map.fitBounds(bounds as [number, number, number, number], { padding: 80, maxZoom: 17 });
+      return `Zoomed to “${layer.name}”.`;
+    }
+
+    if (action.type === "set_layer_visibility") {
+      const visible = action.visible ?? true;
+      if (layer.visible !== visible)
+        await mutate(request, `${visible ? "Showed" : "Hid"} “${layer.name}”`, () =>
+          wb.toggleVisible(layer.id),
+        );
+      return `“${layer.name}” is ${visible ? "visible" : "hidden"}.`;
+    }
+
+    if (action.type === "rename_layer") {
+      const targetName = action.targetName?.trim();
+      if (!targetName) return "Tell me the new layer name.";
+      await mutate(request, `Renamed “${layer.name}” to “${targetName}”`, () =>
+        wb.updateLayer(layer.id, { name: targetName }),
+      );
+      return `Renamed “${layer.name}” to “${targetName}”.`;
+    }
+
+    if (action.type === "select_features") {
+      const field = propertyKeys(layer.data.features as never).find(
+        (item) => item.toLowerCase() === action.field?.toLowerCase(),
+      );
+      if (!field || !action.value) return `I need a valid field and value for “${layer.name}”.`;
+      const result = executeFilter(
+        layer,
+        field,
+        action.operator ?? "contains",
+        action.value,
+        Boolean(action.createLayer),
+      );
+      return action.createLayer
+        ? `Selected ${result.count.toLocaleString()} matches and opened the New layer dialog.`
+        : `Selected ${result.count.toLocaleString()} matches in “${layer.name}”.`;
+    }
+
+    if (action.type === "set_labels") {
+      const available = propertyKeys(layer.data.features as never);
+      const fields = (action.labelFields ?? []).flatMap((requested) => {
+        const match = available.find((field) => field.toLowerCase() === requested.toLowerCase());
+        return match ? [match] : [];
+      });
+      if (!fields.length) return `I could not match those label fields in “${layer.name}”.`;
+      await mutate(request, `Labeled “${layer.name}” by ${fields.join(" + ")}`, () =>
+        wb.updateStyle(layer.id, {
+          labelEnabled: true,
+          labelFields: fields,
+          labelTemplate: buildLabelTemplate(fields, layer.style.labelSeparator),
+        }),
+      );
+      return `Turned on labels for “${layer.name}” using ${fields.join(" + ")}.`;
+    }
+
+    if (action.type === "style_by_attribute") {
+      const field = propertyKeys(layer.data.features as never).find(
+        (item) => item.toLowerCase() === action.field?.toLowerCase(),
+      );
+      if (!field) return `I could not match that style field in “${layer.name}”.`;
+      const values = Array.from(
+        new Set(layer.data.features.map((feature) => String(feature.properties?.[field] ?? ""))),
+      ).slice(0, 100);
+      await mutate(request, `Colored “${layer.name}” by ${field}`, () =>
+        wb.updateStyle(layer.id, {
+          categorized: {
+            enabled: true,
+            field,
+            rules: values.map((value, index) => ({
+              value,
+              label: value || "No value",
+              color: colors[index % colors.length] ?? "#2f7d4f",
+              visible: true,
+            })),
+            fallbackColor: layer.style.fillColor,
+            fallbackVisible: true,
+          },
+        }),
+      );
+      return `Colored “${layer.name}” by ${field}.`;
+    }
+
+    return "";
+  };
+
   const createReport = async (summary: string, resultFeatures?: GisLayer["data"]["features"]) => {
     if (!map) throw new Error("The map is still opening");
     const selected = wb.selectedFeatures.flatMap((selection) => {
@@ -188,11 +334,10 @@ export function AiAssistant() {
       // “How do I rename a layer?” is incorrectly treated as an incomplete rename command.
       if (isGuidanceQuestion(lower)) {
         const guidance = helpAnswer(lower);
-        answer(
-          guidance ??
-            "I can guide you through LandDraft’s map, layer, drawing, selection, analysis, print, project, and account tools. Tell me the result you want—for example, “How do I create a layer from selected parcels?”—and I’ll give you the exact controls to use.",
-        );
-        return;
+        if (guidance) {
+          answer(guidance);
+          return;
+        }
       }
 
       const rename = text.match(
@@ -222,8 +367,11 @@ export function AiAssistant() {
       const visibility = text.match(
         /\b(show|hide|turn on|turn off)\b(?: the)?(?: layer)?\s+[“"']?(.+?)[”"']?$/i,
       );
-      if (visibility) {
-        const layer = findLayerByName(visibility[2] ?? "", wb.layers);
+      const visibilityLayer = visibility
+        ? findLayerByName(visibility[2] ?? "", wb.layers)
+        : undefined;
+      if (visibility && (/\blayer\b/i.test(text) || visibilityLayer)) {
+        const layer = visibilityLayer;
         if (!layer) {
           answer("Which layer should I show or hide? Please use its name from the Layers panel.");
           return;
@@ -372,11 +520,34 @@ export function AiAssistant() {
       }
 
       const help = helpAnswer(lower);
+      if (help) {
+        answer(help);
+        return;
+      }
+
+      const remote = await askLandDraftAssistant({
+        prompt: text,
+        messages: messagesRef.current,
+        context: buildAssistantContext({
+          projectName: wb.projectName,
+          mapView: wb.mapView,
+          selectedStates: wb.selectedStates,
+          layers: wb.layers,
+          activeLayer: wb.activeLayer,
+          selectedFeatures: wb.selectedFeatures,
+        }),
+      });
+      const actionResults: string[] = [];
+      for (const action of remote.actions) {
+        const result = await executeRemoteAction(text, action);
+        if (result) actionResults.push(result);
+      }
+      const sources = remote.sources.length
+        ? `\n\nSources:\n${remote.sources.map((source) => `• ${source.title}: ${source.url}`).join("\n")}`
+        : "";
       answer(
-        help ??
-          (text.endsWith("?")
-            ? "I don’t have a specific help article for that question yet. Try asking about adding or editing layers, selecting features, labels, styling, drawing, measurements, spatial analysis, public data, projects, printing, exporting, or account access."
-            : contextualAnswer(wb.layers, wb.activeLayer, wb.projectName)),
+        [remote.answer, ...actionResults].filter(Boolean).join("\n") + sources ||
+          contextualAnswer(wb.layers, wb.activeLayer, wb.projectName),
       );
     } catch (error) {
       const errorMessage =

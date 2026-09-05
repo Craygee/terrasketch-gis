@@ -170,6 +170,14 @@ export async function cloudDataRequest<T>(
   return (text ? JSON.parse(text) : undefined) as T;
 }
 
+/** Calls an authenticated Supabase Edge Function without exposing server secrets. */
+export async function cloudFunctionRequest<T>(name: string, body: unknown): Promise<T> {
+  return cloudDataRequest<T>(`/functions/v1/${encodeURIComponent(name)}`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
 const storagePath = (path: string) =>
   path
     .split("/")
