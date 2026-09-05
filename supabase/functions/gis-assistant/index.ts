@@ -195,7 +195,10 @@ const directPlaceRequest = (prompt: string) => {
       /^(?:please\s+)?(?:show|find|locate|map|add)(?:\s+me)?(?:\s+all|\s+the)?\s+(.+?)\s+(?:in|near|around)\s+(.+?)[?.!]*$/i,
     );
   if (!match?.[1] || !match[2] || /\b(layer|table|attribute)\b/i.test(match[1])) return null;
-  return { query: match[1].trim(), location: match[2].trim() };
+  return {
+    query: match[1].trim().replace(/^the\s+/i, ""),
+    location: match[2].trim(),
+  };
 };
 
 const safeRegex = (value: string) =>
@@ -282,7 +285,7 @@ const fallbackNominatimPlaces = async (query: string, location: string) => {
 const searchPlaces = async (query: string, location: string): Promise<PlaceResult> => {
   const geocodeUrl = new URL(`${NOMINATIM_API}/search`);
   geocodeUrl.searchParams.set("format", "jsonv2");
-  geocodeUrl.searchParams.set("limit", "1");
+  geocodeUrl.searchParams.set("limit", "5");
   geocodeUrl.searchParams.set("addressdetails", "1");
   geocodeUrl.searchParams.set("q", location);
   const geocodeResponse = await fetch(geocodeUrl, {
@@ -292,8 +295,15 @@ const searchPlaces = async (query: string, location: string): Promise<PlaceResul
   const places = (await geocodeResponse.json()) as Array<{
     boundingbox?: [string, string, string, string];
     display_name?: string;
+    type?: string;
+    addresstype?: string;
   }>;
-  const place = places[0];
+  const place =
+    places.find((candidate) =>
+      ["city", "town", "village", "municipality"].includes(
+        candidate.addresstype ?? candidate.type ?? "",
+      ),
+    ) ?? places[0];
   if (!place?.boundingbox) throw new Error(`I could not locate “${location}”`);
   const [south, north, west, east] = place.boundingbox.map(Number);
   if (![south, north, west, east].every(Number.isFinite))

@@ -91,8 +91,9 @@ records and return a reviewable Working-layer draft.
 1. Create a restricted OpenAI API project/key for LandDraft and set a monthly usage budget/alert.
 2. Add `OPENAI_API_KEY` to **Supabase → Edge Functions → Secrets**. Optionally set `OPENAI_MODEL`;
    the function defaults to `gpt-5-mini`.
-3. Deploy `supabase/functions/gis-assistant`. JWT verification must remain enabled, as configured in
-   `supabase/config.toml`.
+3. Deploy `supabase/functions/gis-assistant`. Keep gateway JWT verification enabled, as configured
+   in `supabase/config.toml`. The function also validates the current user token against the
+   project's Auth service before processing any request.
 4. Test a help question, a current-project question, an attribute selection, and a live place query
    such as “Show me all libraries in Midland, Texas.” Verify the returned source links and inspect
    imported public records before relying on them.
