@@ -1,0 +1,31 @@
+{
+  "name": "LandDraft",
+  "short_name": "LandDraft",
+  "description": "A friendly browser GIS workbench for mapping, measuring and shaping land data.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f7f4e9",
+  "theme_color": "#227448",
+  "icons": [
+    {
+      "src": "/landdraft-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/landdraft-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/landdraft-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

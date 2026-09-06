@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="public/landdraft-logo.svg" width="420" alt="LandDraft — Map, measure and shape the land" />
+</p>
+
 # LandDraft
 
 LandDraft is a browser-based GIS workbench for public data, field files, sketching, measurement, styling, inspection, and export. The interface keeps common map actions approachable while retaining powerful spatial workflows.
