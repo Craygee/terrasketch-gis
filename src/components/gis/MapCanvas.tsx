@@ -887,7 +887,7 @@ export function MapCanvas() {
     <div className="relative h-full w-full">
       <div ref={containerRef} className="h-full w-full" />
 
-      <div className="pointer-events-auto absolute bottom-48 right-2 z-20 flex flex-col gap-1">
+      <div className="landdraft-map-lock-controls pointer-events-auto absolute bottom-48 right-2 z-20 flex flex-col gap-1">
         <button
           onClick={() => setPanLocked((locked) => !locked)}
           className={cn(
