@@ -28,6 +28,7 @@ import { ProjectMenu } from "./ProjectMenu";
 import { LandDraftMark } from "@/components/brand/LandDraftMark";
 import { useTours } from "./TourProvider";
 import { SharePanel } from "./SharePanel";
+import { ProjectAreaControl } from "./ProjectAreaControl";
 
 export function TopBar({
   onTogglePanel,
@@ -122,6 +123,8 @@ export function TopBar({
           </select>
         </label>
       )}
+
+      <ProjectAreaControl />
 
       <div className="ml-auto flex items-center gap-1">
         <BarBtn

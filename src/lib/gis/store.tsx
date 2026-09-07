@@ -64,6 +64,7 @@ interface WorkbenchState {
   layers: GisLayer[];
   basemapId: string;
   mapView: MapViewState;
+  projectArea: MapViewState | undefined;
   accessRole: "owner" | ShareRole;
   activeShare: MapShare | null;
   shareSource: ProjectState["shareSource"];
@@ -105,6 +106,7 @@ const initialState = (): WorkbenchState => ({
   layers: [],
   basemapId: "street",
   mapView: { center: [-98.5, 31.3], zoom: 6, bearing: 0, pitch: 0 },
+  projectArea: undefined,
   accessRole: "owner",
   activeShare: null,
   shareSource: undefined,
@@ -208,12 +210,14 @@ const normalizedProject = (
     }),
     basemapId: stored.basemapId,
     mapView: activeShare?.mapView ??
+      stored.projectArea ??
       stored.mapView ?? {
         center: [-98.5, 31.3] as [number, number],
         zoom: 6,
         bearing: 0,
         pitch: 0,
       },
+    projectArea: stored.projectArea,
     accessRole,
     activeShare,
     shareSource: stored.shareSource,
@@ -254,6 +258,7 @@ const stateToProject = (state: WorkbenchState): ProjectState => ({
   layers: state.layers.map(durableLayer),
   basemapId: state.basemapId,
   mapView: state.mapView,
+  ...(state.projectArea ? { projectArea: state.projectArea } : {}),
   units: state.units,
   selectedStates: state.selectedStates,
   derivedLayerGroupId: state.derivedLayerGroupId,
@@ -300,6 +305,7 @@ export interface WorkbenchApi extends WorkbenchState {
   setDerivedLayerGroupId: (groupId: string) => void;
   setBasemapId: (id: string) => void;
   setMapView: (view: MapViewState) => void;
+  setProjectArea: (view: MapViewState | null) => Promise<void>;
   setUnits: (units: Partial<AreaUnitsPref>) => void;
   setProjectName: (name: string) => void;
   appendFeature: (layerId: string, feature: FeatureCollection["features"][number]) => void;
@@ -912,6 +918,51 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
     [auth.user?.id],
   );
 
+  const setProjectArea = useCallback<WorkbenchApi["setProjectArea"]>(
+    async (view) => {
+      const userId = auth.user?.id;
+      const current = stateRef.current;
+      if (
+        !userId ||
+        !current.projectId ||
+        !current.projectReady ||
+        !["owner", "admin"].includes(current.accessRole)
+      )
+        return;
+
+      const projectArea = view
+        ? {
+            ...view,
+            center: [...view.center] as [number, number],
+          }
+        : undefined;
+      const nextState: WorkbenchState = { ...current, projectArea };
+      skipNextAutosave.current = true;
+      setState(nextState);
+
+      try {
+        const project = await workspaceProjectStore.save(
+          userId,
+          current.projectId,
+          stateToProject(nextState),
+          "manual",
+        );
+        const projects = await workspaceProjectStore.list(userId);
+        setState((value) => ({
+          ...value,
+          projectArea,
+          projects,
+          saveHistory: project.versions,
+          lastSavedAt: project.updatedAt,
+        }));
+      } catch (error) {
+        setState((value) => ({ ...value, projectArea: current.projectArea }));
+        throw error;
+      }
+    },
+    [auth.user?.id],
+  );
+
   const createProject = useCallback<WorkbenchApi["createProject"]>(
     async (rawName) => {
       const userId = auth.user?.id;
@@ -1290,6 +1341,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
     state.autosave,
     state.basemapId,
     state.mapView,
+    state.projectArea,
     state.groups,
     state.layers,
     state.projectId,
@@ -1351,6 +1403,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
             return current;
           return { ...current, mapView };
         }),
+      setProjectArea,
       setUnits: (units) => setState((s) => ({ ...s, units: { ...s.units, ...units } })),
       setProjectName: (name) => patch({ projectName: name }),
       appendFeature,
@@ -1425,6 +1478,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       deleteProject,
       restoreVersion,
       setAutosave,
+      setProjectArea,
       setPrintComposition,
       toProjectState,
       patch,

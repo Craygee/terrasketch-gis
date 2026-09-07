@@ -1,5 +1,6 @@
 import { useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { bbox as turfBbox } from "@turf/turf";
+import type { Feature } from "geojson";
 import {
   Eye,
   EyeOff,
@@ -632,6 +633,16 @@ export function LayerPanel() {
                                 icon={<Crosshair className="size-3.5" />}
                               />
                               <IconBtn
+                                label="Rename main layer"
+                                onClick={() => {
+                                  const name = window
+                                    .prompt("Rename main layer", layer.name)
+                                    ?.trim();
+                                  if (name) wb.updateLayer(layer.id, { name });
+                                }}
+                                icon={<Pencil className="size-3.5" />}
+                              />
+                              <IconBtn
                                 label="Style"
                                 onClick={() => setStyleFor(styleFor === layer.id ? null : layer.id)}
                                 icon={<Palette className="size-3.5" />}
@@ -795,6 +806,13 @@ function featureDisplayName(layer: GisLayer, index: number): string {
   return key ? String(properties[key]) : `Feature ${index + 1}`;
 }
 
+function transferableFeature(feature: Feature): Feature {
+  const copy = JSON.parse(JSON.stringify(feature)) as Feature;
+  const properties = { ...(copy.properties ?? {}) };
+  delete properties["__hidden"];
+  return { ...copy, properties };
+}
+
 function FeatureSublayers({
   layer,
   onZoom,
@@ -804,6 +822,7 @@ function FeatureSublayers({
 }) {
   const wb = useWorkbench();
   const [query, setQuery] = useState("");
+  const [targetLayerId, setTargetLayerId] = useState("__new__");
   const normalizedQuery = query.trim().toLowerCase();
   const matches = layer.data.features
     .map((feature, index) => ({ feature, index, name: featureDisplayName(layer, index) }))
@@ -814,6 +833,128 @@ function FeatureSublayers({
         .includes(normalizedQuery);
     });
   const visible = matches.slice(0, 100);
+  const checkedIndexes = new Set(
+    wb.selectedFeatures
+      .filter((selection) => selection.layerId === layer.id)
+      .map((selection) => selection.index),
+  );
+  const targetLayers = wb.layers.filter(
+    (candidate) => candidate.id !== layer.id && candidate.source.kind !== "remote",
+  );
+
+  const setCheckedIndexes = (indexes: Iterable<number>) => {
+    const otherSelections = wb.selectedFeatures.filter(
+      (selection) => selection.layerId !== layer.id,
+    );
+    const layerSelections = Array.from(new Set(indexes))
+      .filter((index) => layer.data.features[index])
+      .sort((a, b) => a - b)
+      .map((index) => ({ layerId: layer.id, index }));
+    wb.setSelectedFeatures([...otherSelections, ...layerSelections]);
+    wb.setActiveLayer(layer.id);
+  };
+
+  const transferChecked = (mode: "copy" | "move") => {
+    const indexes = Array.from(checkedIndexes).sort((a, b) => a - b);
+    const features = indexes
+      .map((index) => layer.data.features[index])
+      .filter((feature): feature is Feature => Boolean(feature))
+      .map(transferableFeature);
+    if (!features.length) return;
+
+    let destinationId = targetLayerId;
+    let firstDestinationIndex = 0;
+    if (targetLayerId === "__new__") {
+      const suggestedName = `${layer.name} selection`;
+      const name = window.prompt("Name the new main layer", suggestedName)?.trim();
+      if (!name) return;
+      const created = wb.addLayer({
+        name,
+        data: { type: "FeatureCollection", features },
+        groupId: wb.derivedLayerGroupId,
+        source: {
+          kind: "derived",
+          sourceLayerId: layer.id,
+          query: `${mode === "move" ? "Moved" : "Copied"} checked feature sublayers`,
+        },
+      });
+      destinationId = created.id;
+    } else {
+      const destination = targetLayers.find((candidate) => candidate.id === targetLayerId);
+      if (!destination) return;
+      firstDestinationIndex = destination.data.features.length;
+      wb.updateLayer(destination.id, {
+        data: {
+          ...destination.data,
+          features: [...destination.data.features, ...features],
+        },
+      });
+    }
+
+    if (mode === "move") {
+      if (layer.source.kind === "remote") {
+        const moving = new Set(indexes);
+        wb.updateLayer(layer.id, {
+          data: {
+            ...layer.data,
+            features: layer.data.features.map((feature, index) =>
+              moving.has(index)
+                ? {
+                    ...feature,
+                    properties: { ...(feature.properties ?? {}), __hidden: true },
+                  }
+                : feature,
+            ),
+          },
+        });
+      } else wb.removeFeatures(layer.id, indexes);
+    }
+
+    wb.setSelectedFeatures(
+      features.map((_, index) => ({
+        layerId: destinationId,
+        index: firstDestinationIndex + index,
+      })),
+    );
+    wb.setActiveLayer(destinationId);
+    const destinationName =
+      targetLayerId === "__new__"
+        ? "a new main layer"
+        : (targetLayers.find((candidate) => candidate.id === destinationId)?.name ?? "the layer");
+    toast.success(
+      `${features.length} feature${features.length === 1 ? "" : "s"} ${mode === "move" ? "moved" : "copied"}`,
+      { description: `Added to ${destinationName}.` },
+    );
+  };
+
+  const removeChecked = () => {
+    const indexes = Array.from(checkedIndexes).sort((a, b) => a - b);
+    if (!indexes.length) return;
+    const action = layer.source.kind === "remote" ? "hide" : "remove";
+    if (
+      !window.confirm(
+        `${action === "hide" ? "Hide" : "Remove"} ${indexes.length} checked feature${indexes.length === 1 ? "" : "s"}?`,
+      )
+    )
+      return;
+    if (layer.source.kind === "remote") {
+      const removing = new Set(indexes);
+      wb.updateLayer(layer.id, {
+        data: {
+          ...layer.data,
+          features: layer.data.features.map((feature, index) =>
+            removing.has(index)
+              ? {
+                  ...feature,
+                  properties: { ...(feature.properties ?? {}), __hidden: true },
+                }
+              : feature,
+          ),
+        },
+      });
+    } else wb.removeFeatures(layer.id, indexes);
+    setCheckedIndexes([]);
+  };
 
   return (
     <details className="group rounded-lg border border-border bg-card/70">
@@ -831,6 +972,84 @@ function FeatureSublayers({
             className="w-full rounded-lg border border-border bg-secondary py-1.5 pl-7 pr-2 text-[10px] outline-none focus:border-primary"
           />
         </label>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() =>
+              setCheckedIndexes([...checkedIndexes, ...visible.map(({ index }) => index)])
+            }
+            className="rounded-lg bg-secondary px-2 py-1 text-[9px] font-semibold hover:bg-accent"
+          >
+            Select shown
+          </button>
+          <button
+            type="button"
+            onClick={() => setCheckedIndexes([])}
+            disabled={checkedIndexes.size === 0}
+            className="rounded-lg px-2 py-1 text-[9px] font-semibold text-muted-foreground hover:bg-accent disabled:opacity-40"
+          >
+            Clear
+          </button>
+          <span className="num ml-auto text-[9px] text-muted-foreground">
+            {checkedIndexes.size} checked
+          </span>
+        </div>
+        {checkedIndexes.size > 0 && (
+          <div className="space-y-1 rounded-xl border border-primary/30 bg-primary/5 p-2">
+            <label className="block text-[9px] font-semibold text-muted-foreground">
+              Destination main layer
+              <select
+                value={targetLayerId}
+                onChange={(event) => setTargetLayerId(event.target.value)}
+                className="mt-1 w-full rounded-lg border border-border bg-card px-2 py-1.5 text-[10px] text-foreground"
+              >
+                <option value="__new__">+ New layer in default category</option>
+                {targetLayers.map((candidate) => (
+                  <option key={candidate.id} value={candidate.id}>
+                    {candidate.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="grid grid-cols-4 gap-1">
+              <button
+                type="button"
+                onClick={() => transferChecked("copy")}
+                className="rounded-lg bg-primary px-1.5 py-1.5 text-[9px] font-semibold text-primary-foreground"
+              >
+                Duplicate
+              </button>
+              <button
+                type="button"
+                onClick={() => transferChecked("move")}
+                className="rounded-lg bg-secondary px-1.5 py-1.5 text-[9px] font-semibold hover:bg-accent"
+              >
+                Move
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  onZoom({
+                    type: "FeatureCollection",
+                    features: Array.from(checkedIndexes)
+                      .map((index) => layer.data.features[index])
+                      .filter((feature): feature is Feature => Boolean(feature)),
+                  })
+                }
+                className="rounded-lg bg-secondary px-1.5 py-1.5 text-[9px] font-semibold hover:bg-accent"
+              >
+                Zoom
+              </button>
+              <button
+                type="button"
+                onClick={removeChecked}
+                className="rounded-lg px-1.5 py-1.5 text-[9px] font-semibold text-destructive hover:bg-destructive/10"
+              >
+                {layer.source.kind === "remote" ? "Hide" : "Remove"}
+              </button>
+            </div>
+          </div>
+        )}
         <div className="max-h-64 space-y-1 overflow-y-auto">
           {visible.map(({ feature, index, name }) => {
             const hidden = feature.properties?.["__hidden"] === true;
@@ -845,6 +1064,18 @@ function FeatureSublayers({
                   selected ? "border-primary bg-accent" : "border-transparent bg-secondary/50",
                 )}
               >
+                <input
+                  type="checkbox"
+                  checked={checkedIndexes.has(index)}
+                  onChange={(event) => {
+                    const next = new Set(checkedIndexes);
+                    if (event.target.checked) next.add(index);
+                    else next.delete(index);
+                    setCheckedIndexes(next);
+                  }}
+                  aria-label={`Select ${name} for batch actions`}
+                  className="size-3 shrink-0 accent-primary"
+                />
                 <button
                   onClick={() => wb.updateFeatureProperties(layer.id, index, { __hidden: !hidden })}
                   title={hidden ? "Show feature" : "Hide feature"}

@@ -38,6 +38,7 @@ import { FeatureDestinationDialog } from "./FeatureDestinationDialog";
 import { TourProvider, useTours } from "./TourProvider";
 import { ConnectionManager } from "./ConnectionManager";
 import { FieldModule } from "./FieldModule";
+import { ProjectAreaControl } from "./ProjectAreaControl";
 
 const AiAssistant = lazy(() =>
   import("./AiAssistant").then((module) => ({ default: module.AiAssistant })),
@@ -155,6 +156,7 @@ function MobileShell() {
           >
             <Monitor className="size-3.5" />
           </button>
+          <ProjectAreaControl />
         </div>
         <div className="float-surface pointer-events-auto ml-auto grid grid-cols-2 rounded-2xl p-1">
           <button

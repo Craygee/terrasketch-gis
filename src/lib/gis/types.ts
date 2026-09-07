@@ -262,6 +262,8 @@ export interface ProjectState {
   layers: GisLayer[];
   basemapId: string;
   mapView?: MapViewState;
+  /** Optional preferred extent restored whenever this project is opened. */
+  projectArea?: MapViewState;
   units: AreaUnitsPref;
   selectedStates?: string[];
   derivedLayerGroupId?: string;

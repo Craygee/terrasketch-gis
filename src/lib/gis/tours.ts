@@ -11,7 +11,7 @@ export interface TourStep {
  * Add tour-worthy features here and increment TOUR_VERSION. Users who keep
  * feature tips enabled will be offered the refreshed walkthrough once.
  */
-export const TOUR_VERSION = 3;
+export const TOUR_VERSION = 4;
 
 export const TOUR_REGISTRY: Record<TourKind, TourStep[]> = {
   basic: [
@@ -88,6 +88,12 @@ export const TOUR_REGISTRY: Record<TourKind, TourStep[]> = {
       target: "top-projects",
       title: "Projects and subprojects",
       body: "Switch maps, duplicate projects, create subprojects and overlay selected subprojects in a parent map.",
+    },
+    {
+      id: "project-area",
+      target: "project-area",
+      title: "Choose where a project opens",
+      body: "Set the current location and zoom as this project's preferred area, return to it anytime, or reset it as the project changes.",
     },
     {
       id: "basemap",
