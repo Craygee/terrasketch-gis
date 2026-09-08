@@ -22,6 +22,7 @@ import {
   NotebookPen,
   Save,
   Search,
+  MoreHorizontal,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -88,6 +89,7 @@ export function LayerPanel() {
   const groupDropTargetRef = useRef<string | null>(null);
   const layerListRef = useRef<HTMLDivElement>(null);
   const [groupStyleFor, setGroupStyleFor] = useState<string | null>(null);
+  const [groupMenuFor, setGroupMenuFor] = useState<string | null>(null);
   const visibleGroups = flattenVisibleGroups(wb.groups);
 
   const groupSelectedLayers = () => {
@@ -107,6 +109,21 @@ export function LayerPanel() {
     wb.setSelectedLayers(selectedIds);
     toast.success(`${selectedIds.length} layer${selectedIds.length === 1 ? "" : "s"} grouped`, {
       description: `Moved into ${name}.`,
+    });
+  };
+
+  const nestSelectedGroups = () => {
+    if (!wb.selectedGroupIds.length) return;
+    const name = window
+      .prompt(
+        `Name the parent group for ${wb.selectedGroupIds.length} selected data group${wb.selectedGroupIds.length === 1 ? "" : "s"}`,
+        "New parent group",
+      )
+      ?.trim();
+    if (!name) return;
+    wb.groupSelectedGroups(wb.selectedGroupIds, name);
+    toast.success("Data groups nested", {
+      description: `The selected groups are now subgroups of ${name}.`,
     });
   };
 
@@ -345,7 +362,7 @@ export function LayerPanel() {
     >
       <div className="flex items-center justify-between border-b border-sidebar-border px-3 py-2.5">
         <div className="flex items-center gap-2 text-sm font-semibold">
-          <Layers className="size-4 text-primary" /> Layers
+          <Layers className="size-4 text-primary" /> Data Groups
           <span className="num rounded-full bg-secondary px-1.5 text-[10px] text-muted-foreground">
             {wb.layers.length}
           </span>
@@ -361,37 +378,6 @@ export function LayerPanel() {
         >
           <FolderPlus className="size-4" />
         </button>
-      </div>
-
-      <div className="p-3">
-        <button
-          onClick={() => fileInput.current?.click()}
-          className={cn(
-            "flex w-full flex-col items-center gap-1 rounded-xl border-2 border-dashed px-3 py-4 text-center transition-colors",
-            dragging ? "border-primary bg-accent" : "border-border hover:border-primary",
-          )}
-        >
-          {busy ? (
-            <Loader2 className="size-5 animate-spin text-primary" />
-          ) : (
-            <Upload className="size-5 text-primary" />
-          )}
-          <span className="text-xs font-medium">Drop files or click to add data</span>
-          <span className="text-[10px] text-muted-foreground">
-            GeoJSON · KML · KMZ · Shapefile .zip · GPX · CSV
-          </span>
-        </button>
-        <input
-          ref={fileInput}
-          type="file"
-          multiple
-          accept={SUPPORTED_EXTENSIONS.join(",")}
-          className="hidden"
-          onChange={(e) => {
-            void handleFiles(Array.from(e.target.files ?? []));
-            e.target.value = "";
-          }}
-        />
       </div>
 
       {wb.layers.length > 0 && (
@@ -429,6 +415,30 @@ export function LayerPanel() {
         </div>
       )}
 
+      {wb.selectedGroupIds.length > 0 && (
+        <div className="mx-2 mb-2 flex items-center gap-1.5 rounded-xl border border-primary/30 bg-primary/5 px-2 py-1.5 text-[10px]">
+          <span className="min-w-0 flex-1 truncate text-muted-foreground">
+            {wb.selectedGroupIds.length} data group
+            {wb.selectedGroupIds.length === 1 ? "" : "s"} selected
+          </span>
+          <button
+            type="button"
+            onClick={nestSelectedGroups}
+            className="flex items-center gap-1 rounded-lg bg-primary px-2 py-1 font-semibold text-primary-foreground"
+            title="Create a parent group containing the selected groups as subgroups"
+          >
+            <FolderPlus className="size-3" /> Make subgroup
+          </button>
+          <button
+            type="button"
+            onClick={() => wb.setSelectedGroups([])}
+            className="rounded-lg px-1.5 py-1 font-semibold text-muted-foreground hover:bg-accent"
+          >
+            Clear
+          </button>
+        </div>
+      )}
+
       <div ref={layerListRef} className="flex-1 overflow-y-auto px-2 pb-6">
         {visibleGroups.map(({ group, depth }) => {
           const layers = wb.layers.filter((l) => l.groupId === group.id);
@@ -437,6 +447,7 @@ export function LayerPanel() {
           const groupedLayers = wb.layers.filter((layer) => groupedLayerIds.has(layer.groupId));
           const allVisible =
             groupedLayers.length > 0 && groupedLayers.every((layer) => layer.visible);
+          const groupSelected = wb.selectedGroupIds.includes(group.id);
           const renameGroup = () => {
             const name = window.prompt("Rename layer group", group.name)?.trim();
             if (!name || name === group.name) return;
@@ -459,8 +470,20 @@ export function LayerPanel() {
             >
               <div
                 data-group-header-id={group.id}
-                className="flex items-center rounded-lg text-muted-foreground hover:bg-sidebar-accent"
+                className={cn(
+                  "relative flex items-center rounded-lg text-muted-foreground hover:bg-sidebar-accent",
+                  groupSelected && "bg-accent text-foreground ring-1 ring-primary/40",
+                )}
               >
+                <input
+                  type="checkbox"
+                  checked={groupSelected}
+                  onChange={() => wb.toggleGroupSelection(group.id)}
+                  onClick={(event) => event.stopPropagation()}
+                  aria-label={`Select ${group.name} group`}
+                  title="Select group for nesting"
+                  className="ml-1.5 size-3.5 shrink-0 accent-primary"
+                />
                 <button
                   onClick={() => wb.toggleGroup(group.id)}
                   onDoubleClick={(event) => {
@@ -483,14 +506,6 @@ export function LayerPanel() {
                   <span className="num ml-auto text-[10px]">{groupedLayers.length}</span>
                 </button>
                 <button
-                  onClick={renameGroup}
-                  aria-label={`Rename ${group.name} group`}
-                  title="Rename group"
-                  className="rounded p-1 hover:bg-accent hover:text-foreground"
-                >
-                  <Pencil className="size-3.5" />
-                </button>
-                <button
                   onClick={() => wb.setGroupVisible(group.id, !allVisible)}
                   aria-label={allVisible ? `Hide ${group.name}` : `Show ${group.name}`}
                   title={allVisible ? "Hide group" : "Show group"}
@@ -499,30 +514,69 @@ export function LayerPanel() {
                   {allVisible ? <Eye className="size-3.5" /> : <EyeOff className="size-3.5" />}
                 </button>
                 <button
-                  onClick={() => setGroupStyleFor(groupStyleFor === group.id ? null : group.id)}
-                  aria-label={`Style ${group.name}`}
-                  title="Style every layer in group"
-                  className={cn(
-                    "rounded p-1 hover:bg-accent hover:text-foreground",
-                    groupStyleFor === group.id && "bg-primary text-primary-foreground",
-                  )}
+                  onClick={() => setGroupMenuFor(groupMenuFor === group.id ? null : group.id)}
+                  aria-label={`Open actions for ${group.name}`}
+                  title="Rename, style, add a subgroup, or delete"
+                  className="rounded p-1 hover:bg-accent hover:text-foreground"
                 >
-                  <Palette className="size-3.5" />
+                  <MoreHorizontal className="size-3.5" />
                 </button>
-                <button
-                  onClick={() => {
-                    const name = window.prompt(
-                      `Name a subgroup inside ${group.name}`,
-                      "New subgroup",
-                    );
-                    if (name) wb.addSubgroup(group.id, name);
-                  }}
-                  aria-label={`Add subgroup inside ${group.name}`}
-                  title="Add subgroup"
-                  className="mr-1 rounded p-1 hover:bg-accent hover:text-foreground"
-                >
-                  <FolderPlus className="size-3.5" />
-                </button>
+                {groupMenuFor === group.id && (
+                  <div className="absolute right-7 top-7 z-30 w-44 rounded-xl border border-border bg-popover p-1 text-[10px] normal-case tracking-normal text-popover-foreground shadow-xl">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setGroupMenuFor(null);
+                        renameGroup();
+                      }}
+                      className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left hover:bg-accent"
+                    >
+                      <Pencil className="size-3.5" /> Rename group
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setGroupStyleFor(groupStyleFor === group.id ? null : group.id);
+                        setGroupMenuFor(null);
+                      }}
+                      className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left hover:bg-accent"
+                    >
+                      <Palette className="size-3.5" /> Style every layer
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setGroupMenuFor(null);
+                        const name = window
+                          .prompt(`Name a subgroup inside ${group.name}`, "New subgroup")
+                          ?.trim();
+                        if (name) wb.addSubgroup(group.id, name);
+                      }}
+                      className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left hover:bg-accent"
+                    >
+                      <FolderPlus className="size-3.5" /> Add subgroup
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setGroupMenuFor(null);
+                        if (
+                          !window.confirm(
+                            `Delete the “${group.name}” group and its subgroups? Its map layers will be kept and moved to another data group.`,
+                          )
+                        )
+                          return;
+                        wb.removeGroup(group.id);
+                        toast.success("Data group deleted", {
+                          description: "Its layers were kept and moved to another group.",
+                        });
+                      }}
+                      className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-destructive hover:bg-destructive/10"
+                    >
+                      <Trash2 className="size-3.5" /> Delete group
+                    </button>
+                  </div>
+                )}
                 <button
                   type="button"
                   onPointerDown={(event) => startPointerGroupDrag(event, group.id)}
@@ -721,16 +775,6 @@ export function LayerPanel() {
                                 icon={<Crosshair className="size-3.5" />}
                               />
                               <IconBtn
-                                label="Rename main layer"
-                                onClick={() => {
-                                  const name = window
-                                    .prompt("Rename main layer", layer.name)
-                                    ?.trim();
-                                  if (name) wb.updateLayer(layer.id, { name });
-                                }}
-                                icon={<Pencil className="size-3.5" />}
-                              />
-                              <IconBtn
                                 label="Style"
                                 onClick={() => setStyleFor(styleFor === layer.id ? null : layer.id)}
                                 icon={<Palette className="size-3.5" />}
@@ -886,6 +930,35 @@ export function LayerPanel() {
             Delete {wb.selectedLayerIds.length} selected layers
           </button>
         )}
+
+        <div className="mt-3">
+          <button
+            onClick={() => fileInput.current?.click()}
+            className={cn(
+              "flex w-full items-center justify-center gap-2 rounded-xl border border-dashed px-2 py-2 text-center transition-colors",
+              dragging ? "border-primary bg-accent" : "border-border hover:border-primary",
+            )}
+            title="Add GeoJSON, KML, KMZ, zipped Shapefile, GPX, or CSV data"
+          >
+            {busy ? (
+              <Loader2 className="size-4 animate-spin text-primary" />
+            ) : (
+              <Upload className="size-4 text-primary" />
+            )}
+            <span className="text-[10px] font-medium">Drop files or click to add data</span>
+          </button>
+          <input
+            ref={fileInput}
+            type="file"
+            multiple
+            accept={SUPPORTED_EXTENSIONS.join(",")}
+            className="hidden"
+            onChange={(e) => {
+              void handleFiles(Array.from(e.target.files ?? []));
+              e.target.value = "";
+            }}
+          />
+        </div>
 
         <p className="mt-4 rounded-xl bg-secondary/60 px-3 py-2 text-[10px] leading-relaxed text-muted-foreground">
           Sketches and measurements are for planning only. They are not a survey and do not

@@ -220,13 +220,24 @@ export function MapCanvas() {
     if (!map || !ready || !share) return;
     const shareKey = `${share.id}:${share.updatedAt}`;
     if (fittedShareRef.current === shareKey) return;
-    const features = wb.displayLayers.flatMap((layer) => layer.data.features);
-    if (!features.length) return;
-    const bounds = turfBbox({ type: "FeatureCollection", features });
-    if (bounds.length !== 4 || !bounds.every(Number.isFinite)) return;
+    const largest = wb.displayLayers
+      .filter((layer) => layer.visible && layer.data.features.length > 0)
+      .flatMap((layer) => {
+        try {
+          const bounds = turfBbox(layer.data);
+          if (bounds.length !== 4 || !bounds.every(Number.isFinite)) return [];
+          const width = Math.abs(bounds[2] - bounds[0]);
+          const height = Math.abs(bounds[3] - bounds[1]);
+          return [{ bounds, score: width * height || width + height || 1 }];
+        } catch {
+          return [];
+        }
+      })
+      .sort((a, b) => b.score - a.score)[0];
+    if (!largest) return;
     fittedShareRef.current = shareKey;
     map.resize();
-    const [west, south, east, north] = bounds;
+    const [west, south, east, north] = largest.bounds;
     if (west === east && south === north) {
       map.jumpTo({ center: [west, south], zoom: Math.max(map.getZoom(), 16) });
       return;

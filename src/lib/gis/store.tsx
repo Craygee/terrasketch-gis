@@ -71,6 +71,7 @@ interface WorkbenchState {
   units: AreaUnitsPref;
   activeLayerId: string | null;
   selectedLayerIds: string[];
+  selectedGroupIds: string[];
   selectedFeature: SelectedFeature | null;
   selectedFeatures: SelectedFeature[];
   drawMode: DrawMode;
@@ -113,6 +114,7 @@ const initialState = (): WorkbenchState => ({
   units: { area: "acres", length: "miles" },
   activeLayerId: null,
   selectedLayerIds: [],
+  selectedGroupIds: [],
   selectedFeature: null,
   selectedFeatures: [],
   drawMode: "none",
@@ -224,6 +226,7 @@ const normalizedProject = (
     units: stored.units,
     activeLayerId: null,
     selectedLayerIds: [],
+    selectedGroupIds: [],
     selectedFeature: null,
     selectedFeatures: [],
     drawMode: "none" as DrawMode,
@@ -294,7 +297,11 @@ export interface WorkbenchApi extends WorkbenchState {
   addGroup: (name: string) => string;
   addSubgroup: (parentId: string, name: string) => void;
   renameGroup: (id: string, name: string) => void;
+  groupSelectedGroups: (ids: string[], name: string) => void;
+  removeGroup: (id: string) => void;
   toggleGroup: (id: string) => void;
+  toggleGroupSelection: (id: string) => void;
+  setSelectedGroups: (ids: string[]) => void;
   setGroupVisible: (id: string, visible: boolean) => void;
   applyStyleToGroup: (id: string, patch: Partial<LayerStyle>) => void;
   setActiveLayer: (id: string | null) => void;
@@ -417,6 +424,18 @@ const flattenedGroupIds = (groups: LayerGroup[]): string[] => {
     .forEach(visit);
   groups.filter((group) => !visited.has(group.id)).forEach(visit);
   return ordered;
+};
+
+const orderedLayersForGroups = (layers: GisLayer[], groups: LayerGroup[]): GisLayer[] => {
+  const groupRank = new Map(flattenedGroupIds(groups).map((groupId, index) => [groupId, index]));
+  return layers
+    .map((layer, index) => ({ layer, index }))
+    .sort((a, b) => {
+      const aRank = groupRank.get(a.layer.groupId) ?? Number.MAX_SAFE_INTEGER;
+      const bRank = groupRank.get(b.layer.groupId) ?? Number.MAX_SAFE_INTEGER;
+      return aRank - bRank || a.index - b.index;
+    })
+    .map(({ layer }) => layer);
 };
 
 export function WorkbenchProvider({ children }: { children: ReactNode }) {
@@ -684,17 +703,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
 
       // Keep every group's complete layer stack together while preserving
       // the existing order of the layers within each group.
-      const groupRank = new Map(
-        flattenedGroupIds(groups).map((groupId, index) => [groupId, index]),
-      );
-      const layers = s.layers
-        .map((layer, index) => ({ layer, index }))
-        .sort((a, b) => {
-          const aRank = groupRank.get(a.layer.groupId) ?? Number.MAX_SAFE_INTEGER;
-          const bRank = groupRank.get(b.layer.groupId) ?? Number.MAX_SAFE_INTEGER;
-          return aRank - bRank || a.index - b.index;
-        })
-        .map(({ layer }) => layer);
+      const layers = orderedLayersForGroups(s.layers, groups);
 
       return { ...s, groups, layers };
     });
@@ -756,6 +765,88 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       ...s,
       groups: s.groups.map((group) => (group.id === id ? { ...group, name: nextName } : group)),
     }));
+  }, []);
+
+  const groupSelectedGroups = useCallback<WorkbenchApi["groupSelectedGroups"]>((ids, name) => {
+    const nextName = name.trim();
+    if (!nextName) return;
+    setState((s) => {
+      const selected = new Set(ids.filter((id) => s.groups.some((group) => group.id === id)));
+      if (!selected.size) return s;
+
+      const hasSelectedAncestor = (group: LayerGroup) => {
+        const seen = new Set<string>();
+        let parentId = group.parentId;
+        while (parentId && !seen.has(parentId)) {
+          if (selected.has(parentId)) return true;
+          seen.add(parentId);
+          parentId = s.groups.find((item) => item.id === parentId)?.parentId;
+        }
+        return false;
+      };
+      const selectedRoots = s.groups.filter(
+        (group) => selected.has(group.id) && !hasSelectedAncestor(group),
+      );
+      if (!selectedRoots.length) return s;
+
+      const parentIds = new Set(selectedRoots.map((group) => group.parentId ?? null));
+      const parentId = parentIds.size === 1 ? (selectedRoots[0]?.parentId ?? null) : null;
+      const newGroup: LayerGroup = {
+        id: uid(),
+        name: nextName,
+        collapsed: false,
+        ...(parentId ? { parentId } : {}),
+      };
+      const firstIndex = Math.min(
+        ...selectedRoots.map((group) => s.groups.findIndex((item) => item.id === group.id)),
+      );
+      const groups = s.groups.map((group) =>
+        selectedRoots.some((item) => item.id === group.id)
+          ? { ...group, parentId: newGroup.id }
+          : group,
+      );
+      groups.splice(Math.max(firstIndex, 0), 0, newGroup);
+      return {
+        ...s,
+        groups,
+        layers: orderedLayersForGroups(s.layers, groups),
+        selectedGroupIds: [newGroup.id],
+      };
+    });
+  }, []);
+
+  const removeGroup = useCallback<WorkbenchApi["removeGroup"]>((id) => {
+    setState((s) => {
+      const group = s.groups.find((item) => item.id === id);
+      if (!group) return s;
+      const removedIds = descendantGroupIds(id, s.groups);
+      let groups = s.groups.filter((item) => !removedIds.has(item.id));
+      let targetGroupId =
+        (group.parentId && groups.some((item) => item.id === group.parentId)
+          ? group.parentId
+          : null) ??
+        (id !== "working" && groups.some((item) => item.id === "working") ? "working" : null) ??
+        groups.find((item) => !item.parentId)?.id ??
+        groups[0]?.id;
+
+      if (!targetGroupId) {
+        targetGroupId = "working";
+        groups = [{ id: targetGroupId, name: "Working layers", collapsed: false }];
+      }
+
+      const reassignedLayers = s.layers.map((layer) =>
+        removedIds.has(layer.groupId) ? { ...layer, groupId: targetGroupId } : layer,
+      );
+      return {
+        ...s,
+        groups,
+        layers: orderedLayersForGroups(reassignedLayers, groups),
+        derivedLayerGroupId: removedIds.has(s.derivedLayerGroupId)
+          ? targetGroupId
+          : s.derivedLayerGroupId,
+        selectedGroupIds: s.selectedGroupIds.filter((groupId) => !removedIds.has(groupId)),
+      };
+    });
   }, []);
 
   const toggleGroup = useCallback<WorkbenchApi["toggleGroup"]>((id) => {
@@ -1420,7 +1511,24 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       addGroup,
       addSubgroup,
       renameGroup,
+      groupSelectedGroups,
+      removeGroup,
       toggleGroup,
+      toggleGroupSelection: (id) =>
+        setState((current) => ({
+          ...current,
+          selectedGroupIds: current.selectedGroupIds.includes(id)
+            ? current.selectedGroupIds.filter((groupId) => groupId !== id)
+            : [...current.selectedGroupIds, id],
+        })),
+      setSelectedGroups: (ids) =>
+        setState((current) => {
+          const available = new Set(current.groups.map((group) => group.id));
+          return {
+            ...current,
+            selectedGroupIds: Array.from(new Set(ids)).filter((id) => available.has(id)),
+          };
+        }),
       setGroupVisible,
       applyStyleToGroup,
       setActiveLayer: (id) => patch({ activeLayerId: id }),
@@ -1513,6 +1621,8 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       addGroup,
       addSubgroup,
       renameGroup,
+      groupSelectedGroups,
+      removeGroup,
       toggleGroup,
       setGroupVisible,
       applyStyleToGroup,

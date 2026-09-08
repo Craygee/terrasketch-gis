@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Archive,
+  ChevronRight,
   Clock3,
   Download,
   FileArchive,
@@ -42,7 +43,12 @@ import {
   type InboundProjectEmail,
   type ProjectEmailAlias,
 } from "@/lib/gis/inboundEmail";
-import type { ProjectDocument, ProjectEventType, ProjectRecords } from "@/lib/gis/types";
+import type {
+  ProjectDocument,
+  ProjectEventType,
+  ProjectNote,
+  ProjectRecords,
+} from "@/lib/gis/types";
 import { cn } from "@/lib/utils";
 
 type Tab = "notes" | "layer-notes" | "files" | "activity" | "email" | "summary";
@@ -94,6 +100,12 @@ const fileDataUrl = (blob: Blob) =>
     reader.readAsDataURL(blob);
   });
 
+const dateTimeInputValue = (timestamp: number) => {
+  const date = new Date(timestamp);
+  const offset = date.getTimezoneOffset() * 60_000;
+  return new Date(timestamp - offset).toISOString().slice(0, 16);
+};
+
 export function ProjectRecordsPanel() {
   const wb = useWorkbench();
   const auth = useAuth();
@@ -101,6 +113,8 @@ export function ProjectRecordsPanel() {
   const [tab, setTab] = useState<Tab>("notes");
   const [noteTitle, setNoteTitle] = useState("");
   const [noteBody, setNoteBody] = useState("");
+  const [noteEditor, setNoteEditor] = useState<ProjectNote | null>(null);
+  const [selectedLayerNoteId, setSelectedLayerNoteId] = useState<string | null>(null);
   const [layerNoteDrafts, setLayerNoteDrafts] = useState<Record<string, string>>({});
   const [folderId, setFolderId] = useState("general");
   const [newFolder, setNewFolder] = useState("");
@@ -182,20 +196,16 @@ export function ProjectRecordsPanel() {
     }
     const now = Date.now();
     const id = window.crypto.randomUUID();
-    update({
-      notes: [
-        {
-          id,
-          title: noteTitle.trim() || "Project note",
-          body,
-          createdAt: now,
-          updatedAt: now,
-          author: auth.user?.name || auth.user?.email || "LandDraft user",
-          includeInPacket: true,
-        },
-        ...records.notes,
-      ],
-    });
+    const note: ProjectNote = {
+      id,
+      title: noteTitle.trim() || "Project note",
+      body,
+      createdAt: now,
+      updatedAt: now,
+      author: auth.user?.name || auth.user?.email || "LandDraft user",
+      includeInPacket: true,
+    };
+    update({ notes: [note, ...records.notes] });
     wb.addProjectEvent({
       type: "note",
       title: noteTitle.trim() || "Added project note",
@@ -204,7 +214,30 @@ export function ProjectRecordsPanel() {
     });
     setNoteTitle("");
     setNoteBody("");
+    setNoteEditor(note);
     toast.success("Note added to this project");
+  };
+
+  const saveEditedNote = () => {
+    if (!noteEditor) return;
+    const title = noteEditor.title.trim() || "Project note";
+    const body = noteEditor.body.trim();
+    if (!body) {
+      toast.error("Enter a note");
+      return;
+    }
+    const updatedNote = { ...noteEditor, title, body, updatedAt: Date.now() };
+    update({
+      notes: records.notes.map((note) => (note.id === updatedNote.id ? updatedNote : note)),
+    });
+    setNoteEditor(updatedNote);
+    wb.addProjectEvent({
+      type: "note",
+      title: `Updated note: ${title}`,
+      detail: body.slice(0, 180),
+      relatedId: updatedNote.id,
+    });
+    toast.success("Note changes saved");
   };
 
   const createFolder = () => {
@@ -491,18 +524,26 @@ export function ProjectRecordsPanel() {
           {tab === "notes" && (
             <div className="space-y-4">
               <section className="rounded-2xl border border-border bg-secondary/40 p-3">
+                <label htmlFor="new-note-subject" className="text-[10px] font-semibold">
+                  Subject
+                </label>
                 <input
+                  id="new-note-subject"
                   value={noteTitle}
                   onChange={(event) => setNoteTitle(event.target.value)}
-                  placeholder="Note title (optional)"
-                  className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm outline-none focus:border-primary"
+                  placeholder="What is this note about?"
+                  className="mt-1 w-full rounded-xl border border-border bg-card px-3 py-2 text-sm outline-none focus:border-primary"
                 />
+                <label htmlFor="new-note-body" className="mt-2 block text-[10px] font-semibold">
+                  Note
+                </label>
                 <textarea
+                  id="new-note-body"
                   value={noteBody}
                   onChange={(event) => setNoteBody(event.target.value)}
                   placeholder="Add a project note…"
                   rows={4}
-                  className="mt-2 w-full resize-y rounded-xl border border-border bg-card px-3 py-2 text-sm outline-none focus:border-primary"
+                  className="mt-1 w-full resize-y rounded-xl border border-border bg-card px-3 py-2 text-sm outline-none focus:border-primary"
                 />
                 <button
                   onClick={addNote}
@@ -511,47 +552,193 @@ export function ProjectRecordsPanel() {
                   <Plus className="size-3.5" /> Add note
                 </button>
               </section>
-              {records.notes.map((note) => (
-                <article key={note.id} className="rounded-2xl border border-border p-3">
-                  <div className="flex items-start gap-2">
-                    <div className="min-w-0 flex-1">
-                      <h3 className="font-semibold">{note.title}</h3>
-                      <p className="text-[10px] text-muted-foreground">
-                        {note.author} · {new Date(note.createdAt).toLocaleString()}
+
+              {layerNotes.length > 0 && (
+                <section className="rounded-2xl border border-border p-3">
+                  <div className="mb-2 flex items-center gap-2">
+                    <Layers3 className="size-4 text-primary" />
+                    <div>
+                      <h3 className="text-xs font-semibold">Layer notes</h3>
+                      <p className="text-[9px] text-muted-foreground">
+                        Saved notes listed in current layer order
                       </p>
                     </div>
+                  </div>
+                  <div className="space-y-1">
+                    {layerNotes.map(({ layer, order }) => (
+                      <button
+                        key={layer.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedLayerNoteId(layer.id);
+                          setLayerNoteDrafts((current) => ({
+                            ...current,
+                            [layer.id]: layer.note ?? "",
+                          }));
+                          setTab("layer-notes");
+                        }}
+                        className="flex w-full items-center gap-2 rounded-xl bg-secondary px-2.5 py-2 text-left hover:bg-accent"
+                      >
+                        <span className="num flex size-6 shrink-0 items-center justify-center rounded-lg bg-card text-[9px] font-semibold">
+                          {order}
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-[11px] font-semibold">
+                            {layer.name}
+                          </span>
+                          <span className="block truncate text-[9px] text-muted-foreground">
+                            {layer.note}
+                          </span>
+                        </span>
+                        <ChevronRight className="size-3.5 text-muted-foreground" />
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              <section className="rounded-2xl border border-border p-3">
+                <h3 className="mb-2 text-xs font-semibold">Project notes</h3>
+                <div className="space-y-1">
+                  {records.notes.map((note) => (
+                    <button
+                      key={note.id}
+                      type="button"
+                      onClick={() => setNoteEditor({ ...note })}
+                      className={cn(
+                        "flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left hover:bg-accent",
+                        noteEditor?.id === note.id
+                          ? "bg-accent ring-1 ring-primary"
+                          : "bg-secondary",
+                      )}
+                    >
+                      <NotebookPen className="size-3.5 shrink-0 text-primary" />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[11px] font-semibold">
+                          {note.title}
+                        </span>
+                        <span className="block truncate text-[9px] text-muted-foreground">
+                          {note.author} · {new Date(note.createdAt).toLocaleString()}
+                        </span>
+                      </span>
+                      <ChevronRight className="size-3.5 text-muted-foreground" />
+                    </button>
+                  ))}
+                  {!records.notes.length && (
+                    <Empty text="No project notes yet. Notes can be included on maps and in project packets." />
+                  )}
+                </div>
+              </section>
+
+              {noteEditor && (
+                <section className="rounded-2xl border border-primary/30 bg-primary/5 p-3">
+                  <div className="flex items-center gap-2">
+                    <h3 className="min-w-0 flex-1 truncate text-xs font-semibold">Edit note</h3>
+                    <button
+                      type="button"
+                      onClick={() => setNoteEditor(null)}
+                      className="rounded-lg p-1 hover:bg-accent"
+                      aria-label="Close note editor"
+                    >
+                      <X className="size-3.5" />
+                    </button>
+                  </div>
+                  <label className="mt-2 block text-[10px] font-semibold">
+                    Subject
+                    <input
+                      value={noteEditor.title}
+                      onChange={(event) =>
+                        setNoteEditor((current) =>
+                          current ? { ...current, title: event.target.value } : current,
+                        )
+                      }
+                      className="mt-1 w-full rounded-xl border border-border bg-card px-3 py-2 text-xs outline-none focus:border-primary"
+                    />
+                  </label>
+                  <label className="mt-2 block text-[10px] font-semibold">
+                    Note
+                    <textarea
+                      value={noteEditor.body}
+                      onChange={(event) =>
+                        setNoteEditor((current) =>
+                          current ? { ...current, body: event.target.value } : current,
+                        )
+                      }
+                      rows={5}
+                      className="mt-1 w-full resize-y rounded-xl border border-border bg-card px-3 py-2 text-xs leading-relaxed outline-none focus:border-primary"
+                    />
+                  </label>
+                  <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                    <label className="text-[10px] font-semibold">
+                      Date and time
+                      <input
+                        type="datetime-local"
+                        value={dateTimeInputValue(noteEditor.createdAt)}
+                        onChange={(event) => {
+                          const timestamp = new Date(event.target.value).getTime();
+                          if (Number.isFinite(timestamp))
+                            setNoteEditor((current) =>
+                              current ? { ...current, createdAt: timestamp } : current,
+                            );
+                        }}
+                        className="mt-1 w-full rounded-xl border border-border bg-card px-2 py-2 text-[10px]"
+                      />
+                    </label>
+                    <label className="text-[10px] font-semibold">
+                      Author or source
+                      <input
+                        value={noteEditor.author}
+                        onChange={(event) =>
+                          setNoteEditor((current) =>
+                            current ? { ...current, author: event.target.value } : current,
+                          )
+                        }
+                        className="mt-1 w-full rounded-xl border border-border bg-card px-2 py-2 text-[10px]"
+                      />
+                    </label>
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={saveEditedNote}
+                      className="flex items-center gap-1.5 rounded-xl bg-primary px-3 py-2 text-[10px] font-semibold text-primary-foreground"
+                    >
+                      <Save className="size-3.5" /> Save changes
+                    </button>
                     <label className="flex items-center gap-1 text-[10px]">
                       <input
                         type="checkbox"
-                        checked={note.includeInPacket}
+                        checked={noteEditor.includeInPacket}
                         onChange={(event) =>
-                          update({
-                            notes: records.notes.map((item) =>
-                              item.id === note.id
-                                ? { ...item, includeInPacket: event.target.checked }
-                                : item,
-                            ),
-                          })
+                          setNoteEditor((current) =>
+                            current
+                              ? { ...current, includeInPacket: event.target.checked }
+                              : current,
+                          )
                         }
                         className="accent-primary"
-                      />{" "}
-                      Packet
+                      />
+                      Include in packet
                     </label>
                     <button
-                      onClick={() =>
-                        update({ notes: records.notes.filter((item) => item.id !== note.id) })
-                      }
-                      className="p-1 text-destructive"
-                      aria-label={`Delete ${note.title}`}
+                      type="button"
+                      onClick={() => {
+                        if (!window.confirm(`Delete “${noteEditor.title}”?`)) return;
+                        update({
+                          notes: records.notes.filter((note) => note.id !== noteEditor.id),
+                        });
+                        setNoteEditor(null);
+                        toast.success("Note deleted");
+                      }}
+                      className="ml-auto flex items-center gap-1 rounded-lg px-2 py-1.5 text-[10px] font-semibold text-destructive hover:bg-destructive/10"
                     >
-                      <Trash2 className="size-3.5" />
+                      <Trash2 className="size-3" /> Delete
                     </button>
                   </div>
-                  <p className="mt-2 whitespace-pre-wrap text-xs leading-relaxed">{note.body}</p>
-                </article>
-              ))}
-              {!records.notes.length && (
-                <Empty text="No notes yet. Notes can be included on maps and in project packets." />
+                  <p className="mt-2 text-[9px] text-muted-foreground">
+                    Last edited {new Date(noteEditor.updatedAt).toLocaleString()}
+                  </p>
+                </section>
               )}
             </div>
           )}
@@ -572,7 +759,13 @@ export function ProjectRecordsPanel() {
               {layerNotes.map(({ layer, order }) => {
                 const group = wb.groups.find((item) => item.id === layer.groupId);
                 return (
-                  <article key={layer.id} className="rounded-2xl border border-border p-3">
+                  <article
+                    key={layer.id}
+                    className={cn(
+                      "rounded-2xl border border-border p-3",
+                      selectedLayerNoteId === layer.id && "border-primary bg-primary/5",
+                    )}
+                  >
                     <div className="flex items-start gap-2">
                       <span className="num flex size-7 shrink-0 items-center justify-center rounded-lg bg-secondary text-[10px] font-semibold">
                         {order}

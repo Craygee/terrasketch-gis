@@ -292,17 +292,15 @@ export const shareStore = {
     if (!cloudConfigured) throw new Error("Cloud sharing is not configured");
     const id = window.crypto.randomUUID();
     const statePath = await uploadShareState(input.userId, input.projectId, id, input.state);
-    const rows = await cloudDataRequest<ShareRow[]>("/rest/v1/project_shares", {
+    const rows = await cloudDataRequest<ShareRow[]>("/rest/v1/rpc/create_project_share", {
       method: "POST",
-      headers: { Prefer: "return=representation" },
       body: JSON.stringify({
-        id,
-        project_id: input.projectId,
-        owner_id: input.userId,
-        name: input.name.trim(),
-        state_path: statePath,
-        map_view: input.mapView,
-        layer_scope: input.layerScope,
+        p_id: id,
+        p_project_id: input.projectId,
+        p_name: input.name.trim(),
+        p_state_path: statePath,
+        p_map_view: input.mapView,
+        p_layer_scope: input.layerScope,
       }),
     });
     const row = rows[0];

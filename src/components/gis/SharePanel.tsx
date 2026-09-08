@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { bbox as turfBbox } from "@turf/turf";
 import {
   Check,
+  ChevronRight,
   Clipboard,
   Copy,
   ExternalLink,
@@ -66,23 +67,33 @@ const shareViewForScope = (
   layers: ReturnType<typeof useWorkbench>["layers"],
 ): MapViewState => {
   if (!map) return fallback;
-  const features = scope.flatMap((entry) => {
+  const candidates = scope.flatMap((entry) => {
     const layer = layers.find((item) => item.id === entry.layerId);
-    if (!layer) return [];
-    if (!entry.featureIndexes) return layer.data.features;
-    const selected = new Set(entry.featureIndexes);
-    return layer.data.features.filter((_, index) => selected.has(index));
+    if (!layer || !layer.visible) return [];
+    const selected = entry.featureIndexes ? new Set(entry.featureIndexes) : null;
+    const features = selected
+      ? layer.data.features.filter((_, index) => selected.has(index))
+      : layer.data.features;
+    if (!features.length) return [];
+    try {
+      const bounds = turfBbox({ type: "FeatureCollection", features } as never) as [
+        number,
+        number,
+        number,
+        number,
+      ];
+      if (!bounds.every(Number.isFinite)) return [];
+      const width = Math.abs(bounds[2] - bounds[0]);
+      const height = Math.abs(bounds[3] - bounds[1]);
+      return [{ bounds, score: width * height || width + height || 1 }];
+    } catch {
+      return [];
+    }
   });
-  if (!features.length) return mapViewFrom(map, fallback);
+  const largest = candidates.sort((a, b) => b.score - a.score)[0];
+  if (!largest) return mapViewFrom(map, fallback);
   try {
-    const bounds = turfBbox({ type: "FeatureCollection", features } as never) as [
-      number,
-      number,
-      number,
-      number,
-    ];
-    if (!bounds.every(Number.isFinite)) return mapViewFrom(map, fallback);
-    const camera = map.cameraForBounds(bounds, { padding: 70, maxZoom: 16 });
+    const camera = map.cameraForBounds(largest.bounds, { padding: 70, maxZoom: 16 });
     if (!camera?.center) return mapViewFrom(map, fallback);
     const center = Array.isArray(camera.center)
       ? camera.center
@@ -98,6 +109,45 @@ const shareViewForScope = (
   } catch {
     return mapViewFrom(map, fallback);
   }
+};
+
+const flattenedShareGroups = (
+  groups: ReturnType<typeof useWorkbench>["groups"],
+): Array<{ group: ReturnType<typeof useWorkbench>["groups"][number]; depth: number }> => {
+  const result: Array<{
+    group: ReturnType<typeof useWorkbench>["groups"][number];
+    depth: number;
+  }> = [];
+  const visited = new Set<string>();
+  const visit = (group: ReturnType<typeof useWorkbench>["groups"][number], depth: number) => {
+    if (visited.has(group.id)) return;
+    visited.add(group.id);
+    result.push({ group, depth });
+    groups.filter((item) => item.parentId === group.id).forEach((child) => visit(child, depth + 1));
+  };
+  groups
+    .filter((group) => !group.parentId || !groups.some((item) => item.id === group.parentId))
+    .forEach((group) => visit(group, 0));
+  groups.filter((group) => !visited.has(group.id)).forEach((group) => visit(group, 0));
+  return result;
+};
+
+const nestedShareGroupIds = (
+  groupId: string,
+  groups: ReturnType<typeof useWorkbench>["groups"],
+) => {
+  const ids = new Set([groupId]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    groups.forEach((group) => {
+      if (group.parentId && ids.has(group.parentId) && !ids.has(group.id)) {
+        ids.add(group.id);
+        changed = true;
+      }
+    });
+  }
+  return ids;
 };
 
 export function SharePanel({ onClose }: { onClose: () => void }) {
@@ -149,6 +199,19 @@ export function SharePanel({ onClose }: { onClose: () => void }) {
     }
     return result;
   }, [wb.selectedFeatures]);
+  const shareGroups = useMemo(() => flattenedShareGroups(wb.groups), [wb.groups]);
+
+  const setGroupIncluded = (groupId: string, checked: boolean) => {
+    const groupIds = nestedShareGroupIds(groupId, wb.groups);
+    setIncluded((current) => ({
+      ...current,
+      ...Object.fromEntries(
+        wb.layers
+          .filter((layer) => groupIds.has(layer.groupId))
+          .map((layer) => [layer.id, checked]),
+      ),
+    }));
+  };
 
   const currentScope = (): ShareLayerScope[] =>
     wb.layers.flatMap((layer) => {
@@ -338,49 +401,89 @@ export function SharePanel({ onClose }: { onClose: () => void }) {
                     {Object.values(included).filter(Boolean).length} included
                   </span>
                 </div>
-                <div className="max-h-52 space-y-1 overflow-y-auto p-2">
-                  {wb.layers.map((layer) => {
-                    const selectedCount = selectedByLayer.get(layer.id)?.length ?? 0;
+                <div className="max-h-64 space-y-1 overflow-y-auto p-2">
+                  {shareGroups.map(({ group, depth }) => {
+                    const nestedIds = nestedShareGroupIds(group.id, wb.groups);
+                    const groupedLayers = wb.layers.filter((layer) => nestedIds.has(layer.groupId));
+                    const includedCount = groupedLayers.filter(
+                      (layer) => included[layer.id],
+                    ).length;
                     return (
-                      <div key={layer.id} className="rounded-lg bg-secondary p-2">
-                        <label className="flex items-center gap-2">
+                      <div key={group.id}>
+                        <label
+                          className="flex items-center gap-1.5 rounded-lg bg-accent/50 px-2 py-1.5 font-semibold"
+                          style={{ marginLeft: depth * 12 }}
+                        >
                           <input
                             type="checkbox"
-                            checked={Boolean(included[layer.id])}
-                            onChange={(event) =>
-                              setIncluded((current) => ({
-                                ...current,
-                                [layer.id]: event.target.checked,
-                              }))
+                            checked={
+                              groupedLayers.length > 0 && includedCount === groupedLayers.length
                             }
+                            ref={(input) => {
+                              if (input)
+                                input.indeterminate =
+                                  includedCount > 0 && includedCount < groupedLayers.length;
+                            }}
+                            onChange={(event) => setGroupIncluded(group.id, event.target.checked)}
                             className="accent-primary"
                           />
-                          <span
-                            className="size-2.5 rounded-full"
-                            style={{ background: layer.style.fillColor }}
-                          />
-                          <span className="min-w-0 flex-1 truncate font-medium">{layer.name}</span>
-                          <span className="num text-[10px] text-muted-foreground">
-                            {layer.data.features.length.toLocaleString()}
+                          <ChevronRight className="size-3 text-muted-foreground" />
+                          <span className="min-w-0 flex-1 truncate">{group.name}</span>
+                          <span className="num text-[9px] text-muted-foreground">
+                            {includedCount}/{groupedLayers.length}
                           </span>
                         </label>
-                        {selectedCount > 0 && included[layer.id] && (
-                          <label className="mt-1.5 flex items-center gap-2 pl-5 text-[10px] text-muted-foreground">
-                            <input
-                              type="checkbox"
-                              checked={Boolean(selectedOnly[layer.id])}
-                              onChange={(event) =>
-                                setSelectedOnly((current) => ({
-                                  ...current,
-                                  [layer.id]: event.target.checked,
-                                }))
-                              }
-                              className="accent-primary"
-                            />
-                            Share only the {selectedCount} selected feature
-                            {selectedCount === 1 ? "" : "s"}
-                          </label>
-                        )}
+                        <div className="mt-1 space-y-1" style={{ marginLeft: depth * 12 + 18 }}>
+                          {wb.layers
+                            .filter((layer) => layer.groupId === group.id)
+                            .map((layer) => {
+                              const selectedCount = selectedByLayer.get(layer.id)?.length ?? 0;
+                              return (
+                                <div key={layer.id} className="rounded-lg bg-secondary p-2">
+                                  <label className="flex items-center gap-2">
+                                    <input
+                                      type="checkbox"
+                                      checked={Boolean(included[layer.id])}
+                                      onChange={(event) =>
+                                        setIncluded((current) => ({
+                                          ...current,
+                                          [layer.id]: event.target.checked,
+                                        }))
+                                      }
+                                      className="accent-primary"
+                                    />
+                                    <span
+                                      className="size-2.5 rounded-full"
+                                      style={{ background: layer.style.fillColor }}
+                                    />
+                                    <span className="min-w-0 flex-1 truncate font-medium">
+                                      {layer.name}
+                                    </span>
+                                    <span className="num text-[10px] text-muted-foreground">
+                                      {layer.data.features.length.toLocaleString()}
+                                    </span>
+                                  </label>
+                                  {selectedCount > 0 && included[layer.id] && (
+                                    <label className="mt-1.5 flex items-center gap-2 pl-5 text-[10px] text-muted-foreground">
+                                      <input
+                                        type="checkbox"
+                                        checked={Boolean(selectedOnly[layer.id])}
+                                        onChange={(event) =>
+                                          setSelectedOnly((current) => ({
+                                            ...current,
+                                            [layer.id]: event.target.checked,
+                                          }))
+                                        }
+                                        className="accent-primary"
+                                      />
+                                      Share only the {selectedCount} selected feature
+                                      {selectedCount === 1 ? "" : "s"}
+                                    </label>
+                                  )}
+                                </div>
+                              );
+                            })}
+                        </div>
                       </div>
                     );
                   })}
