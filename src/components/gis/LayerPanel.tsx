@@ -1529,51 +1529,287 @@ export function LayerPanel() {
                                   </p>
                                   {layerNotes.length > 0 ? (
                                     <div className="space-y-1">
-                                      {layerNotes.map((note) => (
-                                        <button
-                                          key={note.id}
-                                          type="button"
-                                          onClick={() => {
-                                            setLayerNoteEditor({ ...note });
-                                            setLayerNoteEditorTagText(tagDraft(note.tags));
-                                            setEditingTimestampOpen(false);
-                                          }}
-                                          className={cn(
-                                            "flex w-full items-start gap-1.5 rounded-lg bg-card px-2 py-1.5 text-left hover:bg-accent",
-                                            layerNoteEditor?.id === note.id &&
-                                              "ring-1 ring-primary",
-                                          )}
-                                        >
-                                          <NotebookPen className="mt-0.5 size-3 shrink-0 text-primary" />
-                                          <span className="min-w-0 flex-1">
-                                            <span className="block truncate text-[10px] font-semibold">
-                                              {note.pinned && (
-                                                <Pin className="mr-1 inline size-2.5 text-primary" />
+                                      {layerNotes.map((note) => {
+                                        const noteOpen = layerNoteEditor?.id === note.id;
+                                        return (
+                                          <div key={note.id} className="space-y-1">
+                                            <button
+                                              type="button"
+                                              aria-expanded={noteOpen}
+                                              onClick={() => {
+                                                if (noteOpen) {
+                                                  setLayerNoteEditor(null);
+                                                  setLayerNoteEditorTagText("");
+                                                  setEditingTimestampOpen(false);
+                                                  return;
+                                                }
+                                                setLayerNoteEditor({ ...note });
+                                                setLayerNoteEditorTagText(tagDraft(note.tags));
+                                                setEditingTimestampOpen(false);
+                                              }}
+                                              className={cn(
+                                                "flex w-full items-start gap-1.5 rounded-lg bg-card px-2 py-1.5 text-left hover:bg-accent",
+                                                noteOpen && "ring-1 ring-primary",
                                               )}
-                                              {note.subject}
-                                            </span>
-                                            <span className="block truncate text-[8px] text-muted-foreground">
-                                              {new Date(note.createdAt).toLocaleString()}
-                                              {attachmentsForNote(note.id).length
-                                                ? ` · ${attachmentsForNote(note.id).length} file${attachmentsForNote(note.id).length === 1 ? "" : "s"}`
-                                                : ""}
-                                            </span>
-                                            {note.tags.length > 0 && (
-                                              <span className="mt-1 flex flex-wrap gap-1">
-                                                {note.tags.map((tag) => (
-                                                  <span
-                                                    key={tag}
-                                                    className="rounded-full bg-secondary px-1.5 py-0.5 text-[8px]"
-                                                  >
-                                                    #{tag}
+                                            >
+                                              <NotebookPen className="mt-0.5 size-3 shrink-0 text-primary" />
+                                              <span className="min-w-0 flex-1">
+                                                <span className="block truncate text-[10px] font-semibold">
+                                                  {note.pinned && (
+                                                    <Pin className="mr-1 inline size-2.5 text-primary" />
+                                                  )}
+                                                  {note.subject}
+                                                </span>
+                                                <span className="block truncate text-[8px] text-muted-foreground">
+                                                  {new Date(note.createdAt).toLocaleString()}
+                                                  {attachmentsForNote(note.id).length
+                                                    ? ` · ${attachmentsForNote(note.id).length} file${attachmentsForNote(note.id).length === 1 ? "" : "s"}`
+                                                    : ""}
+                                                </span>
+                                                {note.tags.length > 0 && (
+                                                  <span className="mt-1 flex flex-wrap gap-1">
+                                                    {note.tags.map((tag) => (
+                                                      <span
+                                                        key={tag}
+                                                        className="rounded-full bg-secondary px-1.5 py-0.5 text-[8px]"
+                                                      >
+                                                        #{tag}
+                                                      </span>
+                                                    ))}
                                                   </span>
-                                                ))}
+                                                )}
                                               </span>
+                                              {noteOpen ? (
+                                                <ChevronDown className="mt-0.5 size-3 shrink-0 text-muted-foreground" />
+                                              ) : (
+                                                <ChevronRight className="mt-0.5 size-3 shrink-0 text-muted-foreground" />
+                                              )}
+                                            </button>
+
+                                            {noteOpen && layerNoteEditor && (
+                                              <section className="rounded-lg border border-primary/30 bg-card p-2">
+                                                <div className="flex items-center gap-1.5">
+                                                  <p className="min-w-0 flex-1 truncate text-[10px] font-semibold">
+                                                    Edit saved note
+                                                  </p>
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => setLayerNoteEditor(null)}
+                                                    className="rounded px-1.5 py-0.5 text-[9px] text-muted-foreground hover:bg-accent"
+                                                  >
+                                                    Close
+                                                  </button>
+                                                </div>
+                                                <div className="mt-1.5 grid grid-cols-[1fr_auto] gap-1">
+                                                  <input
+                                                    aria-label="Layer note subject"
+                                                    value={layerNoteEditor.subject}
+                                                    onChange={(event) =>
+                                                      setLayerNoteEditor((current) =>
+                                                        current
+                                                          ? {
+                                                              ...current,
+                                                              subject: event.target.value,
+                                                            }
+                                                          : current,
+                                                      )
+                                                    }
+                                                    className="rounded-lg border border-border px-2 py-1.5 text-[10px] outline-none focus:border-primary"
+                                                  />
+                                                  <button
+                                                    type="button"
+                                                    onClick={() =>
+                                                      setEditingTimestampOpen((current) => !current)
+                                                    }
+                                                    className={cn(
+                                                      "flex size-7 items-center justify-center rounded-lg border border-border hover:bg-accent",
+                                                      editingTimestampOpen &&
+                                                        "border-primary text-primary",
+                                                    )}
+                                                    title="Change timestamp"
+                                                  >
+                                                    <Clock3 className="size-3.5" />
+                                                  </button>
+                                                </div>
+                                                {editingTimestampOpen && (
+                                                  <input
+                                                    aria-label="Layer note date and time"
+                                                    type="datetime-local"
+                                                    value={timestampInputValue(
+                                                      layerNoteEditor.createdAt,
+                                                    )}
+                                                    onChange={(event) =>
+                                                      setLayerNoteEditor((current) =>
+                                                        current
+                                                          ? {
+                                                              ...current,
+                                                              createdAt:
+                                                                new Date(
+                                                                  event.target.value,
+                                                                ).getTime() || current.createdAt,
+                                                            }
+                                                          : current,
+                                                      )
+                                                    }
+                                                    className="mt-1.5 w-full rounded-lg border border-border px-2 py-1.5 text-[10px]"
+                                                  />
+                                                )}
+                                                <input
+                                                  aria-label="Layer note tags"
+                                                  value={layerNoteEditorTagText}
+                                                  onChange={(event) =>
+                                                    setLayerNoteEditorTagText(event.target.value)
+                                                  }
+                                                  placeholder="Tags — type # for suggestions"
+                                                  className="mt-1.5 w-full rounded-lg border border-border px-2 py-1.5 text-[10px] outline-none focus:border-primary"
+                                                />
+                                                {editorTagSuggestions.length > 0 && (
+                                                  <div className="mt-1 flex flex-wrap gap-1">
+                                                    {editorTagSuggestions.map((tag) => (
+                                                      <button
+                                                        key={tag}
+                                                        type="button"
+                                                        onClick={() =>
+                                                          setLayerNoteEditorTagText((current) =>
+                                                            applyTagSuggestion(current, tag),
+                                                          )
+                                                        }
+                                                        className="rounded-full bg-secondary px-2 py-0.5 text-[9px] hover:bg-accent"
+                                                      >
+                                                        #{tag}
+                                                      </button>
+                                                    ))}
+                                                  </div>
+                                                )}
+                                                <textarea
+                                                  aria-label="Layer note"
+                                                  value={layerNoteEditor.body}
+                                                  onChange={(event) =>
+                                                    setLayerNoteEditor((current) =>
+                                                      current
+                                                        ? { ...current, body: event.target.value }
+                                                        : current,
+                                                    )
+                                                  }
+                                                  rows={5}
+                                                  className="mt-1.5 w-full resize-y rounded-lg border border-border px-2 py-1.5 text-[10px] leading-relaxed outline-none focus:border-primary"
+                                                />
+                                                <label className="mt-1.5 flex items-center gap-1.5 rounded-lg bg-secondary px-2 py-1.5 text-[9px] font-semibold">
+                                                  <input
+                                                    type="checkbox"
+                                                    checked={Boolean(layerNoteEditor.pinned)}
+                                                    onChange={(event) =>
+                                                      setLayerNoteEditor((current) =>
+                                                        current
+                                                          ? {
+                                                              ...current,
+                                                              pinned: event.target.checked,
+                                                            }
+                                                          : current,
+                                                      )
+                                                    }
+                                                    className="accent-primary"
+                                                  />
+                                                  <Pin className="size-3 text-primary" /> Pin in
+                                                  Project Records
+                                                </label>
+                                                <div
+                                                  onDragOver={(event) => event.preventDefault()}
+                                                  onDrop={(event) => {
+                                                    event.preventDefault();
+                                                    void addLayerAttachments(
+                                                      layer,
+                                                      layerNoteEditor.id,
+                                                      event.dataTransfer.files,
+                                                    );
+                                                  }}
+                                                  className="mt-1.5 rounded-lg border border-dashed border-border p-1.5 text-center text-[9px] text-muted-foreground"
+                                                >
+                                                  Drop attachments or{" "}
+                                                  <label className="cursor-pointer font-semibold text-primary hover:underline">
+                                                    browse
+                                                    <input
+                                                      type="file"
+                                                      multiple
+                                                      className="hidden"
+                                                      onChange={(event) => {
+                                                        if (event.target.files)
+                                                          void addLayerAttachments(
+                                                            layer,
+                                                            layerNoteEditor.id,
+                                                            event.target.files,
+                                                          );
+                                                        event.currentTarget.value = "";
+                                                      }}
+                                                    />
+                                                  </label>
+                                                </div>
+                                                {attachmentsForNote(layerNoteEditor.id).length >
+                                                  0 && (
+                                                  <div className="mt-1.5 space-y-1">
+                                                    {attachmentsForNote(layerNoteEditor.id).map(
+                                                      (document) => (
+                                                        <div
+                                                          key={document.id}
+                                                          className="flex items-center gap-1.5 rounded-md bg-secondary px-1.5 py-1"
+                                                        >
+                                                          <FileText className="size-3 shrink-0 text-muted-foreground" />
+                                                          <span className="min-w-0 flex-1 truncate text-[9px]">
+                                                            {document.name} ·{" "}
+                                                            {formatFileSize(document.size)}
+                                                          </span>
+                                                          <button
+                                                            type="button"
+                                                            onClick={() =>
+                                                              void downloadProjectAsset(document)
+                                                            }
+                                                            className="rounded p-0.5 hover:bg-accent"
+                                                            aria-label={`Download ${document.name}`}
+                                                          >
+                                                            <Download className="size-2.5" />
+                                                          </button>
+                                                          <button
+                                                            type="button"
+                                                            onClick={() =>
+                                                              void removeLayerAttachment(
+                                                                layer,
+                                                                document,
+                                                              )
+                                                            }
+                                                            className="rounded p-0.5 text-destructive hover:bg-destructive/10"
+                                                            aria-label={`Remove ${document.name}`}
+                                                          >
+                                                            <Trash2 className="size-2.5" />
+                                                          </button>
+                                                        </div>
+                                                      ),
+                                                    )}
+                                                  </div>
+                                                )}
+                                                <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                                                  <button
+                                                    type="button"
+                                                    onClick={saveEditedLayerNote}
+                                                    className="flex items-center gap-1 rounded-lg bg-primary px-2 py-1 text-[9px] font-semibold text-primary-foreground"
+                                                  >
+                                                    <Save className="size-3" /> Save changes
+                                                  </button>
+                                                  <button
+                                                    type="button"
+                                                    disabled={attachmentBusyFor === layer.id}
+                                                    onClick={() =>
+                                                      void deleteLayerNote(layer, layerNoteEditor)
+                                                    }
+                                                    className="ml-auto rounded-lg px-2 py-1 text-[9px] font-semibold text-destructive hover:bg-destructive/10 disabled:opacity-50"
+                                                  >
+                                                    Delete note
+                                                  </button>
+                                                </div>
+                                              </section>
                                             )}
-                                          </span>
-                                          <ChevronRight className="mt-0.5 size-3 shrink-0 text-muted-foreground" />
-                                        </button>
-                                      ))}
+                                          </div>
+                                        );
+                                      })}
                                     </div>
                                   ) : (
                                     <p className="text-[9px] text-muted-foreground">
@@ -1581,206 +1817,6 @@ export function LayerPanel() {
                                     </p>
                                   )}
                                 </div>
-
-                                {layerNoteEditor?.layerId === layer.id && (
-                                  <section className="rounded-lg border border-primary/30 bg-card p-2">
-                                    <div className="flex items-center gap-1.5">
-                                      <p className="min-w-0 flex-1 truncate text-[10px] font-semibold">
-                                        Edit saved note
-                                      </p>
-                                      <button
-                                        type="button"
-                                        onClick={() => setLayerNoteEditor(null)}
-                                        className="rounded px-1.5 py-0.5 text-[9px] text-muted-foreground hover:bg-accent"
-                                      >
-                                        Close
-                                      </button>
-                                    </div>
-                                    <div className="mt-1.5 grid grid-cols-[1fr_auto] gap-1">
-                                      <input
-                                        aria-label="Layer note subject"
-                                        value={layerNoteEditor.subject}
-                                        onChange={(event) =>
-                                          setLayerNoteEditor((current) =>
-                                            current
-                                              ? { ...current, subject: event.target.value }
-                                              : current,
-                                          )
-                                        }
-                                        className="rounded-lg border border-border px-2 py-1.5 text-[10px] outline-none focus:border-primary"
-                                      />
-                                      <button
-                                        type="button"
-                                        onClick={() =>
-                                          setEditingTimestampOpen((current) => !current)
-                                        }
-                                        className={cn(
-                                          "flex size-7 items-center justify-center rounded-lg border border-border hover:bg-accent",
-                                          editingTimestampOpen && "border-primary text-primary",
-                                        )}
-                                        title="Change timestamp"
-                                      >
-                                        <Clock3 className="size-3.5" />
-                                      </button>
-                                    </div>
-                                    {editingTimestampOpen && (
-                                      <input
-                                        aria-label="Layer note date and time"
-                                        type="datetime-local"
-                                        value={timestampInputValue(layerNoteEditor.createdAt)}
-                                        onChange={(event) =>
-                                          setLayerNoteEditor((current) =>
-                                            current
-                                              ? {
-                                                  ...current,
-                                                  createdAt:
-                                                    new Date(event.target.value).getTime() ||
-                                                    current.createdAt,
-                                                }
-                                              : current,
-                                          )
-                                        }
-                                        className="mt-1.5 w-full rounded-lg border border-border px-2 py-1.5 text-[10px]"
-                                      />
-                                    )}
-                                    <input
-                                      aria-label="Layer note tags"
-                                      value={layerNoteEditorTagText}
-                                      onChange={(event) =>
-                                        setLayerNoteEditorTagText(event.target.value)
-                                      }
-                                      placeholder="Tags — type # for suggestions"
-                                      className="mt-1.5 w-full rounded-lg border border-border px-2 py-1.5 text-[10px] outline-none focus:border-primary"
-                                    />
-                                    {editorTagSuggestions.length > 0 && (
-                                      <div className="mt-1 flex flex-wrap gap-1">
-                                        {editorTagSuggestions.map((tag) => (
-                                          <button
-                                            key={tag}
-                                            type="button"
-                                            onClick={() =>
-                                              setLayerNoteEditorTagText((current) =>
-                                                applyTagSuggestion(current, tag),
-                                              )
-                                            }
-                                            className="rounded-full bg-secondary px-2 py-0.5 text-[9px] hover:bg-accent"
-                                          >
-                                            #{tag}
-                                          </button>
-                                        ))}
-                                      </div>
-                                    )}
-                                    <textarea
-                                      aria-label="Layer note"
-                                      value={layerNoteEditor.body}
-                                      onChange={(event) =>
-                                        setLayerNoteEditor((current) =>
-                                          current
-                                            ? { ...current, body: event.target.value }
-                                            : current,
-                                        )
-                                      }
-                                      rows={5}
-                                      className="mt-1.5 w-full resize-y rounded-lg border border-border px-2 py-1.5 text-[10px] leading-relaxed outline-none focus:border-primary"
-                                    />
-                                    <label className="mt-1.5 flex items-center gap-1.5 rounded-lg bg-secondary px-2 py-1.5 text-[9px] font-semibold">
-                                      <input
-                                        type="checkbox"
-                                        checked={Boolean(layerNoteEditor.pinned)}
-                                        onChange={(event) =>
-                                          setLayerNoteEditor((current) =>
-                                            current
-                                              ? { ...current, pinned: event.target.checked }
-                                              : current,
-                                          )
-                                        }
-                                        className="accent-primary"
-                                      />
-                                      <Pin className="size-3 text-primary" /> Pin in Project Records
-                                    </label>
-                                    <div
-                                      onDragOver={(event) => event.preventDefault()}
-                                      onDrop={(event) => {
-                                        event.preventDefault();
-                                        void addLayerAttachments(
-                                          layer,
-                                          layerNoteEditor.id,
-                                          event.dataTransfer.files,
-                                        );
-                                      }}
-                                      className="mt-1.5 rounded-lg border border-dashed border-border p-1.5 text-center text-[9px] text-muted-foreground"
-                                    >
-                                      Drop attachments or{" "}
-                                      <label className="cursor-pointer font-semibold text-primary hover:underline">
-                                        browse
-                                        <input
-                                          type="file"
-                                          multiple
-                                          className="hidden"
-                                          onChange={(event) => {
-                                            if (event.target.files)
-                                              void addLayerAttachments(
-                                                layer,
-                                                layerNoteEditor.id,
-                                                event.target.files,
-                                              );
-                                            event.currentTarget.value = "";
-                                          }}
-                                        />
-                                      </label>
-                                    </div>
-                                    {attachmentsForNote(layerNoteEditor.id).length > 0 && (
-                                      <div className="mt-1.5 space-y-1">
-                                        {attachmentsForNote(layerNoteEditor.id).map((document) => (
-                                          <div
-                                            key={document.id}
-                                            className="flex items-center gap-1.5 rounded-md bg-secondary px-1.5 py-1"
-                                          >
-                                            <FileText className="size-3 shrink-0 text-muted-foreground" />
-                                            <span className="min-w-0 flex-1 truncate text-[9px]">
-                                              {document.name} · {formatFileSize(document.size)}
-                                            </span>
-                                            <button
-                                              type="button"
-                                              onClick={() => void downloadProjectAsset(document)}
-                                              className="rounded p-0.5 hover:bg-accent"
-                                              aria-label={`Download ${document.name}`}
-                                            >
-                                              <Download className="size-2.5" />
-                                            </button>
-                                            <button
-                                              type="button"
-                                              onClick={() =>
-                                                void removeLayerAttachment(layer, document)
-                                              }
-                                              className="rounded p-0.5 text-destructive hover:bg-destructive/10"
-                                              aria-label={`Remove ${document.name}`}
-                                            >
-                                              <Trash2 className="size-2.5" />
-                                            </button>
-                                          </div>
-                                        ))}
-                                      </div>
-                                    )}
-                                    <div className="mt-1.5 flex flex-wrap items-center gap-1">
-                                      <button
-                                        type="button"
-                                        onClick={saveEditedLayerNote}
-                                        className="flex items-center gap-1 rounded-lg bg-primary px-2 py-1 text-[9px] font-semibold text-primary-foreground"
-                                      >
-                                        <Save className="size-3" /> Save changes
-                                      </button>
-                                      <button
-                                        type="button"
-                                        disabled={attachmentBusyFor === layer.id}
-                                        onClick={() => void deleteLayerNote(layer, layerNoteEditor)}
-                                        className="ml-auto rounded-lg px-2 py-1 text-[9px] font-semibold text-destructive hover:bg-destructive/10 disabled:opacity-50"
-                                      >
-                                        Delete note
-                                      </button>
-                                    </div>
-                                  </section>
-                                )}
                               </section>
                             )}
 
