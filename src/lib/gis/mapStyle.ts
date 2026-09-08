@@ -150,7 +150,12 @@ export function buildLayerSpecs(layer: GisLayer, map: MlMap): LayerSpecification
           categorizedIcons.fallbackIcon,
         ]
       : (s.pointIcon ?? "");
-  const markerText = ["coalesce", ["get", "MARKER_ICON"], categoryIcon, ""];
+  // An explicitly selected layer icon (or icon-by-attribute rule) is the active
+  // symbology and must take precedence over legacy/default MARKER_ICON values
+  // stored on individual features. Feature-level icons remain available when
+  // the layer is set to "Circle only".
+  const usesLayerIcon = Boolean(categorizedIcons || s.pointIcon);
+  const markerText = usesLayerIcon ? categoryIcon : ["coalesce", ["get", "MARKER_ICON"], ""];
   const shownFilter = ["!", ["boolean", ["get", "__hidden"], false]];
   const geometryFilter = (filter: unknown[]) => ["all", filter, shownFilter];
   const fillPaint: Record<string, unknown> = patternId
@@ -227,20 +232,24 @@ export function buildLayerSpecs(layer: GisLayer, map: MlMap): LayerSpecification
       ]) as never,
       layout: {
         "text-field": markerText as never,
-        "text-size": [
-          "to-number",
-          ["coalesce", ["get", "MARKER_SIZE"], s.pointIconSize ?? 18],
-          s.pointIconSize ?? 18,
-        ],
+        "text-size": usesLayerIcon
+          ? (s.pointIconSize ?? 18)
+          : [
+              "to-number",
+              ["coalesce", ["get", "MARKER_SIZE"], s.pointIconSize ?? 18],
+              s.pointIconSize ?? 18,
+            ],
         "text-allow-overlap": true,
         "text-ignore-placement": true,
       },
       paint: {
-        "text-color": [
-          "coalesce",
-          ["get", "MARKER_COLOR"],
-          s.pointIconColor ?? categoryMatch(categorized?.fallbackColor ?? s.fillColor),
-        ] as never,
+        "text-color": (usesLayerIcon
+          ? (s.pointIconColor ?? categoryMatch(categorized?.fallbackColor ?? s.fillColor))
+          : [
+              "coalesce",
+              ["get", "MARKER_COLOR"],
+              s.pointIconColor ?? categoryMatch(categorized?.fallbackColor ?? s.fillColor),
+            ]) as never,
         "text-halo-color": "#ffffff",
         "text-halo-width": 1.6,
       },

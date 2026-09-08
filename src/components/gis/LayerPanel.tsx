@@ -2875,6 +2875,17 @@ function LayerStyleSwatch({ layer }: { layer: GisLayer }) {
   const strokePattern = (layer.style.strokePattern ?? "solid") as StrokePattern;
   const fill = layer.style.fillColor;
   const hasFill = layer.style.fillOpacity > 0;
+  const pointFeatures = layer.data.features.filter((feature) =>
+    /Point$/i.test(feature.geometry.type),
+  );
+  const pointOnly = pointFeatures.length > 0 && pointFeatures.length === layer.data.features.length;
+  const categorizedIcon =
+    layer.style.categorizedIcons?.enabled && layer.style.categorizedIcons.field
+      ? layer.style.categorizedIcons.fallbackIcon
+      : "";
+  const featureIcon = String(pointFeatures[0]?.properties?.["MARKER_ICON"] ?? "");
+  const pointIcon = categorizedIcon || layer.style.pointIcon || featureIcon;
+  const pointIconColor = layer.style.pointIconColor ?? fill;
   const backgroundImage = !hasFill
     ? undefined
     : fillPattern === "diagonal"
@@ -2888,6 +2899,21 @@ function LayerStyleSwatch({ layer }: { layer: GisLayer }) {
             : fillPattern === "dotted"
               ? `radial-gradient(circle, ${fill} 1.5px, transparent 1.7px)`
               : undefined;
+  if (pointOnly && pointIcon)
+    return (
+      <span
+        className="flex size-5 shrink-0 items-center justify-center overflow-hidden rounded bg-card font-semibold leading-none"
+        aria-label={`${pointIcon} point icon`}
+        title={`${pointIcon} point icon · ${layer.style.pointIconSize ?? 18}px`}
+        style={{
+          color: pointIconColor,
+          fontSize: Math.max(11, Math.min(18, (layer.style.pointIconSize ?? 18) * 0.72)),
+          opacity: Math.max(0.55, layer.style.fillOpacity),
+        }}
+      >
+        {pointIcon}
+      </span>
+    );
   return (
     <span
       className="size-5 shrink-0 rounded bg-card"
