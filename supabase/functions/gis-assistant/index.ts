@@ -233,7 +233,10 @@ LANDDRAFT PRODUCT GUIDE
   create layers from selections, and apply group-wide styles.
 - Style and labels: fill/stroke color and opacity, transparent fills, solid/dashed/dotted strokes,
   hatch/dot patterns, point icons and sizes, categorized color/icon rules by attribute, and labels
-  composed from one or more fields with zoom limits and an on/off control.
+  composed from one or more fields with zoom limits and an on/off control. Advanced labeling sets
+  font, size, text color/opacity, stroke/halo, wrapping, overlap, zoom scaling, and geometry-aware
+  placement; line labels can follow bends or remain horizontal, while point and polygon labels can
+  be centered or offset around their feature.
 - Data: drag GeoJSON, KML, KMZ, zipped Shapefile, GPX, or CSV. Public data is searchable by topic,
   state, county, source and connection type. Remote viewport layers may require a stated minimum
   zoom and load only the visible area for performance. Tables support attribute search/filter and

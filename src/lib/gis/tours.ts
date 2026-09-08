@@ -11,7 +11,7 @@ export interface TourStep {
  * Add tour-worthy features here and increment TOUR_VERSION. Users who keep
  * feature tips enabled will be offered the refreshed walkthrough once.
  */
-export const TOUR_VERSION = 9;
+export const TOUR_VERSION = 10;
 
 export const TOUR_REGISTRY: Record<TourKind, TourStep[]> = {
   basic: [
@@ -76,6 +76,12 @@ export const TOUR_REGISTRY: Record<TourKind, TourStep[]> = {
       target: "top-table",
       title: "Work with attributes",
       body: "Search or edit table fields. Map selections and table selections stay connected so selected records can become a new layer.",
+    },
+    {
+      id: "label-design",
+      target: "layer-panel",
+      title: "Design readable labels",
+      body: "Open a layer's Style panel and expand Advanced labeling to set font, size, colors, opacity, stroke, wrapping and overlap. Placement adapts to points, lines and polygons; line labels can follow bends or remain horizontal.",
     },
     {
       id: "vertex-editing",

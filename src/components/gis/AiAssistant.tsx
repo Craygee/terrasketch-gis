@@ -867,7 +867,7 @@ function helpAnswer(prompt: string): string | null {
   if (/\b(import|kml|kmz|shp|shapefile|csv|gpx)\b/.test(prompt))
     return "Drop GeoJSON, KML, KMZ, zipped Shapefile, GPX, or CSV files onto the Layers panel. They are added to Imported files.";
   if (/\b(label|labels|attribute label)\b/.test(prompt))
-    return "Expand a layer, open Style, choose one or more label fields, and turn labels on. Advanced labeling controls separators and zoom visibility.";
+    return "Expand a layer, open Style, choose one or more label fields, and turn labels on. Open Advanced labeling to change font, size, text color and opacity, stroke/halo color and width, zoom scaling, wrapping, overlap, and geometry-aware placement. Line labels can follow the line or stay horizontal; point and polygon labels can sit in the center or around the feature.";
   if (/\b(color|colour|symbolog|categor)\b/.test(prompt))
     return "Expand a layer, open Style, then choose Color features by attribute. Pick a field and set each distinct value’s color or visibility.";
   if (/\b(group|subgroup|folder|sublayer|feature list)\b/.test(prompt))

@@ -14,6 +14,26 @@ export const highlightPointId = (layerId: string) => `hl-point-${layerId}`;
 export const patternImageId = (pattern: FillPattern, color: string) =>
   `pat-${pattern}-${color.replace("#", "")}`;
 
+type LabelGeometry = "point" | "line" | "polygon" | "mixed";
+
+const primaryLabelGeometry = (layer: GisLayer): LabelGeometry => {
+  const counts: Record<Exclude<LabelGeometry, "mixed">, number> = {
+    point: 0,
+    line: 0,
+    polygon: 0,
+  };
+  for (const feature of layer.data.features) {
+    if (/Point$/i.test(feature.geometry.type)) counts.point += 1;
+    else if (/LineString$/i.test(feature.geometry.type)) counts.line += 1;
+    else if (/Polygon$/i.test(feature.geometry.type)) counts.polygon += 1;
+  }
+  const populated = (Object.entries(counts) as Array<[Exclude<LabelGeometry, "mixed">, number]>)
+    .filter(([, count]) => count > 0)
+    .sort((a, b) => b[1] - a[1]);
+  if (populated.length === 0) return "mixed";
+  return populated[0]?.[0] ?? "mixed";
+};
+
 /** Draws hatch/dot fill patterns into a canvas and registers them with MapLibre. */
 export function ensurePatternImage(map: MlMap, pattern: FillPattern, color: string): string | null {
   if (pattern === "solid") return null;
@@ -84,8 +104,8 @@ export function ensurePatternImage(map: MlMap, pattern: FillPattern, color: stri
 export function buildLayerSpecs(layer: GisLayer, map: MlMap): LayerSpecification[] {
   const src = sourceId(layer.id);
   const s = layer.style;
-  const labelMinZoom = s.labelMinZoom ?? 4;
-  const labelMaxZoom = s.labelMaxZoom ?? 24;
+  const labelMinZoom = Math.max(0, Math.min(23, s.labelMinZoom ?? 4));
+  const labelMaxZoom = Math.max(labelMinZoom + 0.5, Math.min(24, s.labelMaxZoom ?? 24));
   const categorized = s.categorized?.enabled && s.categorized.field ? s.categorized : undefined;
   const categorizedIcons =
     s.categorizedIcons?.enabled && s.categorizedIcons.field ? s.categorizedIcons : undefined;
@@ -262,6 +282,59 @@ export function buildLayerSpecs(layer: GisLayer, map: MlMap): LayerSpecification
   ];
 
   if (s.labelEnabled && s.labelTemplate.trim().length > 0) {
+    const geometry = primaryLabelGeometry(layer);
+    const requestedPlacement = s.labelPlacement ?? "auto";
+    const placement =
+      requestedPlacement === "auto"
+        ? geometry === "line"
+          ? "follow-line"
+          : "center"
+        : requestedPlacement;
+    const followsLine =
+      geometry === "line" &&
+      (placement === "follow-line" || placement === "above" || placement === "below");
+    const isHorizontalLine = geometry === "line" && placement === "horizontal";
+    const textAnchor =
+      placement === "above"
+        ? "bottom"
+        : placement === "below"
+          ? "top"
+          : placement === "left"
+            ? "right"
+            : placement === "right"
+              ? "left"
+              : "center";
+    const textOffset =
+      placement === "above"
+        ? [0, -0.55]
+        : placement === "below"
+          ? [0, 0.55]
+          : placement === "left"
+            ? [-0.65, 0]
+            : placement === "right"
+              ? [0.65, 0]
+              : geometry === "point" && requestedPlacement === "auto"
+                ? ([
+                    "case",
+                    ["!=", markerText, ""],
+                    ["literal", [0, 1.65]],
+                    ["literal", [0, 0]],
+                  ] as never)
+                : [0, 0];
+    const labelSize = s.labelSize ?? 14;
+    const textSize = s.labelScaleWithZoom
+      ? [
+          "interpolate",
+          ["linear"],
+          ["zoom"],
+          0,
+          Math.max(8, labelSize - 4),
+          16,
+          labelSize,
+          24,
+          Math.min(44, labelSize + 4),
+        ]
+      : labelSize;
     specs.push({
       id: labelId(layer.id),
       type: "symbol",
@@ -269,34 +342,26 @@ export function buildLayerSpecs(layer: GisLayer, map: MlMap): LayerSpecification
       filter: shownFilter as never,
       layout: {
         "text-field": ["coalesce", ["get", "__label"], ""],
-        "text-size": [
-          "interpolate",
-          ["linear"],
-          ["zoom"],
-          labelMinZoom,
-          10,
-          16,
-          14,
-          labelMaxZoom,
-          18,
-        ],
-        "text-anchor": "center",
-        "text-offset": [
-          "case",
-          ["!=", markerText, ""],
-          ["literal", [0, 1.65]],
-          ["literal", [0, 0]],
-        ] as never,
-        "text-allow-overlap": false,
-        "text-max-width": 12,
-        "symbol-placement": "point",
-      },
+        "text-font": [s.labelFont || "Open Sans Regular", "Arial Unicode MS Regular"],
+        "text-size": textSize as never,
+        "text-anchor": textAnchor,
+        "text-offset": textOffset as never,
+        "text-allow-overlap": s.labelAllowOverlap ?? false,
+        "text-ignore-placement": s.labelAllowOverlap ?? false,
+        "text-max-width": s.labelMaxWidth ?? 12,
+        "text-line-height": s.labelLineSpacing ?? 1.2,
+        "text-padding": 2,
+        "text-keep-upright": true,
+        "text-rotation-alignment": followsLine ? "map" : "viewport",
+        "symbol-placement": followsLine ? "line" : isHorizontalLine ? "line-center" : "point",
+      } as never,
       minzoom: labelMinZoom,
       maxzoom: labelMaxZoom,
       paint: {
-        "text-color": "#1d2a20",
-        "text-halo-color": "#fdfbf3",
-        "text-halo-width": 1.6,
+        "text-color": s.labelColor ?? "#1d2a20",
+        "text-opacity": s.labelOpacity ?? 1,
+        "text-halo-color": s.labelHaloColor ?? "#fdfbf3",
+        "text-halo-width": s.labelHaloWidth ?? 1.6,
       },
       ...zoomRange,
     });

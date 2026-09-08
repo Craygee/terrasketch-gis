@@ -32,6 +32,9 @@ export interface CategorizedStyle {
   fallbackVisible: boolean;
 }
 
+export type LabelPlacement =
+  "auto" | "center" | "above" | "below" | "left" | "right" | "follow-line" | "horizontal";
+
 export interface LayerStyle {
   fillColor: string;
   fillOpacity: number;
@@ -51,6 +54,17 @@ export interface LayerStyle {
   labelEnabled: boolean;
   labelMinZoom: number;
   labelMaxZoom: number;
+  labelFont: string;
+  labelSize: number;
+  labelScaleWithZoom: boolean;
+  labelColor: string;
+  labelOpacity: number;
+  labelHaloColor: string;
+  labelHaloWidth: number;
+  labelPlacement: LabelPlacement;
+  labelAllowOverlap: boolean;
+  labelMaxWidth: number;
+  labelLineSpacing: number;
   categorized?: CategorizedStyle;
 }
 
@@ -372,5 +386,16 @@ export const defaultStyle = (seed = 0): LayerStyle => {
     labelEnabled: false,
     labelMinZoom: 4,
     labelMaxZoom: 24,
+    labelFont: "Open Sans Regular",
+    labelSize: 14,
+    labelScaleWithZoom: true,
+    labelColor: "#1d2a20",
+    labelOpacity: 1,
+    labelHaloColor: "#fdfbf3",
+    labelHaloWidth: 1.6,
+    labelPlacement: "auto",
+    labelAllowOverlap: false,
+    labelMaxWidth: 12,
+    labelLineSpacing: 1.2,
   };
 };

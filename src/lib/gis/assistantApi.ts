@@ -105,6 +105,15 @@ const layerContext = (layer: GisLayer) => {
       enabled: layer.style.labelEnabled,
       fields: layer.style.labelFields,
       template: layer.style.labelTemplate,
+      font: layer.style.labelFont,
+      size: layer.style.labelSize,
+      color: layer.style.labelColor,
+      opacity: layer.style.labelOpacity,
+      strokeColor: layer.style.labelHaloColor,
+      strokeWidth: layer.style.labelHaloWidth,
+      placement: layer.style.labelPlacement,
+      scaleWithZoom: layer.style.labelScaleWithZoom,
+      allowOverlap: layer.style.labelAllowOverlap,
     },
   };
 };

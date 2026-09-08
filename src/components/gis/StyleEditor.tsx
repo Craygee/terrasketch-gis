@@ -1,6 +1,6 @@
 import { ChevronRight, Tag, X } from "lucide-react";
 import { useWorkbench } from "@/lib/gis/store";
-import type { FillPattern, GisLayer, StrokePattern } from "@/lib/gis/types";
+import type { FillPattern, GisLayer, LabelPlacement, StrokePattern } from "@/lib/gis/types";
 import {
   buildLabelTemplate,
   labelFieldsFromTemplate,
@@ -35,6 +35,71 @@ const categoryPalette = [
   "#a78431",
 ];
 
+const labelFonts = [
+  { value: "Open Sans Regular", label: "Open Sans" },
+  { value: "Open Sans Semibold", label: "Open Sans Semibold" },
+  { value: "Open Sans Bold", label: "Open Sans Bold" },
+  { value: "Noto Sans Regular", label: "Noto Sans" },
+  { value: "Noto Sans Italic", label: "Noto Sans Italic" },
+  { value: "Noto Sans Bold", label: "Noto Sans Bold" },
+] as const;
+
+type LabelGeometry = "point" | "line" | "polygon" | "mixed";
+
+const geometryFamily = (layer: GisLayer): LabelGeometry => {
+  const families = new Set<Exclude<LabelGeometry, "mixed">>();
+  for (const feature of layer.data.features) {
+    if (/Point$/i.test(feature.geometry.type)) families.add("point");
+    else if (/LineString$/i.test(feature.geometry.type)) families.add("line");
+    else if (/Polygon$/i.test(feature.geometry.type)) families.add("polygon");
+  }
+  return families.size === 1 ? ([...families][0] ?? "mixed") : "mixed";
+};
+
+const placementOptions = (
+  geometry: LabelGeometry,
+): Array<{ value: LabelPlacement; label: string }> => {
+  const common: Array<{ value: LabelPlacement; label: string }> = [
+    { value: "auto", label: "Automatic (recommended)" },
+  ];
+  if (geometry === "line")
+    return [
+      ...common,
+      { value: "follow-line", label: "Follow the line" },
+      { value: "horizontal", label: "Horizontal at line center" },
+      { value: "above", label: "Above the line" },
+      { value: "below", label: "Below the line" },
+    ];
+  if (geometry === "point")
+    return [
+      ...common,
+      { value: "center", label: "Centered on point" },
+      { value: "above", label: "Above point" },
+      { value: "below", label: "Below point" },
+      { value: "left", label: "Left of point" },
+      { value: "right", label: "Right of point" },
+    ];
+  if (geometry === "polygon")
+    return [
+      ...common,
+      { value: "center", label: "Center of polygon" },
+      { value: "above", label: "Above center" },
+      { value: "below", label: "Below center" },
+      { value: "left", label: "Left of center" },
+      { value: "right", label: "Right of center" },
+    ];
+  return [
+    ...common,
+    { value: "center", label: "Center" },
+    { value: "above", label: "Above" },
+    { value: "below", label: "Below" },
+    { value: "left", label: "Left" },
+    { value: "right", label: "Right" },
+    { value: "follow-line", label: "Follow line features" },
+    { value: "horizontal", label: "Horizontal on lines" },
+  ];
+};
+
 const categoryValues = (layer: GisLayer, field: string) =>
   Array.from(
     new Set(layer.data.features.map((feature) => String(feature.properties?.[field] ?? ""))),
@@ -50,6 +115,8 @@ export function StyleEditor({ layer }: { layer: GisLayer }) {
   const selectedFields =
     s.labelFields?.length > 0 ? s.labelFields : labelFieldsFromTemplate(s.labelTemplate);
   const separator = s.labelSeparator || " · ";
+  const labelGeometry = geometryFamily(layer);
+  const availablePlacements = placementOptions(labelGeometry);
   const categorized = s.categorized;
   const categorizedIcons = s.categorizedIcons;
 
@@ -313,6 +380,124 @@ export function StyleEditor({ layer }: { layer: GisLayer }) {
             Advanced labeling
           </summary>
           <div className="space-y-2 border-t border-border p-2">
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="Font">
+                <select
+                  value={s.labelFont}
+                  onChange={(event) => wb.updateStyle(layer.id, { labelFont: event.target.value })}
+                  className="w-full rounded-lg border border-border bg-secondary px-2 py-1 text-xs"
+                >
+                  {labelFonts.map((font) => (
+                    <option key={font.value} value={font.value}>
+                      {font.label}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Position">
+                <select
+                  value={s.labelPlacement}
+                  onChange={(event) =>
+                    wb.updateStyle(layer.id, {
+                      labelPlacement: event.target.value as LabelPlacement,
+                    })
+                  }
+                  className="w-full rounded-lg border border-border bg-secondary px-2 py-1 text-xs"
+                >
+                  {availablePlacements.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            </div>
+            <p className="text-[9px] text-muted-foreground">
+              {labelGeometry === "line"
+                ? "Line labels can follow bends or stay horizontal."
+                : labelGeometry === "polygon"
+                  ? "Polygon labels use the feature center and can be offset around it."
+                  : labelGeometry === "point"
+                    ? "Point labels can sit on or beside the marker."
+                    : "Placement applies to the loaded feature geometry; Automatic handles mixed layers."}
+            </p>
+
+            <Field label={`Text size ${s.labelSize}px`}>
+              <input
+                type="range"
+                min={8}
+                max={36}
+                step={1}
+                value={s.labelSize}
+                onChange={(event) =>
+                  wb.updateStyle(layer.id, { labelSize: Number(event.target.value) })
+                }
+                className="w-full accent-primary"
+              />
+            </Field>
+            <label className="flex items-center gap-2 text-[10px] font-medium">
+              <input
+                type="checkbox"
+                checked={s.labelScaleWithZoom}
+                onChange={(event) =>
+                  wb.updateStyle(layer.id, { labelScaleWithZoom: event.target.checked })
+                }
+                className="accent-primary"
+              />
+              Resize labels as the map zooms
+            </label>
+
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="Text color">
+                <input
+                  type="color"
+                  value={s.labelColor}
+                  onChange={(event) => wb.updateStyle(layer.id, { labelColor: event.target.value })}
+                  aria-label="Label text color"
+                  className="h-8 w-full cursor-pointer rounded-lg border border-border bg-secondary"
+                />
+              </Field>
+              <Field label="Stroke / halo color">
+                <input
+                  type="color"
+                  value={s.labelHaloColor}
+                  onChange={(event) =>
+                    wb.updateStyle(layer.id, { labelHaloColor: event.target.value })
+                  }
+                  aria-label="Label stroke color"
+                  className="h-8 w-full cursor-pointer rounded-lg border border-border bg-secondary"
+                />
+              </Field>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <Field label={`Text opacity ${Math.round(s.labelOpacity * 100)}%`}>
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={s.labelOpacity}
+                  onChange={(event) =>
+                    wb.updateStyle(layer.id, { labelOpacity: Number(event.target.value) })
+                  }
+                  className="w-full accent-primary"
+                />
+              </Field>
+              <Field label={`Stroke width ${s.labelHaloWidth.toFixed(1)}px`}>
+                <input
+                  type="range"
+                  min={0}
+                  max={5}
+                  step={0.2}
+                  value={s.labelHaloWidth}
+                  onChange={(event) =>
+                    wb.updateStyle(layer.id, { labelHaloWidth: Number(event.target.value) })
+                  }
+                  className="w-full accent-primary"
+                />
+              </Field>
+            </div>
+
             <Field label="Field separator">
               <select
                 value={separator}
@@ -346,7 +531,7 @@ export function StyleEditor({ layer }: { layer: GisLayer }) {
                 <input
                   type="range"
                   min={0}
-                  max={18}
+                  max={Math.max(0, s.labelMaxZoom - 1)}
                   step={1}
                   value={s.labelMinZoom}
                   onChange={(event) =>
@@ -358,7 +543,7 @@ export function StyleEditor({ layer }: { layer: GisLayer }) {
               <Field label={`End zoom ${s.labelMaxZoom}`}>
                 <input
                   type="range"
-                  min={6}
+                  min={Math.min(24, s.labelMinZoom + 1)}
                   max={24}
                   step={1}
                   value={s.labelMaxZoom}
@@ -369,6 +554,45 @@ export function StyleEditor({ layer }: { layer: GisLayer }) {
                 />
               </Field>
             </div>
+            <div className="grid grid-cols-2 gap-2">
+              <Field label={`Wrap width ${s.labelMaxWidth}`}>
+                <input
+                  type="range"
+                  min={4}
+                  max={30}
+                  step={1}
+                  value={s.labelMaxWidth}
+                  onChange={(event) =>
+                    wb.updateStyle(layer.id, { labelMaxWidth: Number(event.target.value) })
+                  }
+                  className="w-full accent-primary"
+                />
+              </Field>
+              <Field label={`Line spacing ${s.labelLineSpacing.toFixed(1)}`}>
+                <input
+                  type="range"
+                  min={0.8}
+                  max={2}
+                  step={0.1}
+                  value={s.labelLineSpacing}
+                  onChange={(event) =>
+                    wb.updateStyle(layer.id, { labelLineSpacing: Number(event.target.value) })
+                  }
+                  className="w-full accent-primary"
+                />
+              </Field>
+            </div>
+            <label className="flex items-center gap-2 text-[10px] font-medium">
+              <input
+                type="checkbox"
+                checked={s.labelAllowOverlap}
+                onChange={(event) =>
+                  wb.updateStyle(layer.id, { labelAllowOverlap: event.target.checked })
+                }
+                className="accent-primary"
+              />
+              Allow labels to overlap when space is tight
+            </label>
           </div>
         </details>
       </section>
