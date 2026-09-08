@@ -1907,6 +1907,8 @@ function LayerChildrenTree({
   const [exportFor, setExportFor] = useState<string | null>(null);
   const [groupStyleFor, setGroupStyleFor] = useState<string | null>(null);
   const [groupMenuFor, setGroupMenuFor] = useState<string | null>(null);
+  const [layerRepositoryOpen, setLayerRepositoryOpen] = useState(false);
+  const [groupRepositoryOpen, setGroupRepositoryOpen] = useState(false);
   const container = wb.groups.find((group) => group.containerLayerId === parentLayerId);
   const parentLayer = wb.layers.find((layer) => layer.id === parentLayerId);
   const moveOutGroupId = container?.parentId ?? parentLayer?.groupId;
@@ -2280,42 +2282,86 @@ function LayerChildrenTree({
 
   return (
     <section className="space-y-1.5 rounded-lg border border-primary/20 bg-primary/5 p-1.5">
-      <div className="space-y-1 rounded-md border border-border/70 bg-card/50 p-1">
-        <p className="flex items-center gap-1 px-1 text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
-          <Layers className="size-3 text-primary" /> Layer sublayers
-          <span className="num ml-auto">{directLayers.length}</span>
-        </p>
-        {directLayers.map((layer) => renderLayer(layer, 0))}
-        <div
+      <div
+        className={cn(
+          "space-y-1 rounded-md border border-border/70 bg-card/50 p-1 transition-colors",
+          layerDropTarget === `layer-repository:${parentLayerId}` &&
+            "border-primary bg-primary/10 ring-1 ring-primary/60",
+        )}
+      >
+        <button
+          type="button"
           data-layer-sublayer-drop-id={parentLayerId}
-          className={cn(
-            "rounded-md border border-dashed px-2 py-1.5 text-center text-[9px] text-muted-foreground transition-colors",
-            layerDropTarget === `layer-repository:${parentLayerId}`
-              ? "border-primary bg-primary/15 font-semibold text-primary"
-              : "border-primary/30 bg-background/50",
-          )}
+          onClick={() => setLayerRepositoryOpen((open) => !open)}
+          aria-expanded={layerRepositoryOpen}
+          className="flex w-full items-center gap-1 rounded px-1 py-0.5 text-left text-[9px] font-semibold uppercase tracking-wide text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+          title={`${layerRepositoryOpen ? "Collapse" : "Expand"} layer sublayers`}
         >
-          Drop a layer here
-        </div>
+          {layerRepositoryOpen ? (
+            <ChevronDown className="size-3 shrink-0" />
+          ) : (
+            <ChevronRight className="size-3 shrink-0" />
+          )}
+          <Layers className="size-3 shrink-0 text-primary" /> Layer sublayers
+          <span className="num ml-auto">{directLayers.length}</span>
+        </button>
+        {layerRepositoryOpen && (
+          <div className="space-y-1">
+            {directLayers.map((layer) => renderLayer(layer, 0))}
+            <div
+              data-layer-sublayer-drop-id={parentLayerId}
+              className={cn(
+                "rounded-md border border-dashed px-2 py-1.5 text-center text-[9px] text-muted-foreground transition-colors",
+                layerDropTarget === `layer-repository:${parentLayerId}`
+                  ? "border-primary bg-primary/15 font-semibold text-primary"
+                  : "border-primary/30 bg-background/50",
+              )}
+            >
+              Drop a layer here
+            </div>
+          </div>
+        )}
       </div>
 
-      <div className="space-y-1 rounded-md border border-border/70 bg-card/50 p-1">
-        <p className="flex items-center gap-1 px-1 text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
-          <FolderPlus className="size-3 text-primary" /> Group sublayers
-          <span className="num ml-auto">{directGroups.length}</span>
-        </p>
-        {directGroups.map((group) => renderGroup(group, 0))}
-        <div
+      <div
+        className={cn(
+          "space-y-1 rounded-md border border-border/70 bg-card/50 p-1 transition-colors",
+          groupDropTarget === `layer-repository:${parentLayerId}` &&
+            "border-primary bg-primary/10 ring-1 ring-primary/60",
+        )}
+      >
+        <button
+          type="button"
           data-group-sublayer-drop-id={parentLayerId}
-          className={cn(
-            "rounded-md border border-dashed px-2 py-1.5 text-center text-[9px] text-muted-foreground transition-colors",
-            groupDropTarget === `layer-repository:${parentLayerId}`
-              ? "border-primary bg-primary/15 font-semibold text-primary"
-              : "border-primary/30 bg-background/50",
-          )}
+          onClick={() => setGroupRepositoryOpen((open) => !open)}
+          aria-expanded={groupRepositoryOpen}
+          className="flex w-full items-center gap-1 rounded px-1 py-0.5 text-left text-[9px] font-semibold uppercase tracking-wide text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+          title={`${groupRepositoryOpen ? "Collapse" : "Expand"} group sublayers`}
         >
-          Drop a group here
-        </div>
+          {groupRepositoryOpen ? (
+            <ChevronDown className="size-3 shrink-0" />
+          ) : (
+            <ChevronRight className="size-3 shrink-0" />
+          )}
+          <FolderPlus className="size-3 shrink-0 text-primary" /> Group sublayers
+          <span className="num ml-auto">{directGroups.length}</span>
+        </button>
+        {groupRepositoryOpen && (
+          <div className="space-y-1">
+            {directGroups.map((group) => renderGroup(group, 0))}
+            <div
+              data-group-sublayer-drop-id={parentLayerId}
+              className={cn(
+                "rounded-md border border-dashed px-2 py-1.5 text-center text-[9px] text-muted-foreground transition-colors",
+                groupDropTarget === `layer-repository:${parentLayerId}`
+                  ? "border-primary bg-primary/15 font-semibold text-primary"
+                  : "border-primary/30 bg-background/50",
+              )}
+            >
+              Drop a group here
+            </div>
+          </div>
+        )}
       </div>
     </section>
   );
