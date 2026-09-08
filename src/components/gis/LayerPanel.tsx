@@ -28,6 +28,7 @@ import {
   Clock3,
   Pin,
   ArrowUpFromLine,
+  ChevronsUp,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -172,7 +173,7 @@ export function LayerPanel() {
     const selectedIds = wb.layers
       .filter((layer) => wb.selectedLayerIds.includes(layer.id))
       .map((layer) => layer.id);
-    if (selectedIds.length === 0) return;
+    if (selectedIds.length < 2) return;
     const name = window
       .prompt(
         `Name the group for ${selectedIds.length} selected layer${selectedIds.length === 1 ? "" : "s"}`,
@@ -186,6 +187,17 @@ export function LayerPanel() {
     toast.success(`${selectedIds.length} layer${selectedIds.length === 1 ? "" : "s"} grouped`, {
       description: `Moved into ${name}.`,
     });
+  };
+
+  const minimizeAll = () => {
+    wb.groups.filter((group) => !group.collapsed).forEach((group) => wb.toggleGroup(group.id));
+    setExpandedLayers(new Set());
+    setStyleFor(null);
+    setExportFor(null);
+    setNoteFor(null);
+    setLayerNoteEditor(null);
+    setGroupStyleFor(null);
+    setGroupMenuFor(null);
   };
 
   const nestSelectedGroups = () => {
@@ -837,40 +849,27 @@ export function LayerPanel() {
         </button>
       </div>
 
-      {wb.layers.length > 0 && (
-        <div className="mx-2 mb-2 flex items-center gap-1.5 rounded-xl border border-border bg-card px-2 py-1.5 text-[10px]">
-          <input
-            type="checkbox"
-            checked={wb.selectedLayerIds.length === wb.layers.length}
-            ref={(input) => {
-              if (input)
-                input.indeterminate =
-                  wb.selectedLayerIds.length > 0 && wb.selectedLayerIds.length < wb.layers.length;
-            }}
-            onChange={(event) =>
-              wb.setSelectedLayers(event.target.checked ? wb.layers.map((layer) => layer.id) : [])
-            }
-            aria-label="Select all layers"
-            title="Select or clear every layer"
-            className="size-3.5 shrink-0 accent-primary"
-          />
-          <span className="min-w-0 flex-1 truncate text-muted-foreground">
-            {wb.selectedLayerIds.length > 0
-              ? `${wb.selectedLayerIds.length} selected`
-              : "Select layers to group"}
-          </span>
-          {wb.selectedLayerIds.length > 0 && (
-            <button
-              type="button"
-              onClick={groupSelectedLayers}
-              className="flex items-center gap-1 rounded-lg bg-primary px-2 py-1 font-semibold text-primary-foreground"
-              title="Create a group containing the checked layers"
-            >
-              <FolderPlus className="size-3" /> Group selected
-            </button>
-          )}
-        </div>
-      )}
+      <div className="mx-2 mb-2 flex items-center justify-between gap-1.5 rounded-xl border border-border bg-card px-2 py-1.5 text-[10px]">
+        <button
+          type="button"
+          onClick={minimizeAll}
+          className="flex items-center gap-1 rounded-lg px-2 py-1 font-semibold text-muted-foreground hover:bg-accent hover:text-foreground"
+          title="Collapse every open data group, layer, sublayer section, note, and editor"
+          aria-label="Minimize all layer panel sections"
+        >
+          <ChevronsUp className="size-3" /> Minimize all
+        </button>
+        {wb.selectedLayerIds.length > 1 && (
+          <button
+            type="button"
+            onClick={groupSelectedLayers}
+            className="flex items-center gap-1 rounded-lg bg-primary px-2 py-1 font-semibold text-primary-foreground"
+            title={`Create a group containing ${wb.selectedLayerIds.length} checked layers`}
+          >
+            <FolderPlus className="size-3" /> Group selected
+          </button>
+        )}
+      </div>
 
       {wb.selectedGroupIds.length > 0 && (
         <div className="mx-2 mb-2 flex items-center gap-1.5 rounded-xl border border-primary/30 bg-primary/5 px-2 py-1.5 text-[10px]">
