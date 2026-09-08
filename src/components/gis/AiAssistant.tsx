@@ -851,7 +851,7 @@ function contextualAnswer(layers: GisLayer[], active: GisLayer | null, projectNa
 
 function helpAnswer(prompt: string): string | null {
   if (/\b(log ?out|sign ?out)\b/.test(prompt))
-    return "Open the information (i) menu in the upper-right corner, then choose Log out under Account. On mobile, open the same i menu and tap Log out at the bottom.";
+    return "Open File in the top toolbar and choose Log out. You can also open the information (i) menu and use Log out under Account. On mobile, open the i menu and tap Log out at the bottom.";
   if (/\b(layer note|note.*layer)\b/.test(prompt))
     return "Expand a layer and choose its note button to add or edit a note. Layer notes stay attached to the layer, sync with the project, and are also listed front-to-back under Project records → Layer notes.";
   if (/\b(add|create|make|load|import)\b.*\blayer\b/.test(prompt) && /\bedit/.test(prompt))
@@ -869,7 +869,7 @@ function helpAnswer(prompt: string): string | null {
   if (/\b(color|colour|symbolog|categor)\b/.test(prompt))
     return "Expand a layer, open Style, then choose Color features by attribute. Pick a field and set each distinct value’s color or visibility.";
   if (/\b(group|subgroup|folder|sublayer|feature list)\b/.test(prompt))
-    return "Working layers, My sketches, Imported files, and Public data are layer groups. Use the pencil on a group header to rename any group, including the defaults. Use folder-plus for groups and subgroups, and drag a group by its six-dot handle to move its complete layer stack. Expand a layer, then Advanced layer options → Features as sublayers to search, select, zoom, rename, hide, or remove features.";
+    return "Working layers, My sketches, Imported files, and Public data are layer groups. Use the pencil on a group header to rename any group, including the defaults. Check several layers and choose Group selected to place them together, or drag a layer or group by its handle to reorder it. Expand a layer, then open Feature sublayers to search, select, zoom, rename, hide, copy, move, or remove individual features.";
   if (/\b(vertex|vertices|reshape|edit geometry)\b/.test(prompt))
     return "Select one feature, turn on Edit vertices, then drag a square vertex. Click a faint midpoint to add a vertex. Points can be dragged; lines and polygons reshaped.";
   if (/\b(multiple|multi-select|box select|select many)\b/.test(prompt))

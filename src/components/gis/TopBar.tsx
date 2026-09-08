@@ -23,6 +23,7 @@ import { toast } from "sonner";
 import { useWorkbench } from "@/lib/gis/store";
 import { useAuth } from "@/lib/auth";
 import { useMapRef } from "@/lib/gis/mapRef";
+import type { ProjectSummary } from "@/lib/gis/project";
 import { cn } from "@/lib/utils";
 import { ExportPanel } from "./ExportMenu";
 import { ProjectMenu } from "./ProjectMenu";
@@ -123,8 +124,9 @@ export function TopBar({
             aria-label="Switch project"
             className="w-36 rounded-xl border border-transparent bg-secondary px-3 py-1.5 text-xs font-medium outline-none focus:border-primary lg:w-44"
           >
-            {wb.projects.map((project) => (
+            {projectTree(wb.projects).map(({ project, depth }) => (
               <option key={project.id} value={project.id}>
+                {depth > 0 ? `${"\u00a0\u00a0".repeat(depth)}↳ ` : ""}
                 {project.name}
               </option>
             ))}
@@ -439,6 +441,16 @@ export function TopBar({
               }}
             />
           )}
+          <div className="my-1 border-t border-border" />
+          <MenuAction
+            icon={<LogOut className="size-4" />}
+            label="Log out"
+            help="Sign out of LandDraft on this device"
+            onClick={() => {
+              closeCompactMenus();
+              void auth.signOut();
+            }}
+          />
         </div>
       )}
 
@@ -552,6 +564,32 @@ export function TopBar({
       )}
     </header>
   );
+}
+
+function projectTree(projects: ProjectSummary[]): Array<{
+  project: ProjectSummary;
+  depth: number;
+}> {
+  const ordered: Array<{ project: ProjectSummary; depth: number }> = [];
+  const visited = new Set<string>();
+  const visit = (project: ProjectSummary, depth: number) => {
+    if (visited.has(project.id)) return;
+    visited.add(project.id);
+    ordered.push({ project, depth });
+    projects
+      .filter((candidate) => candidate.parentProjectId === project.id)
+      .forEach((child) => visit(child, depth + 1));
+  };
+
+  projects
+    .filter(
+      (project) =>
+        !project.parentProjectId ||
+        !projects.some((candidate) => candidate.id === project.parentProjectId),
+    )
+    .forEach((project) => visit(project, 0));
+  projects.filter((project) => !visited.has(project.id)).forEach((project) => visit(project, 0));
+  return ordered;
 }
 
 function BarBtn({

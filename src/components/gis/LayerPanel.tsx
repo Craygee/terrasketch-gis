@@ -87,9 +87,28 @@ export function LayerPanel() {
   const [groupDropTarget, setGroupDropTarget] = useState<string | null>(null);
   const groupDropTargetRef = useRef<string | null>(null);
   const layerListRef = useRef<HTMLDivElement>(null);
-  const [duplicateTargets, setDuplicateTargets] = useState<Record<string, string>>({});
   const [groupStyleFor, setGroupStyleFor] = useState<string | null>(null);
   const visibleGroups = flattenVisibleGroups(wb.groups);
+
+  const groupSelectedLayers = () => {
+    const selectedIds = wb.layers
+      .filter((layer) => wb.selectedLayerIds.includes(layer.id))
+      .map((layer) => layer.id);
+    if (selectedIds.length === 0) return;
+    const name = window
+      .prompt(
+        `Name the group for ${selectedIds.length} selected layer${selectedIds.length === 1 ? "" : "s"}`,
+        "New layer group",
+      )
+      ?.trim();
+    if (!name) return;
+    const groupId = wb.addGroup(name);
+    selectedIds.forEach((layerId) => wb.setLayerGroup(layerId, groupId));
+    wb.setSelectedLayers(selectedIds);
+    toast.success(`${selectedIds.length} layer${selectedIds.length === 1 ? "" : "s"} grouped`, {
+      description: `Moved into ${name}.`,
+    });
+  };
 
   const updateDropTarget = (target: string | null) => {
     if (dropTargetRef.current === target) return;
@@ -375,6 +394,41 @@ export function LayerPanel() {
         />
       </div>
 
+      {wb.layers.length > 0 && (
+        <div className="mx-2 mb-2 flex items-center gap-1.5 rounded-xl border border-border bg-card px-2 py-1.5 text-[10px]">
+          <input
+            type="checkbox"
+            checked={wb.selectedLayerIds.length === wb.layers.length}
+            ref={(input) => {
+              if (input)
+                input.indeterminate =
+                  wb.selectedLayerIds.length > 0 && wb.selectedLayerIds.length < wb.layers.length;
+            }}
+            onChange={(event) =>
+              wb.setSelectedLayers(event.target.checked ? wb.layers.map((layer) => layer.id) : [])
+            }
+            aria-label="Select all layers"
+            title="Select or clear every layer"
+            className="size-3.5 shrink-0 accent-primary"
+          />
+          <span className="min-w-0 flex-1 truncate text-muted-foreground">
+            {wb.selectedLayerIds.length > 0
+              ? `${wb.selectedLayerIds.length} selected`
+              : "Select layers to group"}
+          </span>
+          {wb.selectedLayerIds.length > 0 && (
+            <button
+              type="button"
+              onClick={groupSelectedLayers}
+              className="flex items-center gap-1 rounded-lg bg-primary px-2 py-1 font-semibold text-primary-foreground"
+              title="Create a group containing the checked layers"
+            >
+              <FolderPlus className="size-3" /> Group selected
+            </button>
+          )}
+        </div>
+      )}
+
       <div ref={layerListRef} className="flex-1 overflow-y-auto px-2 pb-6">
         {visibleGroups.map(({ group, depth }) => {
           const layers = wb.layers.filter((l) => l.groupId === group.id);
@@ -530,6 +584,15 @@ export function LayerPanel() {
                         )}
                       >
                         <div className="flex min-h-8 items-center gap-1.5">
+                          <input
+                            type="checkbox"
+                            checked={selected}
+                            onChange={() => wb.toggleLayerSelection(layer.id, true)}
+                            onClick={(event) => event.stopPropagation()}
+                            aria-label={`Select ${layer.name} for batch actions`}
+                            title="Select layer for batch actions"
+                            className="size-3.5 shrink-0 accent-primary"
+                          />
                           <button
                             onClick={() => toggleLayerExpanded(layer.id)}
                             aria-label={expanded ? "Collapse layer" : "Expand layer"}
@@ -803,65 +866,7 @@ export function LayerPanel() {
 
                             {styleFor === layer.id && <StyleEditor layer={layer} />}
 
-                            <details className="group rounded-lg border border-border bg-card/50">
-                              <summary className="flex cursor-pointer list-none items-center gap-1 px-2 py-1.5 text-[10px] font-semibold">
-                                <ChevronRight className="size-3.5 transition-transform group-open:rotate-90" />
-                                Advanced layer options
-                              </summary>
-                              <div className="space-y-2 border-t border-border p-2">
-                                <div className="grid grid-cols-2 gap-1">
-                                  <label className="text-[10px] text-muted-foreground">
-                                    Move to
-                                    <select
-                                      value={layer.groupId}
-                                      onChange={(event) =>
-                                        wb.setLayerGroup(layer.id, event.target.value)
-                                      }
-                                      aria-label="Move layer to category"
-                                      className="mt-0.5 w-full rounded-lg border border-border bg-card px-2 py-1 text-[11px] text-foreground"
-                                    >
-                                      {wb.groups.map((group) => (
-                                        <option key={group.id} value={group.id}>
-                                          {group.name}
-                                        </option>
-                                      ))}
-                                    </select>
-                                  </label>
-                                  <label className="text-[10px] text-muted-foreground">
-                                    Duplicate into
-                                    <select
-                                      value={duplicateTargets[layer.id] ?? layer.groupId}
-                                      onChange={(event) => {
-                                        const groupId = event.target.value;
-                                        wb.duplicateLayer(layer.id, groupId);
-                                        setDuplicateTargets((current) => ({
-                                          ...current,
-                                          [layer.id]: layer.groupId,
-                                        }));
-                                        const target = wb.groups.find(
-                                          (group) => group.id === groupId,
-                                        );
-                                        toast.success(
-                                          `Layer duplicated into ${target?.name ?? "category"}`,
-                                        );
-                                      }}
-                                      aria-label="Duplicate layer into category"
-                                      className="mt-0.5 w-full rounded-lg border border-border bg-card px-2 py-1 text-[11px] text-foreground"
-                                    >
-                                      {wb.groups.map((group) => (
-                                        <option key={group.id} value={group.id}>
-                                          {group.name}
-                                        </option>
-                                      ))}
-                                    </select>
-                                  </label>
-                                </div>
-                                {layer.source.kind === "remote" && (
-                                  <RemoteLayerSettings layerId={layer.id} source={layer.source} />
-                                )}
-                                <FeatureSublayers layer={layer} onZoom={zoomTo} />
-                              </div>
-                            </details>
+                            <FeatureSublayers layer={layer} onZoom={zoomTo} />
                           </div>
                         )}
                       </div>
@@ -1052,9 +1057,12 @@ function FeatureSublayers({
     <details className="group rounded-lg border border-border bg-card/70">
       <summary className="flex cursor-pointer list-none items-center gap-1 px-2 py-1.5 text-[10px] font-semibold">
         <ChevronRight className="size-3.5 transition-transform group-open:rotate-90" />
-        Features as sublayers ({layer.data.features.length})
+        Feature sublayers ({layer.data.features.length})
       </summary>
       <div className="space-y-2 border-t border-border p-2">
+        {layer.source.kind === "remote" && (
+          <RemoteLayerSettings layerId={layer.id} source={layer.source} />
+        )}
         <label className="relative block">
           <Search className="absolute left-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground" />
           <input

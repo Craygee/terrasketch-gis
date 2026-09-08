@@ -299,6 +299,7 @@ export interface WorkbenchApi extends WorkbenchState {
   applyStyleToGroup: (id: string, patch: Partial<LayerStyle>) => void;
   setActiveLayer: (id: string | null) => void;
   toggleLayerSelection: (id: string, additive: boolean) => void;
+  setSelectedLayers: (ids: string[]) => void;
   setSelectedFeature: (sel: SelectedFeature | null) => void;
   setSelectedFeatures: (selections: SelectedFeature[]) => void;
   setDrawMode: (mode: DrawMode) => void;
@@ -737,7 +738,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
 
   const addGroup = useCallback<WorkbenchApi["addGroup"]>((name) => {
     const id = uid();
-    setState((s) => ({ ...s, groups: [...s.groups, { id, name, collapsed: false }] }));
+    setState((s) => ({ ...s, groups: [{ id, name, collapsed: false }, ...s.groups] }));
     return id;
   }, []);
 
@@ -1424,6 +1425,20 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       applyStyleToGroup,
       setActiveLayer: (id) => patch({ activeLayerId: id }),
       toggleLayerSelection,
+      setSelectedLayers: (ids) =>
+        setState((current) => {
+          const available = new Set(current.layers.map((layer) => layer.id));
+          const selectedLayerIds = Array.from(new Set(ids)).filter((id) => available.has(id));
+          return {
+            ...current,
+            selectedLayerIds,
+            activeLayerId:
+              selectedLayerIds.at(-1) ??
+              (current.activeLayerId && available.has(current.activeLayerId)
+                ? current.activeLayerId
+                : null),
+          };
+        }),
       setSelectedFeature: (sel) =>
         patch({ selectedFeature: sel, selectedFeatures: sel ? [sel] : [] }),
       setSelectedFeatures: (selections) =>
