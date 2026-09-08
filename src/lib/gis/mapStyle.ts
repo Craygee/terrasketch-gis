@@ -211,7 +211,14 @@ export function buildLayerSpecs(layer: GisLayer, map: MlMap): LayerSpecification
       id: pointId(layer.id),
       type: "circle",
       source: src,
-      filter: geometryFilter(["==", ["geometry-type"], "Point"]) as never,
+      // The circle is the fallback point symbol. When a layer-level,
+      // attribute-driven, or feature-level icon is active, drawing this layer
+      // as well leaves the old circle visibly stacked behind the icon.
+      filter: geometryFilter([
+        "all",
+        ["==", ["geometry-type"], "Point"],
+        ["==", markerText, ""],
+      ]) as never,
       paint: {
         "circle-radius": s.pointSize,
         "circle-color": categoryMatch(categorized?.fallbackColor ?? s.fillColor) as never,
