@@ -586,19 +586,20 @@ export function LayerPanel() {
     }
 
     const invalidTargets = nestedGroupIds(dragged.id, wb.groups);
-    const headers = Array.from(
-      list.querySelectorAll<HTMLElement>("[data-group-header-id]"),
+    const groupCards = Array.from(
+      list.querySelectorAll<HTMLElement>("[data-group-drop-id]"),
     ).flatMap((element) => {
-      const id = element.dataset["groupHeaderId"];
+      const id = element.dataset["groupDropId"];
       const target = wb.groups.find((group) => group.id === id);
       return id && target && !invalidTargets.has(id)
         ? [{ id, bounds: element.getBoundingClientRect() }]
         : [];
     });
 
-    // Dropping anywhere on a visible group header means "make this a subgroup". Computing
-    // against the header rectangles avoids Safari pointer-capture hit-testing quirks on iPad.
-    const nestedTarget = headers.find(
+    // The entire visible group card—including all of its layer rows—is a nesting target. This
+    // matches the natural gesture of dropping into an expanded group without having to scroll
+    // back to its narrow header. Rectangle checks also avoid Safari pointer-capture quirks.
+    const nestedTarget = groupCards.find(
       ({ bounds }) => event.clientY >= bounds.top && event.clientY <= bounds.bottom,
     );
     if (nestedTarget) {
@@ -606,9 +607,9 @@ export function LayerPanel() {
       return;
     }
 
-    // Reordering remains available in the small gaps between headers. Pick the nearest edge so
+    // Reordering remains available in the small gaps between group cards. Pick the nearest edge so
     // it does not compete with the much larger and more intuitive nesting target.
-    const edgeTarget = headers
+    const edgeTarget = groupCards
       .flatMap(({ id, bounds }) => [
         { id, position: "before" as const, distance: Math.abs(event.clientY - bounds.top) },
         { id, position: "after" as const, distance: Math.abs(event.clientY - bounds.bottom) },
@@ -945,7 +946,7 @@ export function LayerPanel() {
                   }}
                   onPointerCancel={resetGroupDrag}
                   aria-label={`Drag ${group.name} group to reorder or nest`}
-                  title="Drop on another group to make this a subgroup; drop between groups to reorder"
+                  title="Drop anywhere inside another group to make this a subgroup; drop between groups to reorder"
                   className={cn(
                     "mr-0.5 flex size-7 shrink-0 touch-none select-none items-center justify-center rounded hover:bg-accent hover:text-foreground",
                     draggedGroupId === group.id
