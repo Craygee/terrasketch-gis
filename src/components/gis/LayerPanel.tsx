@@ -826,7 +826,7 @@ export function LayerPanel() {
                     event.preventDefault();
                     renameGroup();
                   }}
-                  title="Expand or collapse group · double-click or right-click to rename"
+                  title={`${group.name} · Double-click to rename`}
                   className="flex min-w-0 flex-1 items-center gap-1 px-2 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wide"
                 >
                   {group.collapsed ? (

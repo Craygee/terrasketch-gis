@@ -1,9 +1,10 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { FolderPlus, Layers3, Plus, X } from "lucide-react";
 import { toast } from "sonner";
 import type { Feature, Geometry } from "geojson";
 
 import { useMapRef } from "@/lib/gis/mapRef";
+import { labelFieldsFromTemplate } from "@/lib/gis/labels";
 import { useWorkbench } from "@/lib/gis/store";
 import { cn } from "@/lib/utils";
 
@@ -23,6 +24,17 @@ const namedFeature = (feature: Feature, name: string) => ({
   properties: { ...(feature.properties ?? {}), ...(name.trim() ? { NAME: name.trim() } : {}) },
 });
 
+const labelAttributePriority = [
+  "NAME",
+  "OWNER_NAME",
+  "ADDRESS",
+  "SITE_ADDRESS",
+  "SITUS_ADDR",
+  "PARCEL_ID",
+  "GEO_ID",
+  "ACRES",
+];
+
 export function FeatureDestinationDialog() {
   const wb = useWorkbench();
   const { pendingFeatureSave: pending, setPendingFeatureSave } = useMapRef();
@@ -32,6 +44,8 @@ export function FeatureDestinationDialog() {
   const [groupId, setGroupId] = useState("");
   const [newGroupName, setNewGroupName] = useState("");
   const [existingLayerId, setExistingLayerId] = useState("");
+  const [labelsEnabled, setLabelsEnabled] = useState(false);
+  const [labelField, setLabelField] = useState("");
 
   const compatibleLayers = useMemo(() => {
     if (!pending) return [];
@@ -46,6 +60,40 @@ export function FeatureDestinationDialog() {
     });
   }, [pending, wb.layers]);
 
+  const labelAttributes = useMemo(() => {
+    if (!pending) return [];
+    const keys = new Set<string>();
+    for (const feature of pending.features.slice(0, 2_000)) {
+      for (const [key, value] of Object.entries(feature.properties ?? {})) {
+        if (key.startsWith("__") || key === "ATTACHMENTS" || typeof value === "object") continue;
+        keys.add(key);
+      }
+    }
+    return [...keys].sort((left, right) => {
+      const leftPriority = labelAttributePriority.indexOf(left.toUpperCase());
+      const rightPriority = labelAttributePriority.indexOf(right.toUpperCase());
+      if (leftPriority >= 0 || rightPriority >= 0)
+        return (
+          (leftPriority < 0 ? labelAttributePriority.length : leftPriority) -
+          (rightPriority < 0 ? labelAttributePriority.length : rightPriority)
+        );
+      return left.localeCompare(right);
+    });
+  }, [pending]);
+
+  useEffect(() => {
+    if (!pending) return;
+    const inheritedField =
+      pending.style?.labelFields?.[0] ??
+      labelFieldsFromTemplate(pending.style?.labelTemplate ?? "")[0] ??
+      "";
+    const defaultField = labelAttributes.includes(inheritedField)
+      ? inheritedField
+      : (labelAttributes[0] ?? "");
+    setLabelField(defaultField);
+    setLabelsEnabled(Boolean(pending.style?.labelEnabled && defaultField));
+  }, [labelAttributes, pending]);
+
   if (!pending) return null;
   const effectiveLayerName = layerName || pending.suggestedLayerName;
   const effectiveFeatureName = featureName || pending.suggestedFeatureName || "";
@@ -59,6 +107,8 @@ export function FeatureDestinationDialog() {
     setGroupId("");
     setNewGroupName("");
     setExistingLayerId("");
+    setLabelsEnabled(false);
+    setLabelField("");
   };
 
   const save = () => {
@@ -86,14 +136,28 @@ export function FeatureDestinationDialog() {
       close();
       return;
     }
+    if (labelsEnabled && !labelField) {
+      toast.error("Choose an attribute for the feature labels");
+      return;
+    }
     const targetGroupId = newGroupName.trim() ? wb.addGroup(newGroupName.trim()) : effectiveGroupId;
+    const style = {
+      ...(pending.style ?? {}),
+      labelEnabled: labelsEnabled,
+      ...(labelField
+        ? {
+            labelTemplate: `{${labelField}}`,
+            labelFields: [labelField],
+          }
+        : {}),
+    };
     if (pending.separate) {
       features.forEach((feature, index) =>
         wb.addLayer({
           name: String(feature.properties?.["NAME"] ?? `${effectiveLayerName} ${index + 1}`),
           groupId: targetGroupId,
           source: pending.source,
-          ...(pending.style ? { style: pending.style } : {}),
+          style,
           data: { type: "FeatureCollection", features: [feature as never] },
         }),
       );
@@ -103,7 +167,7 @@ export function FeatureDestinationDialog() {
         name: effectiveLayerName.trim() || "New layer",
         groupId: targetGroupId,
         source: pending.source,
-        ...(pending.style ? { style: pending.style } : {}),
+        style,
         data: { type: "FeatureCollection", features: features as never },
       });
       toast.success(`${layer.name} created`);
@@ -186,6 +250,40 @@ export function FeatureDestinationDialog() {
                 />
               </label>
             )}
+            <section className="rounded-xl border border-border bg-secondary/40 p-3">
+              <label className="flex items-center gap-2 text-xs font-semibold text-foreground">
+                <input
+                  type="checkbox"
+                  checked={labelsEnabled}
+                  disabled={labelAttributes.length === 0}
+                  onChange={(event) => setLabelsEnabled(event.target.checked)}
+                  className="accent-primary"
+                />
+                Label features in this layer
+              </label>
+              {labelsEnabled && labelAttributes.length > 0 ? (
+                <label className="mt-2 block text-[10px] font-medium text-muted-foreground">
+                  Label attribute
+                  <select
+                    value={labelField}
+                    onChange={(event) => setLabelField(event.target.value)}
+                    className="mt-1 w-full rounded-xl border border-border bg-card px-3 py-2 text-xs text-foreground"
+                  >
+                    {labelAttributes.map((attribute) => (
+                      <option key={attribute} value={attribute}>
+                        {attribute}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : (
+                <p className="mt-1 text-[9px] text-muted-foreground">
+                  {labelAttributes.length
+                    ? "Labels stay off until this option is selected."
+                    : "These features do not contain a usable label attribute."}
+                </p>
+              )}
+            </section>
             <label className="block text-[10px] font-medium text-muted-foreground">
               Layer group
               <select
