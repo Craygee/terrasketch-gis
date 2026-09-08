@@ -43,6 +43,7 @@ export type DrawMode =
   | "polygon"
   | "line"
   | "point"
+  | "note"
   | "measure-area"
   | "measure-line";
 
@@ -327,7 +328,11 @@ export interface WorkbenchApi extends WorkbenchState {
   moveLayer: (id: string, direction: -1 | 1) => void;
   moveLayerToEdge: (id: string, edge: "front" | "back") => void;
   reorderLayer: (id: string, targetGroupId: string, beforeLayerId?: string) => void;
-  reorderGroup: (id: string, targetGroupId: string, position: "before" | "after") => void;
+  reorderGroup: (
+    id: string,
+    targetGroupId: string,
+    position: "before" | "inside" | "after",
+  ) => void;
   setLayerGroup: (id: string, groupId: string) => void;
   addGroup: (name: string) => string;
   addSubgroup: (parentId: string, name: string) => void;
@@ -729,12 +734,22 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       const source = s.groups.find((group) => group.id === id);
       const target = s.groups.find((group) => group.id === targetGroupId);
       if (!source || !target || source.id === target.id) return s;
-      if ((source.parentId ?? null) !== (target.parentId ?? null)) return s;
+      // A group cannot be nested inside one of its own descendants.
+      if (descendantGroupIds(source.id, s.groups).has(target.id)) return s;
 
       const groups = s.groups.filter((group) => group.id !== id);
-      const targetIndex = groups.findIndex((group) => group.id === targetGroupId);
-      if (targetIndex < 0) return s;
-      groups.splice(targetIndex + (position === "after" ? 1 : 0), 0, source);
+      if (position === "inside") {
+        // Appending makes the dropped group the final child while the tree flattener keeps its
+        // complete descendant stack together. This works at every nesting depth.
+        groups.push({ ...source, parentId: target.id });
+      } else {
+        const targetIndex = groups.findIndex((group) => group.id === targetGroupId);
+        if (targetIndex < 0) return s;
+        const sibling = { ...source };
+        if (target.parentId) sibling.parentId = target.parentId;
+        else delete sibling.parentId;
+        groups.splice(targetIndex + (position === "after" ? 1 : 0), 0, sibling);
+      }
 
       // Keep every group's complete layer stack together while preserving
       // the existing order of the layers within each group.

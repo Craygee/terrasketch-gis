@@ -14,6 +14,8 @@ import {
   Paperclip,
   Plus,
   Printer,
+  Pin,
+  MapPin,
   RefreshCw,
   Search,
   Save,
@@ -131,10 +133,11 @@ const applyLayerNoteTag = (value: string, tag: string) =>
 export function ProjectRecordsPanel() {
   const wb = useWorkbench();
   const auth = useAuth();
-  const { setRecordsOpen } = useMapRef();
+  const { map, setRecordsOpen, recordsTargetNoteId, setRecordsTargetNoteId } = useMapRef();
   const [tab, setTab] = useState<Tab>("notes");
   const [noteTitle, setNoteTitle] = useState("");
   const [noteBody, setNoteBody] = useState("");
+  const [notePinned, setNotePinned] = useState(false);
   const [noteEditor, setNoteEditor] = useState<ProjectNote | null>(null);
   const [layerNoteEditor, setLayerNoteEditor] = useState<LayerNoteRecord | null>(null);
   const [layerNoteEditorTagText, setLayerNoteEditorTagText] = useState("");
@@ -149,6 +152,9 @@ export function ProjectRecordsPanel() {
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
   const [layerAttachmentBusyId, setLayerAttachmentBusyId] = useState<string | null>(null);
+  const [projectNoteAttachmentBusyId, setProjectNoteAttachmentBusyId] = useState<string | null>(
+    null,
+  );
   const [emailBusy, setEmailBusy] = useState(false);
   const [emailSetupError, setEmailSetupError] = useState("");
   const [projectEmailAlias, setProjectEmailAlias] = useState<ProjectEmailAlias | null>(null);
@@ -190,6 +196,38 @@ export function ProjectRecordsPanel() {
     );
   };
   const editorTagSuggestions = layerNoteTagSuggestions(layerNoteEditorTagText, allLayerNoteTags);
+  const pinnedNotes = [
+    ...records.notes
+      .filter((note) => note.pinned)
+      .map((note) => ({ kind: "project" as const, note, createdAt: note.createdAt })),
+    ...layerNoteRows
+      .filter(({ note }) => note.pinned)
+      .map((row) => ({ kind: "layer" as const, ...row, createdAt: row.note.createdAt })),
+  ].sort((left, right) => right.createdAt - left.createdAt);
+  const attachmentsForProjectNote = (noteId: string) =>
+    records.documents.filter((document) => document.projectNoteId === noteId);
+
+  const updateMapNoteMarker = (noteId: string, properties: Record<string, unknown>) => {
+    const markerLayer = wb.layers.find(
+      (layer) => layer.source.kind === "draw" && layer.source.purpose === "map-notes",
+    );
+    const markerIndex = markerLayer?.data.features.findIndex(
+      (feature) => feature.properties?.["NOTE_ID"] === noteId,
+    );
+    if (markerLayer && markerIndex !== undefined && markerIndex >= 0)
+      wb.updateFeatureProperties(markerLayer.id, markerIndex, properties);
+  };
+
+  const removeMapNoteMarker = (noteId: string) => {
+    const markerLayer = wb.layers.find(
+      (layer) => layer.source.kind === "draw" && layer.source.purpose === "map-notes",
+    );
+    const markerIndex = markerLayer?.data.features.findIndex(
+      (feature) => feature.properties?.["NOTE_ID"] === noteId,
+    );
+    if (markerLayer && markerIndex !== undefined && markerIndex >= 0)
+      wb.removeFeatures(markerLayer.id, [markerIndex]);
+  };
 
   const refreshInboundEmail = async () => {
     if (!auth.user || !auth.cloudEnabled) return;
@@ -219,6 +257,27 @@ export function ProjectRecordsPanel() {
     // Project changes recreate the scoped intake address and message list.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auth.user?.id, tab, wb.projectId]);
+
+  useEffect(() => {
+    if (!recordsTargetNoteId) return;
+
+    const projectNote = records.notes.find((note) => note.id === recordsTargetNoteId);
+    if (projectNote) {
+      setNoteEditor({ ...projectNote });
+      setTab("notes");
+      setRecordsTargetNoteId(null);
+      return;
+    }
+
+    const layerNote = records.layerNotes.find((note) => note.id === recordsTargetNoteId);
+    if (layerNote) {
+      setLayerNoteEditor({ ...layerNote });
+      setLayerNoteEditorTagText(layerNoteTagDraft(layerNote.tags));
+      setLayerNoteTimestampOpen(false);
+      setTab("layer-notes");
+    }
+    setRecordsTargetNoteId(null);
+  }, [records.layerNotes, records.notes, recordsTargetNoteId, setRecordsTargetNoteId]);
 
   const update = (patch: Partial<ProjectRecords>) => wb.setProjectRecords({ ...records, ...patch });
 
@@ -262,6 +321,7 @@ export function ProjectRecordsPanel() {
       updatedAt: now,
       author: auth.user?.name || auth.user?.email || "LandDraft user",
       includeInPacket: true,
+      pinned: notePinned,
     };
     update({ notes: [note, ...records.notes] });
     wb.addProjectEvent({
@@ -272,6 +332,7 @@ export function ProjectRecordsPanel() {
     });
     setNoteTitle("");
     setNoteBody("");
+    setNotePinned(false);
     setNoteEditor(note);
     toast.success("Note added to this project");
   };
@@ -289,6 +350,11 @@ export function ProjectRecordsPanel() {
       notes: records.notes.map((note) => (note.id === updatedNote.id ? updatedNote : note)),
     });
     setNoteEditor(updatedNote);
+    updateMapNoteMarker(updatedNote.id, {
+      NAME: title,
+      NOTE: body,
+      PINNED: Boolean(updatedNote.pinned),
+    });
     wb.addProjectEvent({
       type: "note",
       title: `Updated note: ${title}`,
@@ -429,6 +495,54 @@ export function ProjectRecordsPanel() {
     }
   };
 
+  const uploadProjectNoteAttachments = async (projectNoteId: string, files: FileList | null) => {
+    if (!files?.length) return;
+    if (!auth.user) {
+      toast.error("Sign in before attaching files to a project note");
+      return;
+    }
+    setProjectNoteAttachmentBusyId(projectNoteId);
+    try {
+      const added: ProjectDocument[] = [];
+      for (const file of Array.from(files)) {
+        if (file.size > 50 * 1024 * 1024) {
+          toast.error(`${file.name} is larger than the 50 MB project-file limit`);
+          continue;
+        }
+        added.push(
+          await uploadProjectAsset({
+            userId: auth.user.id,
+            projectId: wb.projectId,
+            folderId: "general",
+            fileName: file.name,
+            data: file,
+            source: "upload",
+            uploadedBy: auth.user.name || auth.user.email,
+            projectNoteId,
+          }),
+        );
+      }
+      if (!added.length) return;
+      update({ documents: [...added, ...records.documents] });
+      for (const document of added)
+        wb.addProjectEvent({
+          type: "upload",
+          title: `Attached ${document.name} to a project note`,
+          detail: `${formatBytes(document.size)} · Project note attachment`,
+          relatedId: projectNoteId,
+        });
+      toast.success(
+        `${added.length} project-note attachment${added.length === 1 ? "" : "s"} added`,
+      );
+    } catch (error) {
+      toast.error("Project-note attachment could not be stored", {
+        description: error instanceof Error ? error.message : "Cloud storage is unavailable",
+      });
+    } finally {
+      setProjectNoteAttachmentBusyId(null);
+    }
+  };
+
   const saveLayerNoteEditor = () => {
     if (!layerNoteEditor) return;
     const subject = layerNoteEditor.subject.trim() || "Layer note";
@@ -450,6 +564,11 @@ export function ProjectRecordsPanel() {
       ),
     });
     setLayerNoteEditor(updatedNote);
+    updateMapNoteMarker(updatedNote.id, {
+      NAME: subject,
+      NOTE: body,
+      PINNED: Boolean(updatedNote.pinned),
+    });
     wb.addProjectEvent({
       type: "note",
       title: `Updated layer note: ${subject}`,
@@ -476,6 +595,7 @@ export function ProjectRecordsPanel() {
         title: `Deleted layer note: ${note.subject}`,
         relatedId: note.id,
       });
+      removeMapNoteMarker(note.id);
       setLayerNoteEditor(null);
       toast.success("Layer note deleted");
     } catch (error) {
@@ -484,6 +604,35 @@ export function ProjectRecordsPanel() {
       });
     } finally {
       setLayerAttachmentBusyId(null);
+    }
+  };
+
+  const deleteProjectNote = async (note: ProjectNote) => {
+    if (!window.confirm(`Delete “${note.title}” and its attachments?`)) return;
+    const attachments = attachmentsForProjectNote(note.id);
+    setProjectNoteAttachmentBusyId(note.id);
+    try {
+      await Promise.all(attachments.map((document) => deleteProjectAsset(document)));
+      update({
+        notes: records.notes.filter((item) => item.id !== note.id),
+        documents: records.documents.filter(
+          (document) => !attachments.some((attachment) => attachment.id === document.id),
+        ),
+      });
+      removeMapNoteMarker(note.id);
+      wb.addProjectEvent({
+        type: "project",
+        title: `Deleted project note: ${note.title}`,
+        relatedId: note.id,
+      });
+      setNoteEditor(null);
+      toast.success("Project note deleted");
+    } catch (error) {
+      toast.error("Project note could not be deleted", {
+        description: error instanceof Error ? error.message : "Cloud storage is unavailable",
+      });
+    } finally {
+      setProjectNoteAttachmentBusyId(null);
     }
   };
 
@@ -736,13 +885,77 @@ export function ProjectRecordsPanel() {
                   rows={4}
                   className="mt-1 w-full resize-y rounded-xl border border-border bg-card px-3 py-2 text-sm outline-none focus:border-primary"
                 />
-                <button
-                  onClick={addNote}
-                  className="mt-2 flex items-center gap-1.5 rounded-xl bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground"
-                >
-                  <Plus className="size-3.5" /> Add note
-                </button>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={addNote}
+                    className="flex items-center gap-1.5 rounded-xl bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground"
+                  >
+                    <Plus className="size-3.5" /> Add note
+                  </button>
+                  <label className="flex items-center gap-1.5 text-[10px] font-semibold">
+                    <input
+                      type="checkbox"
+                      checked={notePinned}
+                      onChange={(event) => setNotePinned(event.target.checked)}
+                      className="accent-primary"
+                    />
+                    <Pin className="size-3 text-primary" /> Pin note
+                  </label>
+                </div>
               </section>
+
+              {pinnedNotes.length > 0 && (
+                <section className="rounded-2xl border border-primary/30 bg-primary/5 p-3">
+                  <div className="mb-2 flex items-center gap-2">
+                    <Pin className="size-4 text-primary" />
+                    <div>
+                      <h3 className="text-xs font-semibold">Pinned project records</h3>
+                      <p className="text-[9px] text-muted-foreground">
+                        Project and layer notes · newest first
+                      </p>
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    {pinnedNotes.map((entry) => {
+                      const projectNote = entry.kind === "project" ? entry.note : null;
+                      const layerNote = entry.kind === "layer" ? entry.note : null;
+                      const title = projectNote?.title ?? layerNote?.subject ?? "Pinned note";
+                      const detail =
+                        entry.kind === "project"
+                          ? `Project note · ${new Date(entry.createdAt).toLocaleString()}`
+                          : `${entry.layer.name} · ${entry.group?.name ?? "Layer group"} · ${new Date(entry.createdAt).toLocaleString()}`;
+                      return (
+                        <button
+                          key={`${entry.kind}-${entry.note.id}`}
+                          type="button"
+                          onClick={() => {
+                            if (entry.kind === "project") {
+                              setNoteEditor({ ...entry.note });
+                            } else {
+                              setLayerNoteEditor({ ...entry.note });
+                              setLayerNoteEditorTagText(layerNoteTagDraft(entry.note.tags));
+                              setLayerNoteTimestampOpen(false);
+                              setTab("layer-notes");
+                            }
+                          }}
+                          className="flex w-full items-center gap-2 rounded-xl bg-card px-2.5 py-2 text-left hover:bg-accent"
+                        >
+                          <Pin className="size-3.5 shrink-0 text-primary" />
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-[11px] font-semibold">
+                              {title}
+                            </span>
+                            <span className="block truncate text-[9px] text-muted-foreground">
+                              {detail}
+                            </span>
+                          </span>
+                          <ChevronRight className="size-3.5 text-muted-foreground" />
+                        </button>
+                      );
+                    })}
+                  </div>
+                </section>
+              )}
 
               {layerNoteRows.length > 0 && (
                 <section className="rounded-2xl border border-border p-3">
@@ -773,6 +986,7 @@ export function ProjectRecordsPanel() {
                         </span>
                         <span className="min-w-0 flex-1">
                           <span className="block truncate text-[11px] font-semibold">
+                            {note.pinned && <Pin className="mr-1 inline size-2.5 text-primary" />}
                             {note.subject}
                           </span>
                           <span className="block truncate text-[9px] text-muted-foreground">
@@ -805,6 +1019,7 @@ export function ProjectRecordsPanel() {
                       <NotebookPen className="size-3.5 shrink-0 text-primary" />
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-[11px] font-semibold">
+                          {note.pinned && <Pin className="mr-1 inline size-2.5 text-primary" />}
                           {note.title}
                         </span>
                         <span className="block truncate text-[9px] text-muted-foreground">
@@ -887,6 +1102,96 @@ export function ProjectRecordsPanel() {
                       />
                     </label>
                   </div>
+                  {noteEditor.mapLocation && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        map?.easeTo({
+                          center: [noteEditor.mapLocation!.lng, noteEditor.mapLocation!.lat],
+                          zoom: Math.max(map.getZoom(), 16),
+                        });
+                        setRecordsOpen(false);
+                      }}
+                      className="mt-2 flex items-center gap-1.5 rounded-xl bg-secondary px-3 py-2 text-[10px] font-semibold hover:bg-accent"
+                    >
+                      <MapPin className="size-3.5 text-primary" /> Show note marker on map
+                    </button>
+                  )}
+                  <section
+                    onDragOver={(event) => {
+                      event.preventDefault();
+                      event.dataTransfer.dropEffect = "copy";
+                    }}
+                    onDrop={(event) => {
+                      event.preventDefault();
+                      void uploadProjectNoteAttachments(noteEditor.id, event.dataTransfer.files);
+                    }}
+                    className="mt-2 rounded-xl border border-dashed border-border bg-card/70 p-2"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Paperclip className="size-3.5 text-primary" />
+                      <p className="min-w-0 flex-1 text-[10px] font-semibold">
+                        Attachments
+                        {attachmentsForProjectNote(noteEditor.id).length
+                          ? ` (${attachmentsForProjectNote(noteEditor.id).length})`
+                          : ""}
+                      </p>
+                      <label
+                        className={cn(
+                          "flex cursor-pointer items-center gap-1 rounded-lg bg-secondary px-2 py-1.5 text-[10px] font-semibold hover:bg-accent",
+                          projectNoteAttachmentBusyId === noteEditor.id &&
+                            "pointer-events-none opacity-50",
+                        )}
+                      >
+                        <Plus className="size-3" /> Add files
+                        <input
+                          type="file"
+                          multiple
+                          className="hidden"
+                          disabled={projectNoteAttachmentBusyId === noteEditor.id}
+                          onChange={(event) => {
+                            void uploadProjectNoteAttachments(noteEditor.id, event.target.files);
+                            event.currentTarget.value = "";
+                          }}
+                        />
+                      </label>
+                    </div>
+                    <p className="mt-1 text-[9px] text-muted-foreground">
+                      Drag files into this box, or use Add files.
+                    </p>
+                    {attachmentsForProjectNote(noteEditor.id).length > 0 && (
+                      <div className="mt-2 space-y-1">
+                        {attachmentsForProjectNote(noteEditor.id).map((document) => (
+                          <div
+                            key={document.id}
+                            className="flex items-center gap-2 rounded-lg bg-secondary px-2 py-1.5"
+                          >
+                            <FileText className="size-3.5 shrink-0 text-muted-foreground" />
+                            <span className="min-w-0 flex-1 truncate text-[10px] font-semibold">
+                              {document.name}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => void downloadProjectAsset(document)}
+                              className="rounded-md p-1 hover:bg-accent"
+                              aria-label={`Download ${document.name}`}
+                            >
+                              <Download className="size-3" />
+                            </button>
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => void removeDocument(document)}
+                              className="rounded-md p-1 text-destructive hover:bg-destructive/10 disabled:opacity-50"
+                              aria-label={`Remove ${document.name}`}
+                            >
+                              <Trash2 className="size-3" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </section>
                   <div className="mt-3 flex flex-wrap items-center gap-2">
                     <button
                       type="button"
@@ -910,16 +1215,23 @@ export function ProjectRecordsPanel() {
                       />
                       Include in packet
                     </label>
+                    <label className="flex items-center gap-1 text-[10px]">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(noteEditor.pinned)}
+                        onChange={(event) =>
+                          setNoteEditor((current) =>
+                            current ? { ...current, pinned: event.target.checked } : current,
+                          )
+                        }
+                        className="accent-primary"
+                      />
+                      <Pin className="size-3 text-primary" /> Pinned
+                    </label>
                     <button
                       type="button"
-                      onClick={() => {
-                        if (!window.confirm(`Delete “${noteEditor.title}”?`)) return;
-                        update({
-                          notes: records.notes.filter((note) => note.id !== noteEditor.id),
-                        });
-                        setNoteEditor(null);
-                        toast.success("Note deleted");
-                      }}
+                      disabled={projectNoteAttachmentBusyId === noteEditor.id}
+                      onClick={() => void deleteProjectNote(noteEditor)}
                       className="ml-auto flex items-center gap-1 rounded-lg px-2 py-1.5 text-[10px] font-semibold text-destructive hover:bg-destructive/10"
                     >
                       <Trash2 className="size-3" /> Delete
@@ -1024,6 +1336,7 @@ export function ProjectRecordsPanel() {
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-[11px] font-semibold">
+                        {note.pinned && <Pin className="mr-1 inline size-2.5 text-primary" />}
                         {note.subject}
                       </span>
                       <span className="block truncate text-[9px] text-muted-foreground">
@@ -1169,6 +1482,25 @@ export function ProjectRecordsPanel() {
                         />
                       </label>
 
+                      {layerNoteEditor.mapLocation && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            map?.easeTo({
+                              center: [
+                                layerNoteEditor.mapLocation!.lng,
+                                layerNoteEditor.mapLocation!.lat,
+                              ],
+                              zoom: Math.max(map.getZoom(), 16),
+                            });
+                            setRecordsOpen(false);
+                          }}
+                          className="mt-2 flex items-center gap-1.5 rounded-xl bg-secondary px-3 py-2 text-[10px] font-semibold hover:bg-accent"
+                        >
+                          <MapPin className="size-3.5 text-primary" /> Show note marker on map
+                        </button>
+                      )}
+
                       <section
                         onDragOver={(event) => {
                           event.preventDefault();
@@ -1279,6 +1611,19 @@ export function ProjectRecordsPanel() {
                           />
                           Include in packet
                         </label>
+                        <label className="flex items-center gap-1 text-[10px]">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(layerNoteEditor.pinned)}
+                            onChange={(event) =>
+                              setLayerNoteEditor((current) =>
+                                current ? { ...current, pinned: event.target.checked } : current,
+                              )
+                            }
+                            className="accent-primary"
+                          />
+                          <Pin className="size-3 text-primary" /> Pinned
+                        </label>
                         <button
                           type="button"
                           disabled={layerAttachmentBusyId === layer.id}
@@ -1367,6 +1712,22 @@ export function ProjectRecordsPanel() {
                             · Layer:{" "}
                             {wb.layers.find((layer) => layer.id === document.layerId)?.name ??
                               "Removed layer"}
+                          </>
+                        )}
+                        {document.layerNoteId && (
+                          <>
+                            {" "}
+                            · Note:{" "}
+                            {records.layerNotes.find((note) => note.id === document.layerNoteId)
+                              ?.subject ?? "Removed layer note"}
+                          </>
+                        )}
+                        {document.projectNoteId && (
+                          <>
+                            {" "}
+                            · Note:{" "}
+                            {records.notes.find((note) => note.id === document.projectNoteId)
+                              ?.title ?? "Removed project note"}
                           </>
                         )}
                       </p>

@@ -26,6 +26,7 @@ import {
   Search,
   MoreHorizontal,
   Clock3,
+  Pin,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -90,6 +91,7 @@ type LayerNoteComposer = {
   body: string;
   tagText: string;
   manualTimestamp: boolean;
+  pinned: boolean;
   createdAt: number;
   pendingFiles: File[];
 };
@@ -99,6 +101,7 @@ const newLayerNoteComposer = (): LayerNoteComposer => ({
   body: "",
   tagText: "",
   manualTimestamp: false,
+  pinned: false,
   createdAt: Date.now(),
   pendingFiles: [],
 });
@@ -131,7 +134,7 @@ const timestampInputValue = (timestamp: number) => {
 };
 
 type LayerDropPosition = "before" | "after";
-type GroupDropPosition = "before" | "after";
+type GroupDropPosition = "before" | "inside" | "after";
 
 export function LayerPanel() {
   const wb = useWorkbench();
@@ -306,6 +309,7 @@ export function LayerPanel() {
       updatedAt: Date.now(),
       author: auth.user?.name || auth.user?.email || "LandDraft user",
       includeInPacket: true,
+      pinned: composer.pinned,
     };
     setAttachmentBusyFor(layer.id);
     try {
@@ -361,6 +365,18 @@ export function LayerPanel() {
       ...wb.records,
       layerNotes: wb.records.layerNotes.map((note) => (note.id === updated.id ? updated : note)),
     });
+    const markerLayer = wb.layers.find(
+      (layer) => layer.source.kind === "draw" && layer.source.purpose === "map-notes",
+    );
+    const markerIndex = markerLayer?.data.features.findIndex(
+      (feature) => feature.properties?.["NOTE_ID"] === updated.id,
+    );
+    if (markerLayer && markerIndex !== undefined && markerIndex >= 0)
+      wb.updateFeatureProperties(markerLayer.id, markerIndex, {
+        NAME: subject,
+        NOTE: body,
+        PINNED: Boolean(updated.pinned),
+      });
     wb.addProjectEvent({
       type: "note",
       title: `Updated layer note: ${subject}`,
@@ -420,6 +436,14 @@ export function LayerPanel() {
         detail: layer.name,
         relatedId: note.id,
       });
+      const markerLayer = wb.layers.find(
+        (item) => item.source.kind === "draw" && item.source.purpose === "map-notes",
+      );
+      const markerIndex = markerLayer?.data.features.findIndex(
+        (feature) => feature.properties?.["NOTE_ID"] === note.id,
+      );
+      if (markerLayer && markerIndex !== undefined && markerIndex >= 0)
+        wb.removeFeatures(markerLayer.id, [markerIndex]);
       setLayerNoteEditor(null);
       toast.success("Layer note deleted");
     } catch (error) {
@@ -562,15 +586,15 @@ export function LayerPanel() {
       !dragged ||
       !target ||
       dragged.id === target.id ||
-      (dragged.parentId ?? null) !== (target.parentId ?? null)
+      nestedGroupIds(dragged.id, wb.groups).has(target.id)
     ) {
       updateGroupDropTarget(null);
       return;
     }
 
     const bounds = targetHeader.getBoundingClientRect();
-    const position: GroupDropPosition =
-      event.clientY < bounds.top + bounds.height / 2 ? "before" : "after";
+    const ratio = (event.clientY - bounds.top) / Math.max(bounds.height, 1);
+    const position: GroupDropPosition = ratio < 0.25 ? "before" : ratio > 0.75 ? "after" : "inside";
     updateGroupDropTarget(`${target.id}:${position}`);
   };
 
@@ -585,7 +609,10 @@ export function LayerPanel() {
     const targetGroupId = target.slice(0, separator);
     const position = target.slice(separator + 1) as GroupDropPosition;
     wb.reorderGroup(dragged, targetGroupId, position);
-    toast.success("Layer group reordered");
+    const targetName = wb.groups.find((group) => group.id === targetGroupId)?.name;
+    toast.success(position === "inside" ? "Group nested as a subgroup" : "Layer group reordered", {
+      description: position === "inside" && targetName ? `Moved inside ${targetName}.` : undefined,
+    });
     resetGroupDrag();
   };
 
@@ -769,6 +796,7 @@ export function LayerPanel() {
                 draggedGroupId === group.id && "opacity-40",
                 groupDropTarget === `${group.id}:before` &&
                   "shadow-[0_-3px_0_0_hsl(var(--primary))]",
+                groupDropTarget === `${group.id}:inside` && "bg-primary/10 ring-2 ring-primary/70",
                 groupDropTarget === `${group.id}:after` && "shadow-[0_3px_0_0_hsl(var(--primary))]",
               )}
             >
@@ -894,11 +922,7 @@ export function LayerPanel() {
                   }}
                   onPointerCancel={resetGroupDrag}
                   aria-label={`Drag ${group.name} group to reorder`}
-                  title={
-                    depth === 0
-                      ? "Drag to reorder this group and its complete layer stack"
-                      : "Drag to reorder this subgroup within its parent"
-                  }
+                  title="Drag above or below to reorder, or drop directly on another group to make this a subgroup"
                   className={cn(
                     "mr-0.5 flex size-7 shrink-0 touch-none select-none items-center justify-center rounded hover:bg-accent hover:text-foreground",
                     draggedGroupId === group.id
@@ -1252,6 +1276,19 @@ export function LayerPanel() {
                                     ))}
                                   </div>
                                 )}
+                                <label className="flex items-center gap-1.5 rounded-lg bg-card px-2 py-1.5 text-[9px] font-semibold">
+                                  <input
+                                    type="checkbox"
+                                    checked={composer.pinned}
+                                    onChange={(event) =>
+                                      updateNoteComposer(layer.id, {
+                                        pinned: event.target.checked,
+                                      })
+                                    }
+                                    className="accent-primary"
+                                  />
+                                  <Pin className="size-3 text-primary" /> Pin in Project Records
+                                </label>
                                 <label className="block text-[9px] font-semibold">
                                   Note
                                   <textarea
@@ -1361,6 +1398,9 @@ export function LayerPanel() {
                                           <NotebookPen className="mt-0.5 size-3 shrink-0 text-primary" />
                                           <span className="min-w-0 flex-1">
                                             <span className="block truncate text-[10px] font-semibold">
+                                              {note.pinned && (
+                                                <Pin className="mr-1 inline size-2.5 text-primary" />
+                                              )}
                                               {note.subject}
                                             </span>
                                             <span className="block truncate text-[8px] text-muted-foreground">
@@ -1494,6 +1534,21 @@ export function LayerPanel() {
                                       rows={5}
                                       className="mt-1.5 w-full resize-y rounded-lg border border-border px-2 py-1.5 text-[10px] leading-relaxed outline-none focus:border-primary"
                                     />
+                                    <label className="mt-1.5 flex items-center gap-1.5 rounded-lg bg-secondary px-2 py-1.5 text-[9px] font-semibold">
+                                      <input
+                                        type="checkbox"
+                                        checked={Boolean(layerNoteEditor.pinned)}
+                                        onChange={(event) =>
+                                          setLayerNoteEditor((current) =>
+                                            current
+                                              ? { ...current, pinned: event.target.checked }
+                                              : current,
+                                          )
+                                        }
+                                        className="accent-primary"
+                                      />
+                                      <Pin className="size-3 text-primary" /> Pin in Project Records
+                                    </label>
                                     <div
                                       onDragOver={(event) => event.preventDefault()}
                                       onDrop={(event) => {

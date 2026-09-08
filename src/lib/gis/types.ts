@@ -61,7 +61,7 @@ export interface AreaUnitsPref {
 
 export type LayerSource =
   | { kind: "import"; fileName: string }
-  | { kind: "draw" }
+  | { kind: "draw"; purpose?: "map-notes" }
   | { kind: "derived"; sourceLayerId: string; query?: string }
   | {
       kind: "remote";
@@ -194,6 +194,14 @@ export interface ProjectNote {
   updatedAt: number;
   author: string;
   includeInPacket: boolean;
+  pinned?: boolean;
+  mapLocation?: MapNoteLocation;
+}
+
+export interface MapNoteLocation {
+  lng: number;
+  lat: number;
+  markerFeatureId: string;
 }
 
 export interface LayerNoteRecord {
@@ -206,6 +214,8 @@ export interface LayerNoteRecord {
   updatedAt: number;
   author: string;
   includeInPacket: boolean;
+  pinned?: boolean;
+  mapLocation?: MapNoteLocation;
 }
 
 export interface ProjectFolder {
@@ -238,6 +248,8 @@ export interface ProjectDocument {
   layerId?: string;
   /** Links a layer document to one specific structured layer note. */
   layerNoteId?: string;
+  /** Links a repository document to one project note. */
+  projectNoteId?: string;
   email?: EmailDocumentDetails;
 }
 

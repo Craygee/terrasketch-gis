@@ -18,6 +18,7 @@ import { FeatureDestinationDialog } from "./FeatureDestinationDialog";
 import { TourProvider } from "./TourProvider";
 import { SharedLayerPanel } from "./SharedLayerPanel";
 import { ConnectionManager } from "./ConnectionManager";
+import { MapNoteDialog } from "./MapNoteDialog";
 
 const AiAssistant = lazy(() =>
   import("./AiAssistant").then((module) => ({ default: module.AiAssistant })),
@@ -41,6 +42,7 @@ export default function Workbench() {
             <WorkbenchShell />
             <RemoteLayerManager />
             <FeatureDestinationDialog />
+            <MapNoteDialog />
             <ConnectionManager />
             <Toaster />
           </TourProvider>

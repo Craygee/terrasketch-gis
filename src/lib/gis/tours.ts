@@ -11,7 +11,7 @@ export interface TourStep {
  * Add tour-worthy features here and increment TOUR_VERSION. Users who keep
  * feature tips enabled will be offered the refreshed walkthrough once.
  */
-export const TOUR_VERSION = 5;
+export const TOUR_VERSION = 6;
 
 export const TOUR_REGISTRY: Record<TourKind, TourStep[]> = {
   basic: [
@@ -31,7 +31,7 @@ export const TOUR_REGISTRY: Record<TourKind, TourStep[]> = {
       id: "draw",
       target: "draw-toolbar",
       title: "Draw, select and measure",
-      body: "Create points, lines and areas, select one or many features, measure, snap and capture GPS points.",
+      body: "Create points, lines, areas and map-note markers; select one or many features, measure, snap and capture GPS points.",
     },
     {
       id: "ai",
@@ -69,7 +69,7 @@ export const TOUR_REGISTRY: Record<TourKind, TourStep[]> = {
       id: "layer-organization",
       target: "layer-panel",
       title: "Groups, subgroups and styling",
-      body: "Drag a layer or entire data group to control drawing order. Check multiple groups to nest them under a new parent, and use a group's compact action menu to rename, style, add a subgroup or safely delete its structure without deleting its layers.",
+      body: "Drag a layer or entire data group to control drawing order. Drop a group directly on any group or subgroup to nest it at that depth. Check multiple groups to make a new parent, or use a group's compact action menu to rename, style, add a subgroup or safely delete its structure without deleting its layers.",
     },
     {
       id: "attributes",

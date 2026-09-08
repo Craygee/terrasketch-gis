@@ -30,12 +30,16 @@ interface MapRefApi {
   setConnectionsOpen: (open: boolean) => void;
   recordsOpen: boolean;
   setRecordsOpen: (open: boolean) => void;
+  recordsTargetNoteId: string | null;
+  setRecordsTargetNoteId: (id: string | null) => void;
   pendingCatalogQuery: string;
   setPendingCatalogQuery: (q: string) => void;
   lastPoint: { lng: number; lat: number } | null;
   setLastPoint: (p: { lng: number; lat: number } | null) => void;
   pendingFeatureSave: PendingFeatureSave | null;
   setPendingFeatureSave: (pending: PendingFeatureSave | null) => void;
+  pendingMapNoteLocation: { lng: number; lat: number } | null;
+  setPendingMapNoteLocation: (location: { lng: number; lat: number } | null) => void;
   editEnabled: boolean;
   setEditEnabled: (enabled: boolean) => void;
 }
@@ -52,9 +56,14 @@ export function MapRefProvider({ children }: { children: ReactNode }) {
   const [analysisOpen, setAnalysisOpen] = useState(false);
   const [connectionsOpen, setConnectionsOpen] = useState(false);
   const [recordsOpen, setRecordsOpen] = useState(false);
+  const [recordsTargetNoteId, setRecordsTargetNoteId] = useState<string | null>(null);
   const [pendingCatalogQuery, setPendingCatalogQuery] = useState("");
   const [lastPoint, setLastPoint] = useState<{ lng: number; lat: number } | null>(null);
   const [pendingFeatureSave, setPendingFeatureSave] = useState<PendingFeatureSave | null>(null);
+  const [pendingMapNoteLocation, setPendingMapNoteLocation] = useState<{
+    lng: number;
+    lat: number;
+  } | null>(null);
   const [editEnabled, setEditEnabled] = useState(false);
 
   const value = useMemo<MapRefApi>(
@@ -78,12 +87,16 @@ export function MapRefProvider({ children }: { children: ReactNode }) {
       setConnectionsOpen,
       recordsOpen,
       setRecordsOpen,
+      recordsTargetNoteId,
+      setRecordsTargetNoteId,
       pendingCatalogQuery,
       setPendingCatalogQuery,
       lastPoint,
       setLastPoint,
       pendingFeatureSave,
       setPendingFeatureSave,
+      pendingMapNoteLocation,
+      setPendingMapNoteLocation,
       editEnabled,
       setEditEnabled,
     }),
@@ -96,9 +109,11 @@ export function MapRefProvider({ children }: { children: ReactNode }) {
       analysisOpen,
       connectionsOpen,
       recordsOpen,
+      recordsTargetNoteId,
       pendingCatalogQuery,
       lastPoint,
       pendingFeatureSave,
+      pendingMapNoteLocation,
       editEnabled,
     ],
   );

@@ -9,6 +9,7 @@ import {
   LocateFixed,
   ScanSearch,
   ListChecks,
+  StickyNote,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useWorkbench, type DrawMode } from "@/lib/gis/store";
@@ -31,6 +32,7 @@ const tools: Array<{ mode: DrawMode; label: string; icon: React.ReactNode }> = [
   { mode: "polygon", label: "Draw area", icon: <Hexagon className="size-4" /> },
   { mode: "line", label: "Draw line", icon: <Minus className="size-4" /> },
   { mode: "point", label: "Drop point", icon: <MapPin className="size-4" /> },
+  { mode: "note", label: "Drop note marker", icon: <StickyNote className="size-4" /> },
   { mode: "measure-area", label: "Measure area", icon: <Ruler className="size-4" /> },
   { mode: "measure-line", label: "Measure distance", icon: <Move3d className="size-4" /> },
 ];

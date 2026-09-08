@@ -26,6 +26,7 @@ import {
   Lock,
   Move,
   ZoomIn,
+  StickyNote,
 } from "lucide-react";
 
 import { useWorkbench } from "@/lib/gis/store";
@@ -112,6 +113,7 @@ export function MapCanvas() {
     setPendingCatalogQuery,
     setLastPoint,
     setPendingFeatureSave,
+    setPendingMapNoteLocation,
     editEnabled,
     setEditEnabled,
   } = useMapRef();
@@ -563,7 +565,8 @@ export function MapCanvas() {
   const finishDraft = useCallback(() => {
     const coords = draftRef.current;
     const mode = drawModeRef.current;
-    if (mode === "none" || mode === "select-multiple" || mode === "select-box") return;
+    if (mode === "none" || mode === "select-multiple" || mode === "select-box" || mode === "note")
+      return;
     const isMeasure = mode === "measure-area" || mode === "measure-line";
     const wantsPolygon = mode === "polygon" || mode === "measure-area";
     if (!isMeasure) {
@@ -687,6 +690,11 @@ export function MapCanvas() {
       const coord: Position = wb.snapEnabled
         ? (nearestVisibleVertex(map, e.point.x, e.point.y) ?? [e.lngLat.lng, e.lngLat.lat])
         : [e.lngLat.lng, e.lngLat.lat];
+      if (mode === "note") {
+        setPendingMapNoteLocation({ lng: Number(coord[0]), lat: Number(coord[1]) });
+        wb.setDrawMode("none");
+        return;
+      }
       if (mode === "point") {
         setPendingFeatureSave({
           features: [
@@ -801,7 +809,15 @@ export function MapCanvas() {
       map.off("mousemove", onMouseMove);
       map.off("mouseup", onMouseUp);
     };
-  }, [ready, wb, finishDraft, setPendingFeatureSave, editEnabled, changeEditableGeometry]);
+  }, [
+    ready,
+    wb,
+    finishDraft,
+    setPendingFeatureSave,
+    setPendingMapNoteLocation,
+    editEnabled,
+    changeEditableGeometry,
+  ]);
 
   useEffect(() => {
     const map = mapObj.current;
@@ -957,7 +973,9 @@ export function MapCanvas() {
                     ? "Drag a box across features to select them"
                     : wb.drawMode === "point"
                       ? "Click the map to drop points"
-                      : "Click to add points, double-click or Enter to finish"}
+                      : wb.drawMode === "note"
+                        ? "Click the map to place a note marker"
+                        : "Click to add points, double-click or Enter to finish"}
             </span>
             {readout && (
               <span className="num rounded-full bg-accent px-2 py-0.5 text-accent-foreground">
@@ -974,14 +992,17 @@ export function MapCanvas() {
                 <Undo2 className="size-3.5" />
               </button>
             )}
-            {wb.drawMode !== "none" && wb.drawMode !== "point" && wb.drawMode !== "select-box" && (
-              <button
-                onClick={finishDraft}
-                className="flex items-center gap-1 rounded-full bg-primary px-2 py-1 text-primary-foreground"
-              >
-                <Check className="size-3.5" /> Finish
-              </button>
-            )}
+            {wb.drawMode !== "none" &&
+              wb.drawMode !== "point" &&
+              wb.drawMode !== "note" &&
+              wb.drawMode !== "select-box" && (
+                <button
+                  onClick={finishDraft}
+                  className="flex items-center gap-1 rounded-full bg-primary px-2 py-1 text-primary-foreground"
+                >
+                  <Check className="size-3.5" /> Finish
+                </button>
+              )}
             <button
               onClick={() => {
                 setDraft([]);
@@ -1052,6 +1073,16 @@ export function MapCanvas() {
                 setMenu(null);
               }}
             />
+            {wb.canEditProject && (
+              <MenuItem
+                icon={<StickyNote className="size-4" />}
+                label="Add a note marker here"
+                onClick={() => {
+                  setPendingMapNoteLocation({ lng: menu.lng, lat: menu.lat });
+                  setMenu(null);
+                }}
+              />
+            )}
             <MenuItem
               icon={<Database className="size-4" />}
               label="Find data here"

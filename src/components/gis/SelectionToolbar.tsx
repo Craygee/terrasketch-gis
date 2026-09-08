@@ -12,6 +12,7 @@ import {
   Palette,
   Table2,
   X,
+  NotebookPen,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -37,6 +38,8 @@ export function SelectionToolbar({ mobile = false }: { mobile?: boolean }) {
     setPendingFeatureSave,
     editEnabled,
     setEditEnabled,
+    setRecordsOpen,
+    setRecordsTargetNoteId,
   } = useMapRef();
   const [showField, setShowField] = useState(false);
   const [fieldName, setFieldName] = useState("");
@@ -64,6 +67,7 @@ export function SelectionToolbar({ mobile = false }: { mobile?: boolean }) {
     .filter(([key]) => !key.startsWith("__") && key !== "ATTACHMENTS")
     .slice(0, 4);
   const pointSelections = selected.filter(({ feature }) => feature.geometry.type === "Point");
+  const mapNoteId = first.feature.properties?.["NOTE_ID"];
 
   const createCombinedLayer = () => {
     setPendingFeatureSave({
@@ -214,6 +218,16 @@ export function SelectionToolbar({ mobile = false }: { mobile?: boolean }) {
       </div>
 
       <div className="mt-2 flex gap-1 overflow-x-auto pb-0.5">
+        {typeof mapNoteId === "string" && mapNoteId && (
+          <Action
+            icon={<NotebookPen />}
+            label="Open note"
+            onClick={() => {
+              setRecordsTargetNoteId(mapNoteId);
+              setRecordsOpen(true);
+            }}
+          />
+        )}
         <Action
           icon={<Table2 />}
           label="Attributes"
