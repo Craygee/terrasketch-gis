@@ -20,6 +20,8 @@ import {
   Tag,
   Pencil,
   NotebookPen,
+  Paperclip,
+  FileText,
   Save,
   Search,
   MoreHorizontal,
@@ -27,11 +29,23 @@ import {
 import { toast } from "sonner";
 
 import { useWorkbench } from "@/lib/gis/store";
+import { useAuth } from "@/lib/auth";
 import { useMapRef } from "@/lib/gis/mapRef";
+import {
+  deleteProjectAsset,
+  downloadProjectAsset,
+  uploadProjectAsset,
+} from "@/lib/gis/projectRecords";
 import { importFiles, SUPPORTED_EXTENSIONS } from "@/lib/gis/import";
 import { exportLayer, type ExportFormat } from "@/lib/gis/export";
 import { squareMeters, formatArea } from "@/lib/gis/measure";
-import type { FillPattern, GisLayer, LayerGroup, StrokePattern } from "@/lib/gis/types";
+import type {
+  FillPattern,
+  GisLayer,
+  LayerGroup,
+  ProjectDocument,
+  StrokePattern,
+} from "@/lib/gis/types";
 import { StyleEditor } from "./StyleEditor";
 import { cn } from "@/lib/utils";
 import type { LayerSource } from "@/lib/gis/types";
@@ -63,11 +77,18 @@ const remoteLoadLabel = (layer: GisLayer) => {
   return `${layer.data.features.length.toLocaleString()} visible features`;
 };
 
+const formatFileSize = (value: number) => {
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${(value / 1024 / 1024).toFixed(1)} MB`;
+};
+
 type LayerDropPosition = "before" | "after";
 type GroupDropPosition = "before" | "after";
 
 export function LayerPanel() {
   const wb = useWorkbench();
+  const auth = useAuth();
   const { setTableOpen } = useMapRef();
   const fileInput = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
@@ -76,6 +97,7 @@ export function LayerPanel() {
   const [exportFor, setExportFor] = useState<string | null>(null);
   const [noteFor, setNoteFor] = useState<string | null>(null);
   const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
+  const [attachmentBusyFor, setAttachmentBusyFor] = useState<string | null>(null);
   const [expandedLayers, setExpandedLayers] = useState<Set<string>>(() => new Set());
   const [draggedLayerId, setDraggedLayerId] = useState<string | null>(null);
   const draggedLayerRef = useRef<string | null>(null);
@@ -125,6 +147,82 @@ export function LayerPanel() {
     toast.success("Data groups nested", {
       description: `The selected groups are now subgroups of ${name}.`,
     });
+  };
+
+  const addLayerAttachments = async (layer: GisLayer, files: FileList | null) => {
+    if (!files?.length) return;
+    if (!auth.user) {
+      toast.error("Sign in before attaching files to a layer note");
+      return;
+    }
+    setAttachmentBusyFor(layer.id);
+    try {
+      const added: ProjectDocument[] = [];
+      for (const file of Array.from(files)) {
+        if (file.size > 50 * 1024 * 1024) {
+          toast.error(`${file.name} is larger than the 50 MB project-file limit`);
+          continue;
+        }
+        added.push(
+          await uploadProjectAsset({
+            userId: auth.user.id,
+            projectId: wb.projectId,
+            folderId: "general",
+            fileName: file.name,
+            data: file,
+            source: "upload",
+            uploadedBy: auth.user.name || auth.user.email,
+            layerId: layer.id,
+          }),
+        );
+      }
+      if (!added.length) return;
+      wb.setProjectRecords({
+        ...wb.records,
+        documents: [...added, ...wb.records.documents],
+      });
+      for (const document of added)
+        wb.addProjectEvent({
+          type: "upload",
+          title: `Attached ${document.name} to ${layer.name}`,
+          detail: `${formatFileSize(document.size)} · Layer note attachment`,
+          relatedId: layer.id,
+        });
+      toast.success(
+        `${added.length} attachment${added.length === 1 ? "" : "s"} added to ${layer.name}`,
+      );
+    } catch (error) {
+      toast.error("Layer attachment could not be stored", {
+        description: error instanceof Error ? error.message : "Cloud storage is unavailable",
+      });
+    } finally {
+      setAttachmentBusyFor(null);
+    }
+  };
+
+  const removeLayerAttachment = async (layer: GisLayer, document: ProjectDocument) => {
+    if (!window.confirm(`Remove “${document.name}” from ${layer.name}?`)) return;
+    setAttachmentBusyFor(layer.id);
+    try {
+      await deleteProjectAsset(document);
+      wb.setProjectRecords({
+        ...wb.records,
+        documents: wb.records.documents.filter((item) => item.id !== document.id),
+      });
+      wb.addProjectEvent({
+        type: "project",
+        title: `Removed ${document.name}`,
+        detail: `Removed from layer note: ${layer.name}`,
+        relatedId: layer.id,
+      });
+      toast.success("Layer attachment removed");
+    } catch (error) {
+      toast.error("Layer attachment could not be removed", {
+        description: error instanceof Error ? error.message : "Cloud storage is unavailable",
+      });
+    } finally {
+      setAttachmentBusyFor(null);
+    }
   };
 
   const updateDropTarget = (target: string | null) => {
@@ -621,6 +719,9 @@ export function LayerPanel() {
                       layer.style.labelFields?.length > 0
                         ? layer.style.labelFields
                         : labelFieldsFromTemplate(layer.style.labelTemplate);
+                    const layerAttachments = wb.records.documents.filter(
+                      (document) => document.layerId === layer.id,
+                    );
                     return (
                       <div
                         key={layer.id}
@@ -802,7 +903,11 @@ export function LayerPanel() {
                                 icon={<Copy className="size-3.5" />}
                               />
                               <IconBtn
-                                label={layer.note?.trim() ? "Edit layer note" : "Add layer note"}
+                                label={
+                                  layer.note?.trim() || layerAttachments.length > 0
+                                    ? "Edit layer note and attachments"
+                                    : "Add layer note or attachment"
+                                }
                                 onClick={() => {
                                   setNoteDrafts((current) => ({
                                     ...current,
@@ -811,7 +916,11 @@ export function LayerPanel() {
                                   setNoteFor(noteFor === layer.id ? null : layer.id);
                                 }}
                                 icon={<NotebookPen className="size-3.5" />}
-                                active={noteFor === layer.id || Boolean(layer.note?.trim())}
+                                active={
+                                  noteFor === layer.id ||
+                                  Boolean(layer.note?.trim()) ||
+                                  layerAttachments.length > 0
+                                }
                               />
                               <IconBtn
                                 label="Delete"
@@ -827,7 +936,7 @@ export function LayerPanel() {
                                   htmlFor={`layer-note-${layer.id}`}
                                   className="text-[10px] font-semibold text-foreground"
                                 >
-                                  Note for {layer.name}
+                                  Note and attachments for {layer.name}
                                 </label>
                                 <textarea
                                   id={`layer-note-${layer.id}`}
@@ -843,6 +952,76 @@ export function LayerPanel() {
                                   placeholder="Add context, source details, decisions, or follow-up items for this layer…"
                                   className="mt-1 w-full resize-y rounded-lg border border-border bg-card px-2 py-1.5 text-[11px] leading-relaxed outline-none focus:border-primary"
                                 />
+                                <div className="mt-1.5 rounded-lg border border-border bg-card/70 p-1.5">
+                                  <div className="flex items-center gap-1.5">
+                                    <Paperclip className="size-3 text-primary" />
+                                    <span className="min-w-0 flex-1 text-[9px] font-semibold">
+                                      Attachments
+                                      {layerAttachments.length > 0
+                                        ? ` (${layerAttachments.length})`
+                                        : ""}
+                                    </span>
+                                    <label
+                                      className={cn(
+                                        "flex cursor-pointer items-center gap-1 rounded-md bg-secondary px-1.5 py-1 text-[9px] font-semibold hover:bg-accent",
+                                        attachmentBusyFor === layer.id &&
+                                          "pointer-events-none opacity-50",
+                                      )}
+                                    >
+                                      <Upload className="size-2.5" /> Add
+                                      <input
+                                        type="file"
+                                        multiple
+                                        className="hidden"
+                                        disabled={attachmentBusyFor === layer.id}
+                                        onChange={(event) => {
+                                          void addLayerAttachments(layer, event.target.files);
+                                          event.currentTarget.value = "";
+                                        }}
+                                      />
+                                    </label>
+                                  </div>
+                                  {layerAttachments.length > 0 ? (
+                                    <div className="mt-1 space-y-1">
+                                      {layerAttachments.map((document) => (
+                                        <div
+                                          key={document.id}
+                                          className="flex items-center gap-1.5 rounded-md bg-background px-1.5 py-1"
+                                        >
+                                          <FileText className="size-3 shrink-0 text-muted-foreground" />
+                                          <span className="min-w-0 flex-1 truncate text-[9px]">
+                                            {document.name} · {formatFileSize(document.size)}
+                                          </span>
+                                          <button
+                                            type="button"
+                                            onClick={() => void downloadProjectAsset(document)}
+                                            className="rounded p-0.5 hover:bg-accent"
+                                            aria-label={`Download ${document.name}`}
+                                            title="Download attachment"
+                                          >
+                                            <Download className="size-2.5" />
+                                          </button>
+                                          <button
+                                            type="button"
+                                            disabled={attachmentBusyFor === layer.id}
+                                            onClick={() =>
+                                              void removeLayerAttachment(layer, document)
+                                            }
+                                            className="rounded p-0.5 text-destructive hover:bg-destructive/10 disabled:opacity-50"
+                                            aria-label={`Remove ${document.name}`}
+                                            title="Remove attachment"
+                                          >
+                                            <Trash2 className="size-2.5" />
+                                          </button>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    <p className="mt-1 text-[9px] text-muted-foreground">
+                                      Add photos, PDFs, emails, or other layer files.
+                                    </p>
+                                  )}
+                                </div>
                                 <div className="mt-1.5 flex flex-wrap items-center gap-1">
                                   <button
                                     type="button"

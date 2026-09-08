@@ -121,6 +121,7 @@ export function ProjectRecordsPanel() {
   const [eventType, setEventType] = useState<"all" | ProjectEventType>("all");
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
+  const [layerAttachmentBusyId, setLayerAttachmentBusyId] = useState<string | null>(null);
   const [emailBusy, setEmailBusy] = useState(false);
   const [emailSetupError, setEmailSetupError] = useState("");
   const [projectEmailAlias, setProjectEmailAlias] = useState<ProjectEmailAlias | null>(null);
@@ -129,9 +130,14 @@ export function ProjectRecordsPanel() {
   const fileInput = useRef<HTMLInputElement>(null);
   const emailInput = useRef<HTMLInputElement>(null);
   const records = wb.records;
+  const layersWithAttachments = new Set(
+    records.documents.flatMap((document) => (document.layerId ? [document.layerId] : [])),
+  );
   const layerNotes = wb.layers
     .map((layer, index) => ({ layer, order: index + 1 }))
-    .filter(({ layer }) => Boolean(layer.note?.trim()));
+    .filter(({ layer }) => Boolean(layer.note?.trim()) || layersWithAttachments.has(layer.id));
+  const attachmentsForLayer = (layerId: string) =>
+    records.documents.filter((document) => document.layerId === layerId);
 
   const refreshInboundEmail = async () => {
     if (!auth.user || !auth.cloudEnabled) return;
@@ -316,12 +322,70 @@ export function ProjectRecordsPanel() {
     }
   };
 
+  const uploadLayerAttachments = async (layerId: string, files: FileList | null) => {
+    if (!files?.length) return;
+    if (!auth.user) {
+      toast.error("Sign in before attaching files to a layer note");
+      return;
+    }
+    const layer = wb.layers.find((item) => item.id === layerId);
+    if (!layer) return;
+    setLayerAttachmentBusyId(layerId);
+    try {
+      const added: ProjectDocument[] = [];
+      for (const file of Array.from(files)) {
+        if (file.size > 50 * 1024 * 1024) {
+          toast.error(`${file.name} is larger than the 50 MB project-file limit`);
+          continue;
+        }
+        added.push(
+          await uploadProjectAsset({
+            userId: auth.user.id,
+            projectId: wb.projectId,
+            folderId: "general",
+            fileName: file.name,
+            data: file,
+            source: "upload",
+            uploadedBy: auth.user.name || auth.user.email,
+            layerId,
+          }),
+        );
+      }
+      if (!added.length) return;
+      update({ documents: [...added, ...records.documents] });
+      for (const document of added)
+        wb.addProjectEvent({
+          type: "upload",
+          title: `Attached ${document.name} to ${layer.name}`,
+          detail: `${formatBytes(document.size)} · Layer note attachment`,
+          relatedId: layer.id,
+        });
+      toast.success(
+        `${added.length} attachment${added.length === 1 ? "" : "s"} added to ${layer.name}`,
+      );
+    } catch (error) {
+      toast.error("Layer attachment could not be stored", {
+        description: error instanceof Error ? error.message : "Cloud storage is unavailable",
+      });
+    } finally {
+      setLayerAttachmentBusyId(null);
+    }
+  };
+
   const removeDocument = async (document: ProjectDocument) => {
     setBusy(true);
     try {
       await deleteProjectAsset(document);
       update({ documents: records.documents.filter((item) => item.id !== document.id) });
-      wb.addProjectEvent({ type: "project", title: `Removed ${document.name}` });
+      const layer = document.layerId
+        ? wb.layers.find((item) => item.id === document.layerId)
+        : undefined;
+      wb.addProjectEvent({
+        type: "project",
+        title: `Removed ${document.name}`,
+        ...(layer ? { detail: `Removed from layer note: ${layer.name}`, relatedId: layer.id } : {}),
+      });
+      toast.success(layer ? "Layer attachment removed" : "Project file removed");
     } catch (error) {
       toast.error("File could not be removed", {
         description: error instanceof Error ? error.message : "Cloud storage is unavailable",
@@ -410,7 +474,7 @@ export function ProjectRecordsPanel() {
         content = `<p class="attachment">Attached file: ${escapeHtml(document.name)} (${formatBytes(document.size)}). The original is included in the downloadable packet.</p>`;
       }
       renderedDocuments.push(
-        `<section class="page"><h2>${escapeHtml(document.name)}</h2><p class="meta">${escapeHtml(folderPath(document.folderId))} · ${new Date(document.createdAt).toLocaleString()}</p>${content}</section>`,
+        `<section class="page"><h2>${escapeHtml(document.name)}</h2><p class="meta">${escapeHtml(folderPath(document.folderId))}${document.layerId ? ` · Layer: ${escapeHtml(wb.layers.find((layer) => layer.id === document.layerId)?.name ?? "Removed layer")}` : ""} · ${new Date(document.createdAt).toLocaleString()}</p>${content}</section>`,
       );
     }
     return `<!doctype html><html><head><title>${escapeHtml(wb.projectName)} packet</title><style>@page{margin:.65in}body{font:12pt Arial,sans-serif;color:#173328}h1,h2{color:#1f7044}.cover,.page{break-after:page}.meta{color:#647067;font-size:9pt}article{white-space:pre-wrap;line-height:1.5}img{max-width:100%;max-height:8in;object-fit:contain}pre{white-space:pre-wrap;font:10pt Arial;line-height:1.45}dl{display:grid;grid-template-columns:70px 1fr;gap:4px}dt{font-weight:bold}.attachment{border:1px solid #ccd4ce;padding:16px;border-radius:8px}</style></head><body><section class="cover"><h1>${escapeHtml(wb.projectName)}</h1><p>${escapeHtml(records.summary || "Project records packet")}</p><p class="meta">Created ${new Date().toLocaleString()} · ${notes.length} notes · ${documents.length} files</p></section>${notes.map((note) => `<section class="page"><h2>${escapeHtml(note.title)}</h2><p class="meta">${escapeHtml(note.author)} · ${new Date(note.createdAt).toLocaleString()}</p><article>${escapeHtml(note.body)}</article></section>`).join("")}${renderedDocuments.join("")}</body></html>`;
@@ -587,7 +651,8 @@ export function ProjectRecordsPanel() {
                             {layer.name}
                           </span>
                           <span className="block truncate text-[9px] text-muted-foreground">
-                            {layer.note}
+                            {layer.note?.trim() ||
+                              `${attachmentsForLayer(layer.id).length} layer attachment${attachmentsForLayer(layer.id).length === 1 ? "" : "s"}`}
                           </span>
                         </span>
                         <ChevronRight className="size-3.5 text-muted-foreground" />
@@ -751,13 +816,15 @@ export function ProjectRecordsPanel() {
                   <div>
                     <h3 className="text-xs font-semibold">Notes attached to map layers</h3>
                     <p className="mt-0.5 text-[10px] text-muted-foreground">
-                      Listed from front to back in the same order as the Layers panel.
+                      Notes and their files, listed front to back in the same order as the Layers
+                      panel.
                     </p>
                   </div>
                 </div>
               </section>
               {layerNotes.map(({ layer, order }) => {
                 const group = wb.groups.find((item) => item.id === layer.groupId);
+                const attachments = attachmentsForLayer(layer.id);
                 return (
                   <article
                     key={layer.id}
@@ -792,6 +859,76 @@ export function ProjectRecordsPanel() {
                       aria-label={`Note for ${layer.name}`}
                       className="mt-2 w-full resize-y rounded-xl border border-border bg-card px-3 py-2 text-xs leading-relaxed outline-none focus:border-primary"
                     />
+                    <section className="mt-2 rounded-xl border border-border bg-secondary/40 p-2">
+                      <div className="flex items-center gap-2">
+                        <Paperclip className="size-3.5 text-primary" />
+                        <p className="min-w-0 flex-1 text-[10px] font-semibold">
+                          Attachments {attachments.length > 0 && `(${attachments.length})`}
+                        </p>
+                        <label
+                          className={cn(
+                            "flex cursor-pointer items-center gap-1 rounded-lg bg-card px-2 py-1.5 text-[10px] font-semibold hover:bg-accent",
+                            layerAttachmentBusyId === layer.id && "pointer-events-none opacity-50",
+                          )}
+                        >
+                          <Plus className="size-3" /> Add files
+                          <input
+                            type="file"
+                            multiple
+                            className="hidden"
+                            disabled={layerAttachmentBusyId === layer.id}
+                            onChange={(event) => {
+                              void uploadLayerAttachments(layer.id, event.target.files);
+                              event.currentTarget.value = "";
+                            }}
+                          />
+                        </label>
+                      </div>
+                      {attachments.length > 0 ? (
+                        <div className="mt-2 space-y-1">
+                          {attachments.map((document) => (
+                            <div
+                              key={document.id}
+                              className="flex items-center gap-2 rounded-lg bg-card px-2 py-1.5"
+                            >
+                              <FileText className="size-3.5 shrink-0 text-muted-foreground" />
+                              <span className="min-w-0 flex-1">
+                                <span className="block truncate text-[10px] font-semibold">
+                                  {document.name}
+                                </span>
+                                <span className="block text-[9px] text-muted-foreground">
+                                  {formatBytes(document.size)} ·{" "}
+                                  {new Date(document.createdAt).toLocaleDateString()}
+                                </span>
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => void downloadProjectAsset(document)}
+                                className="rounded-md p-1 hover:bg-accent"
+                                aria-label={`Download ${document.name}`}
+                                title="Download attachment"
+                              >
+                                <Download className="size-3" />
+                              </button>
+                              <button
+                                type="button"
+                                disabled={busy}
+                                onClick={() => void removeDocument(document)}
+                                className="rounded-md p-1 text-destructive hover:bg-destructive/10 disabled:opacity-50"
+                                aria-label={`Remove ${document.name} from ${layer.name}`}
+                                title="Remove attachment"
+                              >
+                                <Trash2 className="size-3" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="mt-2 text-[9px] text-muted-foreground">
+                          Add photos, documents, emails, or other files for this layer.
+                        </p>
+                      )}
+                    </section>
                     <div className="mt-2 flex items-center gap-1">
                       <button
                         type="button"
@@ -827,7 +964,7 @@ export function ProjectRecordsPanel() {
                 );
               })}
               {!layerNotes.length && (
-                <Empty text="No layer notes yet. Expand a layer in the Layers panel and use its note button to add one." />
+                <Empty text="No layer notes or attachments yet. Expand a layer in the Layers panel and use its note button to add them." />
               )}
             </div>
           )}
@@ -895,6 +1032,14 @@ export function ProjectRecordsPanel() {
                       <p className="text-[10px] text-muted-foreground">
                         {folderPath(document.folderId)} · {formatBytes(document.size)} ·{" "}
                         {new Date(document.createdAt).toLocaleDateString()}
+                        {document.layerId && (
+                          <>
+                            {" "}
+                            · Layer:{" "}
+                            {wb.layers.find((layer) => layer.id === document.layerId)?.name ??
+                              "Removed layer"}
+                          </>
+                        )}
                       </p>
                     </div>
                     <label className="flex items-center gap-1 text-[10px]">

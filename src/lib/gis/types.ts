@@ -222,6 +222,8 @@ export interface ProjectDocument {
   createdAt: number;
   uploadedBy: string;
   includeInPacket: boolean;
+  /** Links a repository document to the note/record for a specific map layer. */
+  layerId?: string;
   email?: EmailDocumentDetails;
 }
 
