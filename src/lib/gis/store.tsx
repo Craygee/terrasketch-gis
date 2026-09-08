@@ -333,6 +333,7 @@ export interface WorkbenchApi extends WorkbenchState {
     targetGroupId: string,
     position: "before" | "inside" | "after",
   ) => void;
+  nestGroupInLayer: (groupId: string, layerId: string) => void;
   setLayerGroup: (id: string, groupId: string) => void;
   addGroup: (name: string) => string;
   addSubgroup: (parentId: string, name: string) => void;
@@ -756,6 +757,45 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       const layers = orderedLayersForGroups(s.layers, groups);
 
       return { ...s, groups, layers };
+    });
+  }, []);
+
+  const nestGroupInLayer = useCallback<WorkbenchApi["nestGroupInLayer"]>((groupId, layerId) => {
+    setState((s) => {
+      const sourceGroup = s.groups.find((group) => group.id === groupId);
+      const targetLayer = s.layers.find((layer) => layer.id === layerId);
+      if (!sourceGroup || !targetLayer) return s;
+
+      // A group cannot contain a layer that is already inside that group or one of its children.
+      if (descendantGroupIds(sourceGroup.id, s.groups).has(targetLayer.groupId)) return s;
+
+      let groups = [...s.groups];
+      let container = groups.find((group) => group.containerLayerId === targetLayer.id);
+      if (!container) {
+        container = {
+          id: uid(),
+          name: targetLayer.name,
+          collapsed: false,
+          parentId: targetLayer.groupId,
+          containerLayerId: targetLayer.id,
+        };
+        const parentIndex = groups.findIndex((group) => group.id === targetLayer.groupId);
+        groups.splice(parentIndex >= 0 ? parentIndex + 1 : groups.length, 0, container);
+      }
+      if (sourceGroup.parentId === container.id && targetLayer.groupId === container.id) return s;
+
+      groups = groups.map((group) =>
+        group.id === sourceGroup.id ? { ...group, parentId: container.id } : group,
+      );
+      const layers = s.layers.map((layer) =>
+        layer.id === targetLayer.id ? { ...layer, groupId: container.id } : layer,
+      );
+      return {
+        ...s,
+        groups,
+        layers: orderedLayersForGroups(layers, groups),
+        selectedGroupIds: [sourceGroup.id],
+      };
     });
   }, []);
 
@@ -1557,6 +1597,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       moveLayerToEdge,
       reorderLayer,
       reorderGroup,
+      nestGroupInLayer,
       setLayerGroup,
       addGroup,
       addSubgroup,
@@ -1667,6 +1708,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       moveLayerToEdge,
       reorderLayer,
       reorderGroup,
+      nestGroupInLayer,
       setLayerGroup,
       addGroup,
       addSubgroup,

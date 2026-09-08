@@ -586,6 +586,20 @@ export function LayerPanel() {
     }
 
     const invalidTargets = nestedGroupIds(dragged.id, wb.groups);
+    const layerTarget = Array.from(list.querySelectorAll<HTMLElement>("[data-layer-drop-id]"))
+      .flatMap((element) => {
+        const id = element.dataset["layerDropId"];
+        const target = wb.layers.find((layer) => layer.id === id);
+        return id && target && !invalidTargets.has(target.groupId)
+          ? [{ id, bounds: element.getBoundingClientRect() }]
+          : [];
+      })
+      .find(({ bounds }) => event.clientY >= bounds.top && event.clientY <= bounds.bottom);
+    if (layerTarget) {
+      updateGroupDropTarget(`layer:${layerTarget.id}`);
+      return;
+    }
+
     const groupCards = Array.from(
       list.querySelectorAll<HTMLElement>("[data-group-drop-id]"),
     ).flatMap((element) => {
@@ -596,9 +610,9 @@ export function LayerPanel() {
         : [];
     });
 
-    // The entire visible group card—including all of its layer rows—is a nesting target. This
-    // matches the natural gesture of dropping into an expanded group without having to scroll
-    // back to its narrow header. Rectangle checks also avoid Safari pointer-capture quirks.
+    // The remaining group card area is a normal subgroup target. Layer rows are handled above so
+    // the user can intentionally turn one layer into a container of original features + sublayers.
+    // Rectangle checks also avoid Safari pointer-capture quirks.
     const nestedTarget = groupCards.find(
       ({ bounds }) => event.clientY >= bounds.top && event.clientY <= bounds.bottom,
     );
@@ -626,6 +640,18 @@ export function LayerPanel() {
     const dragged = draggedGroupRef.current;
     const target = groupDropTargetRef.current;
     if (!dragged || !target) {
+      resetGroupDrag();
+      return;
+    }
+    if (target.startsWith("layer:")) {
+      const targetLayerId = target.slice("layer:".length);
+      const targetLayerName = wb.layers.find((layer) => layer.id === targetLayerId)?.name;
+      wb.nestGroupInLayer(dragged, targetLayerId);
+      toast.success("Group added as layer sublayers", {
+        description: targetLayerName
+          ? `The original ${targetLayerName} features and the dropped group are now organized together.`
+          : undefined,
+      });
       resetGroupDrag();
       return;
     }
@@ -850,13 +876,16 @@ export function LayerPanel() {
                     event.preventDefault();
                     renameGroup();
                   }}
-                  title={`${group.name} · Double-click to rename`}
+                  title={`${group.name}${group.containerLayerId ? " layer container" : ""} · Double-click to rename`}
                   className="flex min-w-0 flex-1 items-center gap-1 px-2 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wide"
                 >
                   {group.collapsed ? (
                     <ChevronRight className="size-3.5 shrink-0" />
                   ) : (
                     <ChevronDown className="size-3.5 shrink-0" />
+                  )}
+                  {group.containerLayerId && (
+                    <Layers className="size-3 shrink-0 text-primary" aria-hidden="true" />
                   )}
                   <span className="truncate">{group.name}</span>
                   <span className="num ml-auto text-[10px]">{groupedLayers.length}</span>
@@ -946,7 +975,7 @@ export function LayerPanel() {
                   }}
                   onPointerCancel={resetGroupDrag}
                   aria-label={`Drag ${group.name} group to reorder or nest`}
-                  title="Drop anywhere inside another group to make this a subgroup; drop between groups to reorder"
+                  title="Drop on a group to nest it, on a layer to add it as sublayers, or between groups to reorder"
                   className={cn(
                     "mr-0.5 flex size-7 shrink-0 touch-none select-none items-center justify-center rounded hover:bg-accent hover:text-foreground",
                     draggedGroupId === group.id
@@ -1008,6 +1037,8 @@ export function LayerPanel() {
                             "border-primary shadow-[0_-3px_0_0_hsl(var(--primary))]",
                           dropTarget === `layer:${layer.id}:after` &&
                             "border-primary shadow-[0_3px_0_0_hsl(var(--primary))]",
+                          groupDropTarget === `layer:${layer.id}` &&
+                            "border-primary bg-primary/10 ring-2 ring-primary/70",
                         )}
                       >
                         <div className="flex min-h-8 items-center gap-1.5">

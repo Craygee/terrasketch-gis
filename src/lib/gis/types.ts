@@ -100,6 +100,8 @@ export interface LayerGroup {
   name: string;
   collapsed: boolean;
   parentId?: string | null;
+  /** Identifies a group that acts as a container for one layer's original features and sublayers. */
+  containerLayerId?: string;
 }
 
 export type PrintAnnotation =
