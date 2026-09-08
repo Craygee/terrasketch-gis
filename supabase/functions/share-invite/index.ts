@@ -32,9 +32,9 @@ interface MemberRow {
 }
 
 const roleNames: Record<ShareRole, string> = {
-  viewer: "view-only",
-  editor: "editor-copy",
-  admin: "administrator",
+  viewer: "View only",
+  editor: "Editor copy",
+  admin: "Administrator",
 };
 
 const roleDescriptions: Record<ShareRole, string> = {
@@ -191,6 +191,9 @@ Deno.serve(async (request) => {
     const escapedRole = escapeHtml(roleNames[role]);
     const escapedDescription = escapeHtml(roleDescriptions[role]);
     const escapedUrl = escapeHtml(inviteUrl.toString());
+    const logoUrl = new URL("/landdraft-icon-192.png", inviteUrl.origin).toString();
+    const escapedLogoUrl = escapeHtml(logoUrl);
+    const escapedEmail = escapeHtml(email);
     const from = Deno.env.get("RESEND_FROM_EMAIL")?.trim() || DEFAULT_FROM_EMAIL;
     const emailResponse = await fetch(RESEND_EMAILS_API, {
       method: "POST",
@@ -203,8 +206,101 @@ Deno.serve(async (request) => {
         from,
         to: [email],
         subject: `${subjectText(sender)} shared “${subjectText(share.name)}” with you in LandDraft`,
-        text: `${sender} invited you to the LandDraft map “${share.name}” with ${roleNames[role]} access.\n\n${roleDescriptions[role]}\n\nOpen the map: ${inviteUrl.toString()}\n\nSign in with this email address to access the shared map.`,
-        html: `<!doctype html><html><body style="margin:0;background:#f7f4e8;font-family:Arial,sans-serif;color:#18372b"><div style="max-width:560px;margin:0 auto;padding:32px 20px"><div style="background:#fff;border:1px solid #d9ddcf;border-radius:18px;padding:28px"><div style="font-size:22px;font-weight:700;color:#18783f">LandDraft</div><h1 style="font-size:22px;margin:24px 0 8px">A map was shared with you</h1><p style="line-height:1.6"><strong>${escapedSender}</strong> invited you to <strong>${escapedMap}</strong> with ${escapedRole} access.</p><p style="line-height:1.6;color:#52645b">${escapedDescription}</p><p style="margin:28px 0"><a href="${escapedUrl}" style="display:inline-block;background:#18783f;color:#fff;text-decoration:none;font-weight:700;padding:13px 20px;border-radius:12px">Open shared map</a></p><p style="font-size:13px;line-height:1.5;color:#6b776f">Sign in to LandDraft with <strong>${escapeHtml(email)}</strong>. If the button does not work, paste this address into your browser:<br><a href="${escapedUrl}" style="color:#18783f;word-break:break-all">${escapedUrl}</a></p></div></div></body></html>`,
+        text: `LANDDRAFT\nPrivate map invitation\n\n${sender} shared “${share.name}” with you.\nAccess: ${roleNames[role]}\n\n${roleDescriptions[role]}\n\nOPEN SHARED MAP\n${inviteUrl.toString()}\n\nFor security, access is tied to ${email}. Sign in to LandDraft with that email address. The link does not grant access to anyone else.\n\nLandDraft — Map, measure and shape the land\nhttps://landdraft.net`,
+        html: `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light">
+    <meta name="supported-color-schemes" content="light">
+    <title>LandDraft map invitation</title>
+    <style>
+      @media only screen and (max-width: 620px) {
+        .email-shell { padding: 18px 10px !important; }
+        .email-card { border-radius: 16px !important; }
+        .email-content { padding: 28px 22px !important; }
+        .email-header { padding: 22px !important; }
+        .email-title { font-size: 27px !important; }
+        .email-button { display: block !important; text-align: center !important; }
+      }
+    </style>
+  </head>
+  <body style="margin:0;padding:0;background-color:#f4f0e3;color:#173328;font-family:Arial,Helvetica,sans-serif;-webkit-text-size-adjust:100%;">
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">
+      ${escapedSender} shared “${escapedMap}” with you in LandDraft.
+    </div>
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;background-color:#f4f0e3;">
+      <tr>
+        <td class="email-shell" align="center" style="padding:40px 18px;">
+          <table role="presentation" width="600" cellspacing="0" cellpadding="0" border="0" class="email-card" style="width:100%;max-width:600px;background-color:#ffffff;border:1px solid #d9ddcf;border-radius:22px;overflow:hidden;box-shadow:0 8px 28px rgba(23,51,40,0.08);">
+            <tr>
+              <td class="email-header" style="padding:24px 32px;background-color:#227448;">
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                  <tr>
+                    <td width="52" valign="middle" style="width:52px;">
+                      <img src="${escapedLogoUrl}" width="46" height="46" alt="LandDraft logo" style="display:block;width:46px;height:46px;border:0;border-radius:12px;">
+                    </td>
+                    <td valign="middle" style="padding-left:13px;">
+                      <div style="font-size:24px;line-height:28px;font-weight:700;letter-spacing:-0.4px;color:#ffffff;">LandDraft</div>
+                      <div style="padding-top:2px;font-size:10px;line-height:14px;font-weight:700;letter-spacing:1.15px;color:#e4f1e8;">MAP, MEASURE AND SHAPE THE LAND</div>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+            <tr>
+              <td class="email-content" style="padding:38px 36px 34px;">
+                <div style="font-size:11px;line-height:16px;font-weight:700;letter-spacing:1.4px;color:#227448;">PRIVATE MAP INVITATION</div>
+                <h1 class="email-title" style="margin:10px 0 12px;font-size:30px;line-height:38px;font-weight:700;letter-spacing:-0.55px;color:#173328;">A map has been shared with you</h1>
+                <p style="margin:0 0 24px;font-size:16px;line-height:25px;color:#52645b;"><strong style="color:#173328;">${escapedSender}</strong> invited you to collaborate on:</p>
+
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;margin-bottom:26px;background-color:#f8f6ed;border:1px solid #e0e2d6;border-radius:14px;">
+                  <tr>
+                    <td style="padding:20px 20px 18px;">
+                      <div style="font-size:11px;line-height:15px;font-weight:700;letter-spacing:0.9px;color:#6a786f;">SHARED MAP</div>
+                      <div style="padding-top:5px;font-size:21px;line-height:29px;font-weight:700;color:#173328;">${escapedMap}</div>
+                      <div style="padding-top:13px;">
+                        <span style="display:inline-block;padding:6px 10px;background-color:#e2f0e5;border:1px solid #bad4c1;border-radius:999px;font-size:12px;line-height:16px;font-weight:700;color:#1d633e;">${escapedRole}</span>
+                      </div>
+                      <p style="margin:13px 0 0;font-size:14px;line-height:22px;color:#52645b;">${escapedDescription}</p>
+                    </td>
+                  </tr>
+                </table>
+
+                <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin:0 0 28px;">
+                  <tr>
+                    <td align="center" bgcolor="#227448" style="border-radius:12px;">
+                      <a class="email-button" href="${escapedUrl}" target="_blank" style="display:inline-block;padding:14px 23px;border:1px solid #227448;border-radius:12px;background-color:#227448;font-size:15px;line-height:20px;font-weight:700;color:#ffffff;text-decoration:none;">Open shared map&nbsp;&nbsp;&rarr;</a>
+                    </td>
+                  </tr>
+                </table>
+
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;background-color:#f1f6f2;border-left:4px solid #80aa8d;border-radius:8px;">
+                  <tr>
+                    <td style="padding:13px 15px;font-size:13px;line-height:20px;color:#52645b;">
+                      <strong style="color:#173328;">Your access is protected.</strong> Sign in with <strong style="color:#173328;">${escapedEmail}</strong>. This link does not give access to anyone who has not been invited.
+                    </td>
+                  </tr>
+                </table>
+
+                <p style="margin:25px 0 6px;font-size:12px;line-height:18px;color:#77837c;">If the button does not work, copy and paste this address into your browser:</p>
+                <p style="margin:0;font-size:12px;line-height:18px;word-break:break-all;"><a href="${escapedUrl}" style="color:#227448;text-decoration:underline;">${escapedUrl}</a></p>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:21px 30px;background-color:#173328;text-align:center;">
+                <p style="margin:0 0 5px;font-size:12px;line-height:18px;color:#d9e4dd;">LandDraft &middot; Map, measure and shape the land</p>
+                <p style="margin:0;font-size:11px;line-height:17px;color:#9eb0a6;">You received this email because ${escapedSender} invited ${escapedEmail} to a private LandDraft map.</p>
+              </td>
+            </tr>
+          </table>
+          <p style="margin:18px auto 0;max-width:560px;font-size:11px;line-height:17px;text-align:center;color:#77837c;">If you were not expecting this invitation, you can safely ignore this email.</p>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>`,
       }),
     });
     if (!emailResponse.ok)
