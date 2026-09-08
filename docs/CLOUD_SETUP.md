@@ -126,8 +126,13 @@ with a future normal mailbox on `@landdraft.net`.
 - Deploy `supabase/functions/resend-inbound`. This endpoint deliberately disables Supabase JWT
   verification because Resend is the caller; the function instead verifies the raw request with
   the Resend/Svix signing secret before doing any work.
+- Deploy `supabase/functions/share-invite`. This authenticated endpoint grants share access through
+  the existing guarded database function and sends the recipient a secure LandDraft link through
+  Resend. Its retry button safely upserts the same permission instead of creating duplicates.
 - Set `RESEND_API_KEY` and `RESEND_WEBHOOK_SECRET` only in Supabase Edge Function secrets. Never add
   either value to GitHub, Lovable, browser variables, or `.env.example`.
+- Optionally set `RESEND_FROM_EMAIL` (default `LandDraft <accounts@notify.landdraft.net>`) and
+  `LANDDRAFT_SITE_URL` (default `https://landdraft.net/`) in Edge Function secrets.
 - Set the deployment's public `VITE_INBOUND_EMAIL_DOMAIN` to `inbound.landdraft.net` only after the
   domain, MX record, webhook, migration, and function have all passed an end-to-end test.
 
@@ -147,7 +152,8 @@ with a future normal mailbox on `@landdraft.net`.
 6. In Supabase Authentication → Email → SMTP Settings, use host `smtp.resend.com`, port `465`,
    username `resend`, the Resend API key as the password, and a verified LandDraft sender such as
    `LandDraft <accounts@notify.landdraft.net>`.
-7. Test signup confirmation, password reset, Google sign-in return, share invitation delivery, one
+7. Deploy `share-invite`, then test signup confirmation, password reset, Google sign-in return,
+   share invitation delivery and its resend control, one
    project-specific intake address, the account inbox, duplicate webhook delivery, an invalid
    signature, and an attachment near the 50 MB per-file limit.
 

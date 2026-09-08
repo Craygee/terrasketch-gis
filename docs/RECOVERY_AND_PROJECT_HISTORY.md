@@ -259,6 +259,11 @@ send whole project files or private stored documents to the model.
 
 ## Outstanding production integrations to keep visible
 
+- The authenticated `share-invite` Edge Function was deployed to LandDraft Production on September
+  8, 2026. It uses the server-only Resend key already held by Supabase, grants access through the
+  guarded `invite_share_member` RPC, and reports email delivery separately from permission changes.
+  Complete an end-to-end delivery test from the published Share panel and confirm the verified
+  `accounts@notify.landdraft.net` sender remains active before broader customer onboarding.
 - Email intake migration `202609040001_project_email_intake.sql` and the `resend-inbound` Edge
   Function were deployed to LandDraft Production on September 4, 2026. Complete the Resend account,
   Name.com records, function secrets, end-to-end test, and written retention policy before showing

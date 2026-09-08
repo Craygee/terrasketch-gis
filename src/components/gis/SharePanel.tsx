@@ -304,12 +304,23 @@ export function SharePanel({ onClose }: { onClose: () => void }) {
 
   const invite = async () => {
     if (!managedShare || !inviteEmail.trim()) return;
+    const email = inviteEmail.trim();
     setBusy(true);
     try {
-      await shareStore.invite(managedShare.id, inviteEmail, inviteRole);
+      const result = await shareStore.invite(managedShare.id, email, inviteRole);
       setInviteEmail("");
       await refresh();
-      toast.success("Access granted", { description: roleHelp[inviteRole] });
+      if (result.emailSent)
+        toast.success("Invitation emailed", {
+          description: `${email} received ${inviteRole} access and a secure LandDraft link.`,
+        });
+      else {
+        await navigator.clipboard.writeText(shareUrl(managedShare.id)).catch(() => undefined);
+        toast.warning("Access granted, but email was not sent", {
+          description: `${result.warning ?? "Outbound email is temporarily unavailable"} The secure link was copied so you can send it directly.`,
+          duration: 8_000,
+        });
+      }
     } catch (error) {
       toast.error("Person could not be added", {
         description: error instanceof Error ? error.message : "Check the email and try again.",
@@ -327,7 +338,9 @@ export function SharePanel({ onClose }: { onClose: () => void }) {
         </span>
         <div className="min-w-0 flex-1">
           <h2 className="text-sm font-semibold">Share maps</h2>
-          <p className="text-[10px] text-muted-foreground">Private links · signed-in access</p>
+          <p className="text-[10px] text-muted-foreground">
+            Private links · signed-in access · email invitations
+          </p>
         </div>
         <button
           onClick={() => void refresh()}
@@ -612,6 +625,8 @@ export function SharePanel({ onClose }: { onClose: () => void }) {
 
               <div className="grid grid-cols-[1fr_105px_auto] gap-1">
                 <input
+                  type="email"
+                  autoComplete="email"
                   value={inviteEmail}
                   onChange={(event) => setInviteEmail(event.target.value)}
                   placeholder="Email address"
@@ -629,7 +644,8 @@ export function SharePanel({ onClose }: { onClose: () => void }) {
                 <button
                   onClick={() => void invite()}
                   className="rounded-lg bg-primary px-2 text-primary-foreground"
-                  title="Grant access"
+                  title="Grant access and email a secure invitation"
+                  aria-label="Grant access and send invitation email"
                 >
                   <UserPlus className="size-4" />
                 </button>
@@ -661,6 +677,38 @@ export function SharePanel({ onClose }: { onClose: () => void }) {
                       <option value="editor">Editor</option>
                       <option value="admin">Admin</option>
                     </select>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => {
+                        setBusy(true);
+                        void shareStore
+                          .invite(managedShare.id, member.email, member.role)
+                          .then((result) => {
+                            if (result.emailSent)
+                              toast.success("Invitation email resent", {
+                                description: `Sent to ${member.email}.`,
+                              });
+                            else
+                              toast.warning("Email was not sent", {
+                                description:
+                                  result.warning ?? "Outbound email is temporarily unavailable.",
+                              });
+                          })
+                          .catch((error: unknown) =>
+                            toast.error("Invitation could not be resent", {
+                              description:
+                                error instanceof Error ? error.message : "Try again shortly.",
+                            }),
+                          )
+                          .finally(() => setBusy(false));
+                      }}
+                      className="rounded-lg p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-40"
+                      title="Resend invitation email"
+                      aria-label={`Resend invitation email to ${member.email}`}
+                    >
+                      <Send className="size-3.5" />
+                    </button>
                     <button
                       onClick={() => void shareStore.removeMember(member.id).then(refresh)}
                       className="rounded-lg p-1.5 text-destructive hover:bg-destructive/10"

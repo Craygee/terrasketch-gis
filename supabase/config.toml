@@ -5,3 +5,6 @@ verify_jwt = false
 
 [functions.gis-assistant]
 verify_jwt = true
+
+[functions.share-invite]
+verify_jwt = true

@@ -1,6 +1,7 @@
 import {
   cloudConfigured,
   cloudDataRequest,
+  cloudFunctionRequest,
   deletePrivateProjectFiles,
   downloadPrivateProjectFile,
   uploadPrivateProjectFile,
@@ -37,6 +38,13 @@ export interface ShareMember {
   role: ShareRole;
   active: boolean;
   acceptedAt: number | null;
+}
+
+export interface ShareInvitationResult {
+  member: ShareMember;
+  emailSent: boolean;
+  messageId?: string;
+  warning?: string;
 }
 
 export interface ShareSubmission {
@@ -334,13 +342,20 @@ export const shareStore = {
     });
   },
 
-  async invite(shareId: string, email: string, role: ShareRole): Promise<ShareMember> {
-    const rows = await cloudDataRequest<MemberRow[]>("/rest/v1/rpc/invite_share_member", {
-      method: "POST",
-      body: JSON.stringify({ p_share_id: shareId, p_email: email, p_role: role }),
-    });
-    if (!rows[0]) throw new Error("The person could not be added");
-    return mapMember(rows[0]);
+  async invite(shareId: string, email: string, role: ShareRole): Promise<ShareInvitationResult> {
+    const result = await cloudFunctionRequest<{
+      member?: MemberRow;
+      emailSent?: boolean;
+      messageId?: string | null;
+      warning?: string;
+    }>("share-invite", { shareId, email, role });
+    if (!result.member) throw new Error("The person could not be added");
+    return {
+      member: mapMember(result.member),
+      emailSent: result.emailSent === true,
+      ...(result.messageId ? { messageId: result.messageId } : {}),
+      ...(result.warning ? { warning: result.warning } : {}),
+    };
   },
 
   async updateMember(memberId: string, role: ShareRole): Promise<void> {
