@@ -292,6 +292,7 @@ export interface WorkbenchApi extends WorkbenchState {
   setLayerGroup: (id: string, groupId: string) => void;
   addGroup: (name: string) => string;
   addSubgroup: (parentId: string, name: string) => void;
+  renameGroup: (id: string, name: string) => void;
   toggleGroup: (id: string) => void;
   setGroupVisible: (id: string, visible: boolean) => void;
   applyStyleToGroup: (id: string, patch: Partial<LayerStyle>) => void;
@@ -713,6 +714,15 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
     setState((s) => ({
       ...s,
       groups: [...s.groups, { id: uid(), name, collapsed: false, parentId }],
+    }));
+  }, []);
+
+  const renameGroup = useCallback<WorkbenchApi["renameGroup"]>((id, name) => {
+    const nextName = name.trim();
+    if (!nextName) return;
+    setState((s) => ({
+      ...s,
+      groups: s.groups.map((group) => (group.id === id ? { ...group, name: nextName } : group)),
     }));
   }, []);
 
@@ -1376,6 +1386,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       setLayerGroup,
       addGroup,
       addSubgroup,
+      renameGroup,
       toggleGroup,
       setGroupVisible,
       applyStyleToGroup,
@@ -1453,6 +1464,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       setLayerGroup,
       addGroup,
       addSubgroup,
+      renameGroup,
       toggleGroup,
       setGroupVisible,
       applyStyleToGroup,

@@ -381,6 +381,12 @@ export function LayerPanel() {
           const groupedLayers = wb.layers.filter((layer) => groupedLayerIds.has(layer.groupId));
           const allVisible =
             groupedLayers.length > 0 && groupedLayers.every((layer) => layer.visible);
+          const renameGroup = () => {
+            const name = window.prompt("Rename layer group", group.name)?.trim();
+            if (!name || name === group.name) return;
+            wb.renameGroup(group.id, name);
+            toast.success(`Group renamed to ${name}`);
+          };
           return (
             <div
               key={group.id}
@@ -401,6 +407,15 @@ export function LayerPanel() {
               >
                 <button
                   onClick={() => wb.toggleGroup(group.id)}
+                  onDoubleClick={(event) => {
+                    event.preventDefault();
+                    renameGroup();
+                  }}
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    renameGroup();
+                  }}
+                  title="Expand or collapse group · double-click or right-click to rename"
                   className="flex min-w-0 flex-1 items-center gap-1 px-2 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wide"
                 >
                   {group.collapsed ? (
@@ -410,6 +425,14 @@ export function LayerPanel() {
                   )}
                   <span className="truncate">{group.name}</span>
                   <span className="num ml-auto text-[10px]">{groupedLayers.length}</span>
+                </button>
+                <button
+                  onClick={renameGroup}
+                  aria-label={`Rename ${group.name} group`}
+                  title="Rename group"
+                  className="rounded p-1 hover:bg-accent hover:text-foreground"
+                >
+                  <Pencil className="size-3.5" />
                 </button>
                 <button
                   onClick={() => wb.setGroupVisible(group.id, !allVisible)}
