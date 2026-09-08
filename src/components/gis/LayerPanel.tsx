@@ -2077,18 +2077,28 @@ function nestedGroupIds(groupId: string, groups: LayerGroup[]): Set<string> {
 
 function flattenVisibleGroups(groups: LayerGroup[]): Array<{ group: LayerGroup; depth: number }> {
   const result: Array<{ group: LayerGroup; depth: number }> = [];
-  const visited = new Set<string>();
-  const visit = (group: LayerGroup, depth: number) => {
-    if (visited.has(group.id)) return;
-    visited.add(group.id);
-    result.push({ group, depth });
-    if (!group.collapsed)
-      groups.filter((item) => item.parentId === group.id).forEach((item) => visit(item, depth + 1));
+  const uniqueGroups = groups.filter(
+    (group, index) => groups.findIndex((candidate) => candidate.id === group.id) === index,
+  );
+  const reachable = new Set<string>();
+  const visit = (group: LayerGroup, depth: number, hiddenByCollapsedParent = false) => {
+    if (reachable.has(group.id)) return;
+    reachable.add(group.id);
+    if (!hiddenByCollapsedParent) result.push({ group, depth });
+    const hideChildren = hiddenByCollapsedParent || group.collapsed;
+    uniqueGroups
+      .filter((item) => item.parentId === group.id)
+      .forEach((item) => visit(item, depth + 1, hideChildren));
   };
-  groups
-    .filter((group) => !group.parentId || !groups.some((item) => item.id === group.parentId))
+  uniqueGroups
+    .filter(
+      (group) =>
+        !group.parentId || !uniqueGroups.some((candidate) => candidate.id === group.parentId),
+    )
     .forEach((group) => visit(group, 0));
-  groups.filter((group) => !visited.has(group.id)).forEach((group) => visit(group, 0));
+  // Any remaining group belongs to malformed legacy cyclic data. Render it once as a root;
+  // `reachable` prevents the cycle from ever repeating in the visible tree.
+  uniqueGroups.filter((group) => !reachable.has(group.id)).forEach((group) => visit(group, 0));
   return result;
 }
 

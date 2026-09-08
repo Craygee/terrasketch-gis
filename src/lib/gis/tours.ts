@@ -11,7 +11,7 @@ export interface TourStep {
  * Add tour-worthy features here and increment TOUR_VERSION. Users who keep
  * feature tips enabled will be offered the refreshed walkthrough once.
  */
-export const TOUR_VERSION = 7;
+export const TOUR_VERSION = 8;
 
 export const TOUR_REGISTRY: Record<TourKind, TourStep[]> = {
   basic: [
@@ -81,7 +81,7 @@ export const TOUR_REGISTRY: Record<TourKind, TourStep[]> = {
       id: "vertex-editing",
       target: "draw-toolbar",
       title: "Draw and reshape precisely",
-      body: "The drawing bar can add, delete or undo draft vertices. After selecting an editable feature, choose Edit vertices for Move, Add, Delete, Undo, Reset, Cancel and Finish controls.",
+      body: "The drawing bar can add, delete, undo or redo draft vertices. After selecting an editable feature, choose Edit vertices for Move, Add, Delete, Undo, Redo, Reset, Cancel and Finish controls.",
     },
     {
       id: "analysis-detail",

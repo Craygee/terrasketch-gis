@@ -29,6 +29,7 @@ import {
   StickyNote,
   Plus,
   RotateCcw,
+  Redo2,
 } from "lucide-react";
 
 import { useWorkbench } from "@/lib/gis/store";
@@ -145,6 +146,9 @@ export function MapCanvas() {
   const editMarkerRefs = useRef<Marker[]>([]);
   const editSnapshotRef = useRef<EditGeometrySnapshot | null>(null);
   const editHistoryRef = useRef<Geometry[]>([]);
+  const editRedoRef = useRef<Geometry[]>([]);
+  const draftHistoryRef = useRef<Position[][]>([]);
+  const draftRedoRef = useRef<Position[][]>([]);
   const styledBasemapRef = useRef(wb.basemapId);
   const preparedCacheRef = useRef(new Map<string, PreparedCacheEntry>());
   const sourcePayloadRef = useRef(new Map<string, FeatureCollection>());
@@ -158,6 +162,39 @@ export function MapCanvas() {
   drawModeRef.current = wb.drawMode;
   const draftRef = useRef(draft);
   draftRef.current = draft;
+
+  const updateDraftGeometry = useCallback((update: (current: Position[]) => Position[]) => {
+    const current = draftRef.current;
+    const next = update(current);
+    if (next === current) return;
+    draftHistoryRef.current.push(current.map((coordinate) => [...coordinate] as Position));
+    draftRedoRef.current = [];
+    draftRef.current = next;
+    setDraft(next);
+  }, []);
+
+  const undoDraftGeometry = useCallback(() => {
+    const previous = draftHistoryRef.current.pop();
+    if (!previous) return;
+    draftRedoRef.current.push(draftRef.current.map((coordinate) => [...coordinate] as Position));
+    draftRef.current = previous;
+    setDraft(previous);
+  }, []);
+
+  const redoDraftGeometry = useCallback(() => {
+    const next = draftRedoRef.current.pop();
+    if (!next) return;
+    draftHistoryRef.current.push(draftRef.current.map((coordinate) => [...coordinate] as Position));
+    draftRef.current = next;
+    setDraft(next);
+  }, []);
+
+  const clearDraftGeometry = useCallback(() => {
+    draftRef.current = [];
+    setDraft([]);
+    draftHistoryRef.current = [];
+    draftRedoRef.current = [];
+  }, []);
 
   useEffect(() => {
     if (!wb.canEditProject && editEnabled) setEditEnabled(false);
@@ -504,6 +541,7 @@ export function MapCanvas() {
     if (!editEnabled || !editableFeature || !selection) {
       editSnapshotRef.current = null;
       editHistoryRef.current = [];
+      editRedoRef.current = [];
       setEditVertexMode("move");
       return;
     }
@@ -516,6 +554,7 @@ export function MapCanvas() {
       geometry: structuredClone(editableFeature.geometry),
     };
     editHistoryRef.current = [];
+    editRedoRef.current = [];
     setEditVertexMode("move");
   }, [editEnabled, editableFeature, wb.selectedFeature]);
 
@@ -523,7 +562,10 @@ export function MapCanvas() {
     (nextGeometry: Geometry, trackHistory = true) => {
       const selection = wb.selectedFeature;
       if (!selection || !editableFeature) return;
-      if (trackHistory) editHistoryRef.current.push(structuredClone(editableFeature.geometry));
+      if (trackHistory) {
+        editHistoryRef.current.push(structuredClone(editableFeature.geometry));
+        editRedoRef.current = [];
+      }
       wb.updateFeatureGeometry(selection.layerId, selection.index, nextGeometry);
       const measured = { type: "Feature", properties: {}, geometry: nextGeometry } as Feature;
       if (nextGeometry.type === "Point")
@@ -607,13 +649,25 @@ export function MapCanvas() {
   );
 
   const undoEditableGeometry = useCallback(() => {
+    if (!editableFeature) return;
     const previous = editHistoryRef.current.pop();
     if (!previous) {
       toast.info("No earlier vertex change to undo");
       return;
     }
+    editRedoRef.current.push(structuredClone(editableFeature.geometry));
     persistEditableGeometry(previous, false);
-  }, [persistEditableGeometry]);
+  }, [editableFeature, persistEditableGeometry]);
+
+  const redoEditableGeometry = useCallback(() => {
+    const next = editRedoRef.current.pop();
+    if (!next) {
+      toast.info("No vertex change to redo");
+      return;
+    }
+    if (editableFeature) editHistoryRef.current.push(structuredClone(editableFeature.geometry));
+    persistEditableGeometry(next, false);
+  }, [editableFeature, persistEditableGeometry]);
 
   const restoreEditableGeometry = useCallback(
     (exitAfterRestore = false) => {
@@ -721,13 +775,13 @@ export function MapCanvas() {
         defaultGroupId: "sketch",
         source: { kind: "draw" },
       });
-      setDraft([]);
+      clearDraftGeometry();
       wb.setDrawMode("none");
       return;
     }
     // measurement: keep the draft on screen, just stop adding vertices
     wb.setDrawMode("none");
-  }, [setPendingFeatureSave, wb]);
+  }, [clearDraftGeometry, setPendingFeatureSave, wb]);
 
   useEffect(() => {
     const map = mapObj.current;
@@ -826,7 +880,7 @@ export function MapCanvas() {
           : undefined;
         const vertexIndex = Number(vertexHit?.properties?.["vertex"] ?? 0) - 1;
         if (vertexIndex >= 0) {
-          setDraft((current) => current.filter((_, index) => index !== vertexIndex));
+          updateDraftGeometry((current) => current.filter((_, index) => index !== vertexIndex));
           toast.success("Draft vertex deleted");
         } else toast.info("Click a white draft vertex to delete it");
         return;
@@ -861,7 +915,7 @@ export function MapCanvas() {
         wb.setDrawMode("none");
         return;
       }
-      setDraft((d) => [...d, coord]);
+      updateDraftGeometry((current) => [...current, coord]);
     };
 
     const onDblClick = (e: MapMouseEvent) => {
@@ -964,6 +1018,7 @@ export function MapCanvas() {
     draftVertexMode,
     changeEditableGeometry,
     deleteEditableVertex,
+    updateDraftGeometry,
   ]);
 
   useEffect(() => {
@@ -1001,7 +1056,7 @@ export function MapCanvas() {
           restoreEditableGeometry(true);
           return;
         }
-        setDraft([]);
+        clearDraftGeometry();
         wb.setDrawMode("none");
         setMenu(null);
       }
@@ -1012,7 +1067,7 @@ export function MapCanvas() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [editEnabled, finishDraft, restoreEditableGeometry, setEditEnabled, wb]);
+  }, [clearDraftGeometry, editEnabled, finishDraft, restoreEditableGeometry, setEditEnabled, wb]);
 
   /* ---------------- live readout ---------------- */
   const readout = useMemo(() => {
@@ -1173,6 +1228,13 @@ export function MapCanvas() {
               onClick={undoEditableGeometry}
             />
             <VertexToolButton
+              icon={<Redo2 />}
+              label="Redo"
+              title="Redo the last undone vertex change"
+              disabled={editRedoRef.current.length === 0}
+              onClick={redoEditableGeometry}
+            />
+            <VertexToolButton
               icon={<RotateCcw />}
               label="Reset"
               title="Restore the shape to the start of this editing session"
@@ -1246,15 +1308,23 @@ export function MapCanvas() {
                 />
               </>
             )}
-            {draft.length > 0 && (
-              <button
-                onClick={() => setDraft((d) => d.slice(0, -1))}
-                className="rounded-full p-1 hover:bg-muted"
-                aria-label="Undo last point"
-                title="Remove the last point"
-              >
-                <Undo2 className="size-3.5" />
-              </button>
+            {vertexDrawingActive && (
+              <>
+                <VertexToolButton
+                  icon={<Undo2 />}
+                  label="Undo"
+                  title="Undo the last draft vertex change"
+                  disabled={draftHistoryRef.current.length === 0}
+                  onClick={undoDraftGeometry}
+                />
+                <VertexToolButton
+                  icon={<Redo2 />}
+                  label="Redo"
+                  title="Redo the last undone draft vertex change"
+                  disabled={draftRedoRef.current.length === 0}
+                  onClick={redoDraftGeometry}
+                />
+              </>
             )}
             {wb.drawMode !== "none" &&
               wb.drawMode !== "point" &&
@@ -1269,7 +1339,7 @@ export function MapCanvas() {
               )}
             <button
               onClick={() => {
-                setDraft([]);
+                clearDraftGeometry();
                 wb.setDrawMode("none");
               }}
               className="rounded-full p-1 hover:bg-muted"
@@ -1370,7 +1440,7 @@ export function MapCanvas() {
                 icon={<Trash2 className="size-4" />}
                 label="Clear measurement"
                 onClick={() => {
-                  setDraft([]);
+                  clearDraftGeometry();
                   setMenu(null);
                 }}
               />
