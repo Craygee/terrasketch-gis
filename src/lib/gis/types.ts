@@ -196,6 +196,18 @@ export interface ProjectNote {
   includeInPacket: boolean;
 }
 
+export interface LayerNoteRecord {
+  id: string;
+  layerId: string;
+  subject: string;
+  body: string;
+  tags: string[];
+  createdAt: number;
+  updatedAt: number;
+  author: string;
+  includeInPacket: boolean;
+}
+
 export interface ProjectFolder {
   id: string;
   name: string;
@@ -224,6 +236,8 @@ export interface ProjectDocument {
   includeInPacket: boolean;
   /** Links a repository document to the note/record for a specific map layer. */
   layerId?: string;
+  /** Links a layer document to one specific structured layer note. */
+  layerNoteId?: string;
   email?: EmailDocumentDetails;
 }
 
@@ -241,6 +255,7 @@ export interface ProjectEvent {
 
 export interface ProjectRecords {
   notes: ProjectNote[];
+  layerNotes: LayerNoteRecord[];
   folders: ProjectFolder[];
   documents: ProjectDocument[];
   events: ProjectEvent[];
@@ -249,6 +264,7 @@ export interface ProjectRecords {
 
 export const emptyProjectRecords = (): ProjectRecords => ({
   notes: [],
+  layerNotes: [],
   folders: [
     { id: "general", name: "General", parentId: null, createdAt: Date.now() },
     { id: "maps", name: "Maps", parentId: null, createdAt: Date.now() },

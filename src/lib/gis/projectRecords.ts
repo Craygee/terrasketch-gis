@@ -21,6 +21,7 @@ export async function uploadProjectAsset(input: {
   source: ProjectDocument["source"];
   uploadedBy: string;
   layerId?: string;
+  layerNoteId?: string;
   email?: EmailDocumentDetails;
 }): Promise<ProjectDocument> {
   const id = window.crypto.randomUUID();
@@ -38,6 +39,7 @@ export async function uploadProjectAsset(input: {
     uploadedBy: input.uploadedBy,
     includeInPacket: true,
     ...(input.layerId ? { layerId: input.layerId } : {}),
+    ...(input.layerNoteId ? { layerNoteId: input.layerNoteId } : {}),
     ...(input.email ? { email: input.email } : {}),
   };
 }

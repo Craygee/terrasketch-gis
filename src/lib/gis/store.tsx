@@ -183,6 +183,13 @@ const durableLayer = (layer: GisLayer): GisLayer => {
   };
 };
 
+const withoutLegacyLayerNote = (layer: GisLayer): GisLayer => {
+  const normalized = { ...layer };
+  delete normalized.note;
+  delete normalized.noteUpdatedAt;
+  return normalized;
+};
+
 const normalizedProject = (
   project: StoredProject,
   projects: ProjectSummary[],
@@ -208,7 +215,10 @@ const normalizedProject = (
     // owner projects still discard viewport caches and reload them efficiently.
     layers: stored.layers.map((layer, index) => {
       const normalized = normalizedLayer(layer, index);
-      return activeShare && accessRole !== "admin" ? normalized : durableLayer(normalized);
+      const durable = activeShare && accessRole !== "admin" ? normalized : durableLayer(normalized);
+      // Legacy single-note fields are migrated into records.layerNotes below. Clear the old copy so
+      // deleting a structured note cannot cause it to reappear on a later project reload.
+      return withoutLegacyLayerNote(durable);
     }),
     basemapId: stored.basemapId,
     mapView: activeShare?.mapView ??
@@ -245,6 +255,31 @@ const normalizedProject = (
       ...emptyProjectRecords(),
       ...(stored.records ?? {}),
       notes: stored.records?.notes ?? [],
+      layerNotes: [
+        ...(stored.records?.layerNotes ?? []),
+        ...stored.layers
+          .filter(
+            (layer) =>
+              (Boolean(layer.note?.trim()) ||
+                Boolean(
+                  stored.records?.documents?.some(
+                    (document) => document.layerId === layer.id && !document.layerNoteId,
+                  ),
+                )) &&
+              !(stored.records?.layerNotes ?? []).some((note) => note.layerId === layer.id),
+          )
+          .map((layer) => ({
+            id: `legacy-${layer.id}`,
+            layerId: layer.id,
+            subject: layer.note?.trim() ? `${layer.name} note` : `${layer.name} attachments`,
+            body: layer.note?.trim() || "Attachments saved for this layer.",
+            tags: [],
+            createdAt: layer.noteUpdatedAt ?? layer.createdAt,
+            updatedAt: layer.noteUpdatedAt ?? layer.createdAt,
+            author: "LandDraft user",
+            includeInPacket: true,
+          })),
+      ],
       folders: stored.records?.folders?.length
         ? stored.records.folders
         : emptyProjectRecords().folders,

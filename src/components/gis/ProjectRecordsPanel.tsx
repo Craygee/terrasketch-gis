@@ -44,6 +44,7 @@ import {
   type ProjectEmailAlias,
 } from "@/lib/gis/inboundEmail";
 import type {
+  LayerNoteRecord,
   ProjectDocument,
   ProjectEventType,
   ProjectNote,
@@ -106,6 +107,27 @@ const dateTimeInputValue = (timestamp: number) => {
   return new Date(timestamp - offset).toISOString().slice(0, 16);
 };
 
+const parseLayerNoteTags = (value: string) => [
+  ...new Set(
+    value
+      .split(/[\s,]+/)
+      .map((tag) => tag.replace(/^#+/, "").trim())
+      .filter(Boolean),
+  ),
+];
+
+const layerNoteTagDraft = (tags: string[]) => tags.map((tag) => `#${tag}`).join(" ");
+
+const layerNoteTagSuggestions = (value: string, available: string[]) => {
+  const match = value.match(/(?:^|\s)#([^\s#]*)$/);
+  if (!match) return [];
+  const needle = (match[1] ?? "").toLowerCase();
+  return available.filter((tag) => tag.toLowerCase().includes(needle)).slice(0, 8);
+};
+
+const applyLayerNoteTag = (value: string, tag: string) =>
+  `${value.replace(/(?:^|\s)#[^\s#]*$/, "").trim()}${value.trim() ? " " : ""}#${tag} `;
+
 export function ProjectRecordsPanel() {
   const wb = useWorkbench();
   const auth = useAuth();
@@ -114,8 +136,13 @@ export function ProjectRecordsPanel() {
   const [noteTitle, setNoteTitle] = useState("");
   const [noteBody, setNoteBody] = useState("");
   const [noteEditor, setNoteEditor] = useState<ProjectNote | null>(null);
-  const [selectedLayerNoteId, setSelectedLayerNoteId] = useState<string | null>(null);
-  const [layerNoteDrafts, setLayerNoteDrafts] = useState<Record<string, string>>({});
+  const [layerNoteEditor, setLayerNoteEditor] = useState<LayerNoteRecord | null>(null);
+  const [layerNoteEditorTagText, setLayerNoteEditorTagText] = useState("");
+  const [layerNoteTimestampOpen, setLayerNoteTimestampOpen] = useState(false);
+  const [layerNoteQuery, setLayerNoteQuery] = useState("");
+  const [layerNoteGroupFilter, setLayerNoteGroupFilter] = useState("all");
+  const [layerNoteLayerFilter, setLayerNoteLayerFilter] = useState("all");
+  const [layerNoteTagFilter, setLayerNoteTagFilter] = useState("all");
   const [folderId, setFolderId] = useState("general");
   const [newFolder, setNewFolder] = useState("");
   const [eventType, setEventType] = useState<"all" | ProjectEventType>("all");
@@ -130,14 +157,39 @@ export function ProjectRecordsPanel() {
   const fileInput = useRef<HTMLInputElement>(null);
   const emailInput = useRef<HTMLInputElement>(null);
   const records = wb.records;
-  const layersWithAttachments = new Set(
-    records.documents.flatMap((document) => (document.layerId ? [document.layerId] : [])),
+  const allLayerNoteTags = [...new Set(records.layerNotes.flatMap((note) => note.tags))].sort(
+    (left, right) => left.localeCompare(right),
   );
-  const layerNotes = wb.layers
-    .map((layer, index) => ({ layer, order: index + 1 }))
-    .filter(({ layer }) => Boolean(layer.note?.trim()) || layersWithAttachments.has(layer.id));
-  const attachmentsForLayer = (layerId: string) =>
-    records.documents.filter((document) => document.layerId === layerId);
+  const layerNoteRows = records.layerNotes
+    .flatMap((note) => {
+      const order = wb.layers.findIndex((item) => item.id === note.layerId);
+      const layer = wb.layers[order];
+      if (!layer) return [];
+      const group = wb.groups.find((item) => item.id === layer.groupId);
+      return [{ note, layer, group, order: order + 1 }];
+    })
+    .sort((left, right) => left.order - right.order || right.note.createdAt - left.note.createdAt);
+  const filteredLayerNoteRows = layerNoteRows.filter(({ note, layer, group }) => {
+    const needle = layerNoteQuery.trim().toLowerCase();
+    return (
+      (layerNoteGroupFilter === "all" || group?.id === layerNoteGroupFilter) &&
+      (layerNoteLayerFilter === "all" || layer.id === layerNoteLayerFilter) &&
+      (layerNoteTagFilter === "all" || note.tags.includes(layerNoteTagFilter)) &&
+      (!needle ||
+        `${note.subject} ${note.body} ${note.tags.join(" ")} ${note.author} ${layer.name} ${group?.name ?? ""}`
+          .toLowerCase()
+          .includes(needle))
+    );
+  });
+  const attachmentsForLayerNote = (layerId: string, noteId: string) => {
+    const noteCount = records.layerNotes.filter((note) => note.layerId === layerId).length;
+    return records.documents.filter(
+      (document) =>
+        document.layerNoteId === noteId ||
+        (!document.layerNoteId && document.layerId === layerId && noteCount === 1),
+    );
+  };
+  const editorTagSuggestions = layerNoteTagSuggestions(layerNoteEditorTagText, allLayerNoteTags);
 
   const refreshInboundEmail = async () => {
     if (!auth.user || !auth.cloudEnabled) return;
@@ -322,7 +374,11 @@ export function ProjectRecordsPanel() {
     }
   };
 
-  const uploadLayerAttachments = async (layerId: string, files: FileList | null) => {
+  const uploadLayerAttachments = async (
+    layerId: string,
+    layerNoteId: string,
+    files: FileList | null,
+  ) => {
     if (!files?.length) return;
     if (!auth.user) {
       toast.error("Sign in before attaching files to a layer note");
@@ -348,6 +404,7 @@ export function ProjectRecordsPanel() {
             source: "upload",
             uploadedBy: auth.user.name || auth.user.email,
             layerId,
+            layerNoteId,
           }),
         );
       }
@@ -358,13 +415,71 @@ export function ProjectRecordsPanel() {
           type: "upload",
           title: `Attached ${document.name} to ${layer.name}`,
           detail: `${formatBytes(document.size)} · Layer note attachment`,
-          relatedId: layer.id,
+          relatedId: layerNoteId,
         });
       toast.success(
         `${added.length} attachment${added.length === 1 ? "" : "s"} added to ${layer.name}`,
       );
     } catch (error) {
       toast.error("Layer attachment could not be stored", {
+        description: error instanceof Error ? error.message : "Cloud storage is unavailable",
+      });
+    } finally {
+      setLayerAttachmentBusyId(null);
+    }
+  };
+
+  const saveLayerNoteEditor = () => {
+    if (!layerNoteEditor) return;
+    const subject = layerNoteEditor.subject.trim() || "Layer note";
+    const body = layerNoteEditor.body.trim();
+    if (!body) {
+      toast.error("Enter a note");
+      return;
+    }
+    const updatedNote: LayerNoteRecord = {
+      ...layerNoteEditor,
+      subject,
+      body,
+      tags: parseLayerNoteTags(layerNoteEditorTagText),
+      updatedAt: Date.now(),
+    };
+    update({
+      layerNotes: records.layerNotes.map((note) =>
+        note.id === updatedNote.id ? updatedNote : note,
+      ),
+    });
+    setLayerNoteEditor(updatedNote);
+    wb.addProjectEvent({
+      type: "note",
+      title: `Updated layer note: ${subject}`,
+      detail: body.slice(0, 180),
+      relatedId: updatedNote.id,
+    });
+    toast.success("Layer note changes saved");
+  };
+
+  const deleteLayerNote = async (note: LayerNoteRecord) => {
+    if (!window.confirm(`Delete “${note.subject}” and its attachments?`)) return;
+    const attachments = attachmentsForLayerNote(note.layerId, note.id);
+    setLayerAttachmentBusyId(note.layerId);
+    try {
+      await Promise.all(attachments.map((document) => deleteProjectAsset(document)));
+      update({
+        layerNotes: records.layerNotes.filter((item) => item.id !== note.id),
+        documents: records.documents.filter(
+          (document) => !attachments.some((attachment) => attachment.id === document.id),
+        ),
+      });
+      wb.addProjectEvent({
+        type: "project",
+        title: `Deleted layer note: ${note.subject}`,
+        relatedId: note.id,
+      });
+      setLayerNoteEditor(null);
+      toast.success("Layer note deleted");
+    } catch (error) {
+      toast.error("Layer note could not be deleted", {
         description: error instanceof Error ? error.message : "Cloud storage is unavailable",
       });
     } finally {
@@ -383,7 +498,12 @@ export function ProjectRecordsPanel() {
       wb.addProjectEvent({
         type: "project",
         title: `Removed ${document.name}`,
-        ...(layer ? { detail: `Removed from layer note: ${layer.name}`, relatedId: layer.id } : {}),
+        ...(layer
+          ? {
+              detail: `Removed from layer note: ${layer.name}`,
+              relatedId: document.layerNoteId ?? layer.id,
+            }
+          : {}),
       });
       toast.success(layer ? "Layer attachment removed" : "Project file removed");
     } catch (error) {
@@ -461,6 +581,7 @@ export function ProjectRecordsPanel() {
 
   const packetHtml = async () => {
     const notes = records.notes.filter((note) => note.includeInPacket);
+    const layerNotes = records.layerNotes.filter((note) => note.includeInPacket);
     const documents = records.documents.filter((document) => document.includeInPacket);
     const renderedDocuments: string[] = [];
     for (const document of documents) {
@@ -477,7 +598,13 @@ export function ProjectRecordsPanel() {
         `<section class="page"><h2>${escapeHtml(document.name)}</h2><p class="meta">${escapeHtml(folderPath(document.folderId))}${document.layerId ? ` · Layer: ${escapeHtml(wb.layers.find((layer) => layer.id === document.layerId)?.name ?? "Removed layer")}` : ""} · ${new Date(document.createdAt).toLocaleString()}</p>${content}</section>`,
       );
     }
-    return `<!doctype html><html><head><title>${escapeHtml(wb.projectName)} packet</title><style>@page{margin:.65in}body{font:12pt Arial,sans-serif;color:#173328}h1,h2{color:#1f7044}.cover,.page{break-after:page}.meta{color:#647067;font-size:9pt}article{white-space:pre-wrap;line-height:1.5}img{max-width:100%;max-height:8in;object-fit:contain}pre{white-space:pre-wrap;font:10pt Arial;line-height:1.45}dl{display:grid;grid-template-columns:70px 1fr;gap:4px}dt{font-weight:bold}.attachment{border:1px solid #ccd4ce;padding:16px;border-radius:8px}</style></head><body><section class="cover"><h1>${escapeHtml(wb.projectName)}</h1><p>${escapeHtml(records.summary || "Project records packet")}</p><p class="meta">Created ${new Date().toLocaleString()} · ${notes.length} notes · ${documents.length} files</p></section>${notes.map((note) => `<section class="page"><h2>${escapeHtml(note.title)}</h2><p class="meta">${escapeHtml(note.author)} · ${new Date(note.createdAt).toLocaleString()}</p><article>${escapeHtml(note.body)}</article></section>`).join("")}${renderedDocuments.join("")}</body></html>`;
+    return `<!doctype html><html><head><title>${escapeHtml(wb.projectName)} packet</title><style>@page{margin:.65in}body{font:12pt Arial,sans-serif;color:#173328}h1,h2{color:#1f7044}.cover,.page{break-after:page}.meta{color:#647067;font-size:9pt}.tags{color:#1f7044;font-size:9pt}article{white-space:pre-wrap;line-height:1.5}img{max-width:100%;max-height:8in;object-fit:contain}pre{white-space:pre-wrap;font:10pt Arial;line-height:1.45}dl{display:grid;grid-template-columns:70px 1fr;gap:4px}dt{font-weight:bold}.attachment{border:1px solid #ccd4ce;padding:16px;border-radius:8px}</style></head><body><section class="cover"><h1>${escapeHtml(wb.projectName)}</h1><p>${escapeHtml(records.summary || "Project records packet")}</p><p class="meta">Created ${new Date().toLocaleString()} · ${notes.length} project notes · ${layerNotes.length} layer notes · ${documents.length} files</p></section>${notes.map((note) => `<section class="page"><h2>${escapeHtml(note.title)}</h2><p class="meta">${escapeHtml(note.author)} · ${new Date(note.createdAt).toLocaleString()}</p><article>${escapeHtml(note.body)}</article></section>`).join("")}${layerNotes
+      .map((note) => {
+        const layer = wb.layers.find((item) => item.id === note.layerId);
+        const group = wb.groups.find((item) => item.id === layer?.groupId);
+        return `<section class="page"><h2>${escapeHtml(note.subject)}</h2><p class="meta">Layer: ${escapeHtml(layer?.name ?? "Removed layer")} · Group: ${escapeHtml(group?.name ?? "Removed group")} · ${escapeHtml(note.author)} · ${new Date(note.createdAt).toLocaleString()}</p>${note.tags.length ? `<p class="tags">${escapeHtml(layerNoteTagDraft(note.tags))}</p>` : ""}<article>${escapeHtml(note.body)}</article></section>`;
+      })
+      .join("")}${renderedDocuments.join("")}</body></html>`;
   };
 
   const printPacket = async () => {
@@ -617,7 +744,7 @@ export function ProjectRecordsPanel() {
                 </button>
               </section>
 
-              {layerNotes.length > 0 && (
+              {layerNoteRows.length > 0 && (
                 <section className="rounded-2xl border border-border p-3">
                   <div className="mb-2 flex items-center gap-2">
                     <Layers3 className="size-4 text-primary" />
@@ -629,16 +756,14 @@ export function ProjectRecordsPanel() {
                     </div>
                   </div>
                   <div className="space-y-1">
-                    {layerNotes.map(({ layer, order }) => (
+                    {layerNoteRows.map(({ note, layer, group, order }) => (
                       <button
-                        key={layer.id}
+                        key={note.id}
                         type="button"
                         onClick={() => {
-                          setSelectedLayerNoteId(layer.id);
-                          setLayerNoteDrafts((current) => ({
-                            ...current,
-                            [layer.id]: layer.note ?? "",
-                          }));
+                          setLayerNoteEditor({ ...note });
+                          setLayerNoteEditorTagText(layerNoteTagDraft(note.tags));
+                          setLayerNoteTimestampOpen(false);
                           setTab("layer-notes");
                         }}
                         className="flex w-full items-center gap-2 rounded-xl bg-secondary px-2.5 py-2 text-left hover:bg-accent"
@@ -648,11 +773,11 @@ export function ProjectRecordsPanel() {
                         </span>
                         <span className="min-w-0 flex-1">
                           <span className="block truncate text-[11px] font-semibold">
-                            {layer.name}
+                            {note.subject}
                           </span>
                           <span className="block truncate text-[9px] text-muted-foreground">
-                            {layer.note?.trim() ||
-                              `${attachmentsForLayer(layer.id).length} layer attachment${attachmentsForLayer(layer.id).length === 1 ? "" : "s"}`}
+                            {layer.name} · {group?.name ?? "Layer group"}
+                            {note.tags.length ? ` · ${layerNoteTagDraft(note.tags)}` : ""}
                           </span>
                         </span>
                         <ChevronRight className="size-3.5 text-muted-foreground" />
@@ -821,151 +946,355 @@ export function ProjectRecordsPanel() {
                     </p>
                   </div>
                 </div>
+                <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  <label className="relative sm:col-span-2">
+                    <Search className="pointer-events-none absolute left-3 top-2.5 size-3.5 text-muted-foreground" />
+                    <input
+                      value={layerNoteQuery}
+                      onChange={(event) => setLayerNoteQuery(event.target.value)}
+                      placeholder="Search subject, note, layer, group, author, or tag"
+                      className="w-full rounded-xl border border-border bg-card py-2 pl-9 pr-3 text-xs outline-none focus:border-primary"
+                    />
+                  </label>
+                  <select
+                    value={layerNoteGroupFilter}
+                    onChange={(event) => setLayerNoteGroupFilter(event.target.value)}
+                    className="rounded-xl border border-border bg-card px-3 py-2 text-xs"
+                    aria-label="Filter layer notes by group"
+                  >
+                    <option value="all">All data groups</option>
+                    {wb.groups.map((group) => (
+                      <option key={group.id} value={group.id}>
+                        {group.name}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value={layerNoteLayerFilter}
+                    onChange={(event) => setLayerNoteLayerFilter(event.target.value)}
+                    className="rounded-xl border border-border bg-card px-3 py-2 text-xs"
+                    aria-label="Filter layer notes by layer"
+                  >
+                    <option value="all">All layers</option>
+                    {wb.layers.map((layer) => (
+                      <option key={layer.id} value={layer.id}>
+                        {layer.name}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value={layerNoteTagFilter}
+                    onChange={(event) => setLayerNoteTagFilter(event.target.value)}
+                    className="rounded-xl border border-border bg-card px-3 py-2 text-xs sm:col-span-2"
+                    aria-label="Filter layer notes by tag"
+                  >
+                    <option value="all">All tags</option>
+                    {allLayerNoteTags.map((tag) => (
+                      <option key={tag} value={tag}>
+                        #{tag}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </section>
-              {layerNotes.map(({ layer, order }) => {
-                const group = wb.groups.find((item) => item.id === layer.groupId);
-                const attachments = attachmentsForLayer(layer.id);
-                return (
-                  <article
-                    key={layer.id}
+
+              <section className="space-y-1 rounded-2xl border border-border p-3">
+                <p className="mb-2 text-[10px] font-semibold">
+                  {filteredLayerNoteRows.length} matching note
+                  {filteredLayerNoteRows.length === 1 ? "" : "s"}
+                </p>
+                {filteredLayerNoteRows.map(({ note, layer, group, order }) => (
+                  <button
+                    key={note.id}
+                    type="button"
+                    onClick={() => {
+                      setLayerNoteEditor({ ...note });
+                      setLayerNoteEditorTagText(layerNoteTagDraft(note.tags));
+                      setLayerNoteTimestampOpen(false);
+                    }}
                     className={cn(
-                      "rounded-2xl border border-border p-3",
-                      selectedLayerNoteId === layer.id && "border-primary bg-primary/5",
+                      "flex w-full items-start gap-2 rounded-xl px-2.5 py-2 text-left hover:bg-accent",
+                      layerNoteEditor?.id === note.id
+                        ? "bg-primary/10 ring-1 ring-primary"
+                        : "bg-secondary",
                     )}
                   >
-                    <div className="flex items-start gap-2">
-                      <span className="num flex size-7 shrink-0 items-center justify-center rounded-lg bg-secondary text-[10px] font-semibold">
-                        {order}
+                    <span className="num flex size-6 shrink-0 items-center justify-center rounded-lg bg-card text-[9px] font-semibold">
+                      {order}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[11px] font-semibold">
+                        {note.subject}
                       </span>
-                      <div className="min-w-0 flex-1">
-                        <h3 className="truncate text-xs font-semibold">{layer.name}</h3>
-                        <p className="text-[9px] text-muted-foreground">
-                          {group?.name ?? "Layer group"}
-                          {layer.noteUpdatedAt
-                            ? ` · Updated ${new Date(layer.noteUpdatedAt).toLocaleString()}`
-                            : ""}
-                        </p>
-                      </div>
-                    </div>
-                    <textarea
-                      value={layerNoteDrafts[layer.id] ?? layer.note ?? ""}
-                      onChange={(event) =>
-                        setLayerNoteDrafts((current) => ({
-                          ...current,
-                          [layer.id]: event.target.value,
-                        }))
-                      }
-                      rows={4}
-                      aria-label={`Note for ${layer.name}`}
-                      className="mt-2 w-full resize-y rounded-xl border border-border bg-card px-3 py-2 text-xs leading-relaxed outline-none focus:border-primary"
-                    />
-                    <section className="mt-2 rounded-xl border border-border bg-secondary/40 p-2">
+                      <span className="block truncate text-[9px] text-muted-foreground">
+                        {layer.name} · {group?.name ?? "Layer group"} ·{" "}
+                        {new Date(note.createdAt).toLocaleString()}
+                      </span>
+                      {note.tags.length > 0 && (
+                        <span className="mt-1 flex flex-wrap gap-1">
+                          {note.tags.map((tag) => (
+                            <span
+                              key={tag}
+                              className="rounded-full bg-card px-1.5 py-0.5 text-[8px]"
+                            >
+                              #{tag}
+                            </span>
+                          ))}
+                        </span>
+                      )}
+                    </span>
+                    <ChevronRight className="mt-1 size-3.5 shrink-0 text-muted-foreground" />
+                  </button>
+                ))}
+                {!filteredLayerNoteRows.length && (
+                  <Empty
+                    text={
+                      layerNoteRows.length
+                        ? "No layer notes match these filters."
+                        : "No layer notes yet. Expand a layer in the Layers panel and use its note button to add one."
+                    }
+                  />
+                )}
+              </section>
+
+              {layerNoteEditor &&
+                (() => {
+                  const layer = wb.layers.find((item) => item.id === layerNoteEditor.layerId);
+                  if (!layer) return null;
+                  const group = wb.groups.find((item) => item.id === layer.groupId);
+                  const attachments = attachmentsForLayerNote(layer.id, layerNoteEditor.id);
+                  return (
+                    <section className="rounded-2xl border border-primary/30 bg-primary/5 p-3">
                       <div className="flex items-center gap-2">
-                        <Paperclip className="size-3.5 text-primary" />
-                        <p className="min-w-0 flex-1 text-[10px] font-semibold">
-                          Attachments {attachments.length > 0 && `(${attachments.length})`}
-                        </p>
-                        <label
-                          className={cn(
-                            "flex cursor-pointer items-center gap-1 rounded-lg bg-card px-2 py-1.5 text-[10px] font-semibold hover:bg-accent",
-                            layerAttachmentBusyId === layer.id && "pointer-events-none opacity-50",
-                          )}
+                        <div className="min-w-0 flex-1">
+                          <h3 className="truncate text-xs font-semibold">Edit layer note</h3>
+                          <p className="truncate text-[9px] text-muted-foreground">
+                            {layer.name} · {group?.name ?? "Layer group"}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setLayerNoteEditor(null)}
+                          className="rounded-lg p-1 hover:bg-accent"
+                          aria-label="Close layer note editor"
                         >
-                          <Plus className="size-3" /> Add files
+                          <X className="size-3.5" />
+                        </button>
+                      </div>
+                      <div className="mt-2 grid grid-cols-[1fr_auto] gap-2">
+                        <label className="text-[10px] font-semibold">
+                          Subject
                           <input
-                            type="file"
-                            multiple
-                            className="hidden"
-                            disabled={layerAttachmentBusyId === layer.id}
-                            onChange={(event) => {
-                              void uploadLayerAttachments(layer.id, event.target.files);
-                              event.currentTarget.value = "";
-                            }}
+                            value={layerNoteEditor.subject}
+                            onChange={(event) =>
+                              setLayerNoteEditor((current) =>
+                                current ? { ...current, subject: event.target.value } : current,
+                              )
+                            }
+                            className="mt-1 w-full rounded-xl border border-border bg-card px-3 py-2 text-xs font-normal outline-none focus:border-primary"
                           />
                         </label>
+                        <button
+                          type="button"
+                          onClick={() => setLayerNoteTimestampOpen((current) => !current)}
+                          className={cn(
+                            "mt-[18px] flex size-8 items-center justify-center rounded-xl border border-border bg-card hover:bg-accent",
+                            layerNoteTimestampOpen && "border-primary text-primary",
+                          )}
+                          title="Change timestamp manually"
+                          aria-label="Change timestamp manually"
+                        >
+                          <Clock3 className="size-3.5" />
+                        </button>
                       </div>
-                      {attachments.length > 0 ? (
-                        <div className="mt-2 space-y-1">
-                          {attachments.map((document) => (
-                            <div
-                              key={document.id}
-                              className="flex items-center gap-2 rounded-lg bg-card px-2 py-1.5"
+                      {layerNoteTimestampOpen && (
+                        <label className="mt-2 block text-[10px] font-semibold">
+                          Date and time
+                          <input
+                            type="datetime-local"
+                            value={dateTimeInputValue(layerNoteEditor.createdAt)}
+                            onChange={(event) =>
+                              setLayerNoteEditor((current) =>
+                                current
+                                  ? {
+                                      ...current,
+                                      createdAt:
+                                        new Date(event.target.value).getTime() || current.createdAt,
+                                    }
+                                  : current,
+                              )
+                            }
+                            className="mt-1 w-full rounded-xl border border-border bg-card px-3 py-2 text-xs font-normal"
+                          />
+                        </label>
+                      )}
+                      <label className="mt-2 block text-[10px] font-semibold">
+                        Tags
+                        <input
+                          value={layerNoteEditorTagText}
+                          onChange={(event) => setLayerNoteEditorTagText(event.target.value)}
+                          placeholder="Type # to reuse a tag, or add a custom tag"
+                          className="mt-1 w-full rounded-xl border border-border bg-card px-3 py-2 text-xs font-normal outline-none focus:border-primary"
+                        />
+                      </label>
+                      {editorTagSuggestions.length > 0 && (
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          {editorTagSuggestions.map((tag) => (
+                            <button
+                              key={tag}
+                              type="button"
+                              onClick={() =>
+                                setLayerNoteEditorTagText((current) =>
+                                  applyLayerNoteTag(current, tag),
+                                )
+                              }
+                              className="rounded-full bg-secondary px-2 py-1 text-[9px] hover:bg-accent"
                             >
-                              <FileText className="size-3.5 shrink-0 text-muted-foreground" />
-                              <span className="min-w-0 flex-1">
-                                <span className="block truncate text-[10px] font-semibold">
-                                  {document.name}
-                                </span>
-                                <span className="block text-[9px] text-muted-foreground">
-                                  {formatBytes(document.size)} ·{" "}
-                                  {new Date(document.createdAt).toLocaleDateString()}
-                                </span>
-                              </span>
-                              <button
-                                type="button"
-                                onClick={() => void downloadProjectAsset(document)}
-                                className="rounded-md p-1 hover:bg-accent"
-                                aria-label={`Download ${document.name}`}
-                                title="Download attachment"
-                              >
-                                <Download className="size-3" />
-                              </button>
-                              <button
-                                type="button"
-                                disabled={busy}
-                                onClick={() => void removeDocument(document)}
-                                className="rounded-md p-1 text-destructive hover:bg-destructive/10 disabled:opacity-50"
-                                aria-label={`Remove ${document.name} from ${layer.name}`}
-                                title="Remove attachment"
-                              >
-                                <Trash2 className="size-3" />
-                              </button>
-                            </div>
+                              #{tag}
+                            </button>
                           ))}
                         </div>
-                      ) : (
-                        <p className="mt-2 text-[9px] text-muted-foreground">
-                          Add photos, documents, emails, or other files for this layer.
-                        </p>
                       )}
+                      <label className="mt-2 block text-[10px] font-semibold">
+                        Note
+                        <textarea
+                          value={layerNoteEditor.body}
+                          onChange={(event) =>
+                            setLayerNoteEditor((current) =>
+                              current ? { ...current, body: event.target.value } : current,
+                            )
+                          }
+                          rows={6}
+                          className="mt-1 w-full resize-y rounded-xl border border-border bg-card px-3 py-2 text-xs font-normal leading-relaxed outline-none focus:border-primary"
+                        />
+                      </label>
+
+                      <section
+                        onDragOver={(event) => {
+                          event.preventDefault();
+                          event.dataTransfer.dropEffect = "copy";
+                        }}
+                        onDrop={(event) => {
+                          event.preventDefault();
+                          void uploadLayerAttachments(
+                            layer.id,
+                            layerNoteEditor.id,
+                            event.dataTransfer.files,
+                          );
+                        }}
+                        className="mt-2 rounded-xl border border-dashed border-border bg-card/70 p-2"
+                      >
+                        <div className="flex items-center gap-2">
+                          <Paperclip className="size-3.5 text-primary" />
+                          <p className="min-w-0 flex-1 text-[10px] font-semibold">
+                            Attachments {attachments.length > 0 && `(${attachments.length})`}
+                          </p>
+                          <label
+                            className={cn(
+                              "flex cursor-pointer items-center gap-1 rounded-lg bg-secondary px-2 py-1.5 text-[10px] font-semibold hover:bg-accent",
+                              layerAttachmentBusyId === layer.id &&
+                                "pointer-events-none opacity-50",
+                            )}
+                          >
+                            <Plus className="size-3" /> Add files
+                            <input
+                              type="file"
+                              multiple
+                              className="hidden"
+                              disabled={layerAttachmentBusyId === layer.id}
+                              onChange={(event) => {
+                                void uploadLayerAttachments(
+                                  layer.id,
+                                  layerNoteEditor.id,
+                                  event.target.files,
+                                );
+                                event.currentTarget.value = "";
+                              }}
+                            />
+                          </label>
+                        </div>
+                        <p className="mt-1 text-[9px] text-muted-foreground">
+                          Drag files into this box, or use Add files.
+                        </p>
+                        {attachments.length > 0 && (
+                          <div className="mt-2 space-y-1">
+                            {attachments.map((document) => (
+                              <div
+                                key={document.id}
+                                className="flex items-center gap-2 rounded-lg bg-secondary px-2 py-1.5"
+                              >
+                                <FileText className="size-3.5 shrink-0 text-muted-foreground" />
+                                <span className="min-w-0 flex-1">
+                                  <span className="block truncate text-[10px] font-semibold">
+                                    {document.name}
+                                  </span>
+                                  <span className="block text-[9px] text-muted-foreground">
+                                    {formatBytes(document.size)} ·{" "}
+                                    {new Date(document.createdAt).toLocaleDateString()}
+                                  </span>
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => void downloadProjectAsset(document)}
+                                  className="rounded-md p-1 hover:bg-accent"
+                                  aria-label={`Download ${document.name}`}
+                                >
+                                  <Download className="size-3" />
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={busy}
+                                  onClick={() => void removeDocument(document)}
+                                  className="rounded-md p-1 text-destructive hover:bg-destructive/10 disabled:opacity-50"
+                                  aria-label={`Remove ${document.name}`}
+                                >
+                                  <Trash2 className="size-3" />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </section>
+
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={saveLayerNoteEditor}
+                          className="flex items-center gap-1.5 rounded-xl bg-primary px-3 py-2 text-[10px] font-semibold text-primary-foreground"
+                        >
+                          <Save className="size-3.5" /> Save changes
+                        </button>
+                        <label className="flex items-center gap-1 text-[10px]">
+                          <input
+                            type="checkbox"
+                            checked={layerNoteEditor.includeInPacket}
+                            onChange={(event) =>
+                              setLayerNoteEditor((current) =>
+                                current
+                                  ? { ...current, includeInPacket: event.target.checked }
+                                  : current,
+                              )
+                            }
+                            className="accent-primary"
+                          />
+                          Include in packet
+                        </label>
+                        <button
+                          type="button"
+                          disabled={layerAttachmentBusyId === layer.id}
+                          onClick={() => void deleteLayerNote(layerNoteEditor)}
+                          className="ml-auto flex items-center gap-1 rounded-lg px-2 py-1.5 text-[10px] font-semibold text-destructive hover:bg-destructive/10 disabled:opacity-50"
+                        >
+                          <Trash2 className="size-3" /> Delete note
+                        </button>
+                      </div>
+                      <p className="mt-2 text-[9px] text-muted-foreground">
+                        {layerNoteEditor.author} · Last edited{" "}
+                        {new Date(layerNoteEditor.updatedAt).toLocaleString()}
+                      </p>
                     </section>
-                    <div className="mt-2 flex items-center gap-1">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const note = layerNoteDrafts[layer.id] ?? layer.note ?? "";
-                          wb.setLayerNote(layer.id, note);
-                          setLayerNoteDrafts((current) => ({
-                            ...current,
-                            [layer.id]: note.trim(),
-                          }));
-                          toast.success("Layer note saved");
-                        }}
-                        className="flex items-center gap-1 rounded-lg bg-primary px-2.5 py-1.5 text-[10px] font-semibold text-primary-foreground"
-                      >
-                        <Save className="size-3" /> Save changes
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          wb.setLayerNote(layer.id, "");
-                          setLayerNoteDrafts((current) => ({
-                            ...current,
-                            [layer.id]: "",
-                          }));
-                          toast.success("Layer note removed");
-                        }}
-                        className="rounded-lg px-2.5 py-1.5 text-[10px] font-semibold text-destructive hover:bg-destructive/10"
-                      >
-                        Remove note
-                      </button>
-                    </div>
-                  </article>
-                );
-              })}
-              {!layerNotes.length && (
-                <Empty text="No layer notes or attachments yet. Expand a layer in the Layers panel and use its note button to add them." />
-              )}
+                  );
+                })()}
             </div>
           )}
 
