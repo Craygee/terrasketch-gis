@@ -230,7 +230,9 @@ LANDDRAFT PRODUCT GUIDE
 - Layers: groups and nested subgroups expand/collapse; layers and whole peer groups are draggable
   and their top-to-bottom order is the map draw order. The active layer wins when overlapping
   features are clicked. Users can duplicate, rename, move, hide, remove, export, inspect tables,
-  create layers from selections, and apply group-wide styles.
+  create layers from selections, and apply group-wide styles. Dropping either a group or layer on
+  the middle of a layer row places it inside that layer's expandable Sublayers & groups tree; each
+  child remains independently draggable and hideable, while the parent eye controls the full tree.
 - Style and labels: fill/stroke color and opacity, transparent fills, solid/dashed/dotted strokes,
   hatch/dot patterns, point icons and sizes, categorized color/icon rules by attribute, and labels
   composed from one or more fields with zoom limits and an on/off control. Advanced labeling sets

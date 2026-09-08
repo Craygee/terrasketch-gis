@@ -201,6 +201,14 @@ const normalizedProject = (
   const groups = stored.groups.some((group) => group.id === "working")
     ? stored.groups
     : [{ id: "working", name: "Working layers", collapsed: false }, ...stored.groups];
+  const normalizedLayers = stored.layers.map((layer, index) => {
+    const normalized = normalizedLayer(layer, index);
+    const durable = activeShare && accessRole !== "admin" ? normalized : durableLayer(normalized);
+    // Legacy single-note fields are migrated into records.layerNotes below. Clear the old copy so
+    // deleting a structured note cannot cause it to reappear on a later project reload.
+    return withoutLegacyLayerNote(durable);
+  });
+  const normalizedHierarchy = normalizeLayerContainers(groups, normalizedLayers);
   return {
     projectId: project.id,
     projectReady: true,
@@ -210,17 +218,11 @@ const normalizedProject = (
     saveHistory: project.versions ?? [],
     autosave: project.autosave,
     lastSavedAt: project.updatedAt,
-    groups,
+    groups: normalizedHierarchy.groups,
     // Viewer/editor shares contain the exact feature snapshot chosen by the owner. Keep that
     // snapshot long enough for the first-open map extent to include every shared feature; normal
     // owner projects still discard viewport caches and reload them efficiently.
-    layers: stored.layers.map((layer, index) => {
-      const normalized = normalizedLayer(layer, index);
-      const durable = activeShare && accessRole !== "admin" ? normalized : durableLayer(normalized);
-      // Legacy single-note fields are migrated into records.layerNotes below. Clear the old copy so
-      // deleting a structured note cannot cause it to reappear on a later project reload.
-      return withoutLegacyLayerNote(durable);
-    }),
+    layers: normalizedHierarchy.layers,
     basemapId: stored.basemapId,
     mapView: activeShare?.mapView ??
       stored.projectArea ??
@@ -242,7 +244,9 @@ const normalizedProject = (
     selectedFeatures: [],
     drawMode: "none" as DrawMode,
     selectedStates: stored.selectedStates?.length ? stored.selectedStates : ["TX"],
-    derivedLayerGroupId: groups.some((group) => group.id === stored.derivedLayerGroupId)
+    derivedLayerGroupId: normalizedHierarchy.groups.some(
+      (group) => group.id === stored.derivedLayerGroupId,
+    )
       ? (stored.derivedLayerGroupId as string)
       : "working",
     parentProjectId:
@@ -334,6 +338,7 @@ export interface WorkbenchApi extends WorkbenchState {
     position: "before" | "inside" | "after",
   ) => void;
   nestGroupInLayer: (groupId: string, layerId: string) => void;
+  nestLayerInLayer: (layerId: string, targetLayerId: string) => void;
   setLayerGroup: (id: string, groupId: string) => void;
   addGroup: (name: string) => string;
   addSubgroup: (parentId: string, name: string) => void;
@@ -450,33 +455,74 @@ const descendantGroupIds = (groupId: string, groups: LayerGroup[]): Set<string> 
   return ids;
 };
 
-const flattenedGroupIds = (groups: LayerGroup[]): string[] => {
-  const ordered: string[] = [];
-  const visited = new Set<string>();
-  const visit = (group: LayerGroup) => {
-    if (visited.has(group.id)) return;
-    visited.add(group.id);
-    ordered.push(group.id);
-    groups.filter((item) => item.parentId === group.id).forEach(visit);
+const normalizeLayerContainers = (groups: LayerGroup[], layers: GisLayer[]) => {
+  let normalizedGroups = groups.map((group) => ({ ...group }));
+  let normalizedLayers = layers.map((layer) => ({ ...layer }));
+  for (const container of normalizedGroups.filter((group) => group.containerLayerId)) {
+    const target = normalizedLayers.find((layer) => layer.id === container.containerLayerId);
+    const fallbackGroupId =
+      container.parentId && normalizedGroups.some((group) => group.id === container.parentId)
+        ? container.parentId
+        : (normalizedGroups.find((group) => !group.containerLayerId)?.id ?? "working");
+    // A focused share may intentionally exclude the parent layer while including one of its
+    // children. Promote those children to the nearest visible group instead of hiding them behind
+    // a structural container whose owning layer is absent.
+    if (!target) {
+      normalizedLayers = normalizedLayers.map((layer) =>
+        layer.groupId === container.id ? { ...layer, groupId: fallbackGroupId } : layer,
+      );
+      normalizedGroups = normalizedGroups
+        .filter((group) => group.id !== container.id)
+        .map((group) =>
+          group.parentId === container.id ? { ...group, parentId: fallbackGroupId } : group,
+        );
+      continue;
+    }
+    // The first container implementation placed the target layer inside its own structural
+    // container. Move that layer back beside the container so the container can render beneath
+    // the layer row without creating a duplicate or self-referencing tree.
+    if (target?.groupId === container.id) {
+      target.groupId = fallbackGroupId;
+    }
+  }
+  return {
+    groups: normalizedGroups,
+    layers: orderedLayersForGroups(normalizedLayers, normalizedGroups),
   };
-
-  groups
-    .filter((group) => !group.parentId || !groups.some((item) => item.id === group.parentId))
-    .forEach(visit);
-  groups.filter((group) => !visited.has(group.id)).forEach(visit);
-  return ordered;
 };
 
 const orderedLayersForGroups = (layers: GisLayer[], groups: LayerGroup[]): GisLayer[] => {
-  const groupRank = new Map(flattenedGroupIds(groups).map((groupId, index) => [groupId, index]));
-  return layers
-    .map((layer, index) => ({ layer, index }))
-    .sort((a, b) => {
-      const aRank = groupRank.get(a.layer.groupId) ?? Number.MAX_SAFE_INTEGER;
-      const bRank = groupRank.get(b.layer.groupId) ?? Number.MAX_SAFE_INTEGER;
-      return aRank - bRank || a.index - b.index;
-    })
-    .map(({ layer }) => layer);
+  const ordered: GisLayer[] = [];
+  const visitedLayers = new Set<string>();
+  const visitedGroups = new Set<string>();
+  const visitLayer = (layer: GisLayer) => {
+    if (visitedLayers.has(layer.id)) return;
+    visitedLayers.add(layer.id);
+    ordered.push(layer);
+    const container = groups.find((group) => group.containerLayerId === layer.id);
+    if (container) visitGroup(container);
+  };
+  const visitGroup = (group: LayerGroup) => {
+    if (visitedGroups.has(group.id)) return;
+    visitedGroups.add(group.id);
+    layers.filter((layer) => layer.groupId === group.id).forEach(visitLayer);
+    groups
+      .filter((child) => child.parentId === group.id && !child.containerLayerId)
+      .forEach(visitGroup);
+  };
+
+  groups
+    .filter(
+      (group) =>
+        !group.containerLayerId &&
+        (!group.parentId || !groups.some((candidate) => candidate.id === group.parentId)),
+    )
+    .forEach(visitGroup);
+  groups
+    .filter((group) => !group.containerLayerId && !visitedGroups.has(group.id))
+    .forEach(visitGroup);
+  layers.filter((layer) => !visitedLayers.has(layer.id)).forEach(visitLayer);
+  return ordered;
 };
 
 export function WorkbenchProvider({ children }: { children: ReactNode }) {
@@ -673,15 +719,38 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const removeLayers = useCallback<WorkbenchApi["removeLayers"]>((ids) => {
-    setState((s) => ({
-      ...s,
-      layers: s.layers.filter((l) => !ids.includes(l.id)),
-      activeLayerId: ids.includes(s.activeLayerId ?? "") ? null : s.activeLayerId,
-      selectedLayerIds: s.selectedLayerIds.filter((id) => !ids.includes(id)),
-      selectedFeature:
-        s.selectedFeature && ids.includes(s.selectedFeature.layerId) ? null : s.selectedFeature,
-      selectedFeatures: s.selectedFeatures.filter((item) => !ids.includes(item.layerId)),
-    }));
+    setState((s) => {
+      const removedIds = new Set(ids);
+      let groups = s.groups.map((group) => ({ ...group }));
+      let layers = s.layers.filter((layer) => !removedIds.has(layer.id));
+      const removedContainers = groups.filter(
+        (group) => group.containerLayerId && removedIds.has(group.containerLayerId),
+      );
+      for (const container of removedContainers) {
+        const fallbackGroupId =
+          container.parentId && groups.some((group) => group.id === container.parentId)
+            ? container.parentId
+            : (groups.find((group) => !group.containerLayerId)?.id ?? "working");
+        layers = layers.map((layer) =>
+          layer.groupId === container.id ? { ...layer, groupId: fallbackGroupId } : layer,
+        );
+        groups = groups
+          .filter((group) => group.id !== container.id)
+          .map((group) =>
+            group.parentId === container.id ? { ...group, parentId: fallbackGroupId } : group,
+          );
+      }
+      return {
+        ...s,
+        groups,
+        layers: orderedLayersForGroups(layers, groups),
+        activeLayerId: removedIds.has(s.activeLayerId ?? "") ? null : s.activeLayerId,
+        selectedLayerIds: s.selectedLayerIds.filter((id) => !removedIds.has(id)),
+        selectedFeature:
+          s.selectedFeature && removedIds.has(s.selectedFeature.layerId) ? null : s.selectedFeature,
+        selectedFeatures: s.selectedFeatures.filter((item) => !removedIds.has(item.layerId)),
+      };
+    });
   }, []);
 
   const duplicateLayer = useCallback<WorkbenchApi["duplicateLayer"]>((id, targetGroupId) => {
@@ -724,7 +793,16 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
           );
           layers.splice(lastInGroup + 1, 0, moved);
         }
-        return { ...s, layers, activeLayerId: id, selectedLayerIds: [id] };
+        const groups = s.groups.map((group) =>
+          group.containerLayerId === id ? { ...group, parentId: targetGroupId } : group,
+        );
+        return {
+          ...s,
+          groups,
+          layers: orderedLayersForGroups(layers, groups),
+          activeLayerId: id,
+          selectedLayerIds: [id],
+        };
       });
     },
     [],
@@ -774,7 +852,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       if (!container) {
         container = {
           id: uid(),
-          name: targetLayer.name,
+          name: `${targetLayer.name} sublayers`,
           collapsed: false,
           parentId: targetLayer.groupId,
           containerLayerId: targetLayer.id,
@@ -782,28 +860,90 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
         const parentIndex = groups.findIndex((group) => group.id === targetLayer.groupId);
         groups.splice(parentIndex >= 0 ? parentIndex + 1 : groups.length, 0, container);
       }
-      if (sourceGroup.parentId === container.id && targetLayer.groupId === container.id) return s;
+      if (sourceGroup.parentId === container.id) return s;
 
       groups = groups.map((group) =>
-        group.id === sourceGroup.id ? { ...group, parentId: container.id } : group,
-      );
-      const layers = s.layers.map((layer) =>
-        layer.id === targetLayer.id ? { ...layer, groupId: container.id } : layer,
+        group.id === sourceGroup.id
+          ? { ...group, parentId: container.id }
+          : group.id === container.id
+            ? { ...group, parentId: targetLayer.groupId }
+            : group,
       );
       return {
         ...s,
         groups,
-        layers: orderedLayersForGroups(layers, groups),
+        layers: orderedLayersForGroups(s.layers, groups),
         selectedGroupIds: [sourceGroup.id],
       };
     });
   }, []);
 
+  const nestLayerInLayer = useCallback<WorkbenchApi["nestLayerInLayer"]>(
+    (layerId, targetLayerId) => {
+      setState((s) => {
+        const sourceLayer = s.layers.find((layer) => layer.id === layerId);
+        const targetLayer = s.layers.find((layer) => layer.id === targetLayerId);
+        if (!sourceLayer || !targetLayer || sourceLayer.id === targetLayer.id) return s;
+
+        const sourceContainer = s.groups.find((group) => group.containerLayerId === sourceLayer.id);
+        if (
+          sourceContainer &&
+          descendantGroupIds(sourceContainer.id, s.groups).has(targetLayer.groupId)
+        )
+          return s;
+
+        let groups = [...s.groups];
+        let targetContainer = groups.find((group) => group.containerLayerId === targetLayer.id);
+        if (!targetContainer) {
+          targetContainer = {
+            id: uid(),
+            name: `${targetLayer.name} sublayers`,
+            collapsed: false,
+            parentId: targetLayer.groupId,
+            containerLayerId: targetLayer.id,
+          };
+          const parentIndex = groups.findIndex((group) => group.id === targetLayer.groupId);
+          groups.splice(parentIndex >= 0 ? parentIndex + 1 : groups.length, 0, targetContainer);
+        } else if (targetContainer.parentId !== targetLayer.groupId) {
+          groups = groups.map((group) =>
+            group.id === targetContainer?.id ? { ...group, parentId: targetLayer.groupId } : group,
+          );
+        }
+
+        groups = groups.map((group) =>
+          group.containerLayerId === sourceLayer.id
+            ? { ...group, parentId: targetContainer.id }
+            : group,
+        );
+        const layers = s.layers.map((layer) =>
+          layer.id === sourceLayer.id ? { ...layer, groupId: targetContainer.id } : layer,
+        );
+        return {
+          ...s,
+          groups,
+          layers: orderedLayersForGroups(layers, groups),
+          activeLayerId: sourceLayer.id,
+          selectedLayerIds: [sourceLayer.id],
+        };
+      });
+    },
+    [],
+  );
+
   const toggleVisible = useCallback<WorkbenchApi["toggleVisible"]>((id) => {
-    setState((s) => ({
-      ...s,
-      layers: s.layers.map((l) => (l.id === id ? { ...l, visible: !l.visible } : l)),
-    }));
+    setState((s) => {
+      const layer = s.layers.find((item) => item.id === id);
+      if (!layer) return s;
+      const visible = !layer.visible;
+      const container = s.groups.find((group) => group.containerLayerId === id);
+      const childGroupIds = container ? descendantGroupIds(container.id, s.groups) : new Set();
+      return {
+        ...s,
+        layers: s.layers.map((item) =>
+          item.id === id || childGroupIds.has(item.groupId) ? { ...item, visible } : item,
+        ),
+      };
+    });
   }, []);
 
   const moveLayer = useCallback<WorkbenchApi["moveLayer"]>((id, direction) => {
@@ -1598,6 +1738,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       reorderLayer,
       reorderGroup,
       nestGroupInLayer,
+      nestLayerInLayer,
       setLayerGroup,
       addGroup,
       addSubgroup,
@@ -1709,6 +1850,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       reorderLayer,
       reorderGroup,
       nestGroupInLayer,
+      nestLayerInLayer,
       setLayerGroup,
       addGroup,
       addSubgroup,

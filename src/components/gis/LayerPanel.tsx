@@ -1,4 +1,4 @@
-import { useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { bbox as turfBbox } from "@turf/turf";
 import type { Feature } from "geojson";
 import {
@@ -133,7 +133,7 @@ const timestampInputValue = (timestamp: number) => {
   return new Date(timestamp - offset).toISOString().slice(0, 16);
 };
 
-type LayerDropPosition = "before" | "after";
+type LayerDropPosition = "before" | "inside" | "after";
 type GroupDropPosition = "before" | "inside" | "after";
 
 export function LayerPanel() {
@@ -493,6 +493,16 @@ export function LayerPanel() {
       return;
     }
 
+    if (position === "inside") {
+      wb.nestLayerInLayer(dragged, targetLayer.id);
+      setExpandedLayers((current) => new Set(current).add(targetLayer.id));
+      toast.success("Layer added as a sublayer", {
+        description: `${targetLayer.name} now contains the dragged layer.`,
+      });
+      resetLayerDrag();
+      return;
+    }
+
     let beforeLayerId: string | undefined = targetLayer.id;
     if (position === "after") {
       const targetGroupLayers = wb.layers.filter(
@@ -521,13 +531,20 @@ export function LayerPanel() {
     const dragged = draggedLayerRef.current;
     if (layerRow) {
       const targetLayerId = layerRow.dataset["layerDropId"];
-      if (!targetLayerId || targetLayerId === dragged) {
+      const invalidLayerTargets = dragged
+        ? nestedLayerIds(dragged, wb.groups, wb.layers)
+        : new Set<string>();
+      if (!targetLayerId || targetLayerId === dragged || invalidLayerTargets.has(targetLayerId)) {
         updateDropTarget(null);
         return;
       }
       const bounds = layerRow.getBoundingClientRect();
       const position: LayerDropPosition =
-        event.clientY < bounds.top + bounds.height / 2 ? "before" : "after";
+        event.clientY < bounds.top + bounds.height * 0.25
+          ? "before"
+          : event.clientY > bounds.bottom - bounds.height * 0.25
+            ? "after"
+            : "inside";
       updateDropTarget(`layer:${targetLayerId}:${position}`);
       return;
     }
@@ -546,6 +563,14 @@ export function LayerPanel() {
     setDraggedLayerId(layerId);
     updateDropTarget(null);
     event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const endPointerLayerDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (draggedPointerRef.current !== event.pointerId) return;
+    updatePointerDropTarget(event);
+    if (event.currentTarget.hasPointerCapture(event.pointerId))
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    finishLayerDrag();
   };
 
   const updateGroupDropTarget = (target: string | null) => {
@@ -647,6 +672,7 @@ export function LayerPanel() {
       const targetLayerId = target.slice("layer:".length);
       const targetLayerName = wb.layers.find((layer) => layer.id === targetLayerId)?.name;
       wb.nestGroupInLayer(dragged, targetLayerId);
+      setExpandedLayers((current) => new Set(current).add(targetLayerId));
       toast.success("Group added as layer sublayers", {
         description: targetLayerName
           ? `The original ${targetLayerName} features and the dropped group are now organized together.`
@@ -675,6 +701,14 @@ export function LayerPanel() {
     setDraggedGroupId(groupId);
     updateGroupDropTarget(null);
     event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const endPointerGroupDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (draggedGroupPointerRef.current !== event.pointerId) return;
+    updatePointerGroupDropTarget(event);
+    if (event.currentTarget.hasPointerCapture(event.pointerId))
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    finishGroupDrag();
   };
 
   const toggleLayerExpanded = (id: string) => {
@@ -838,7 +872,6 @@ export function LayerPanel() {
           return (
             <div
               key={group.id}
-              data-group-drop-id={group.id}
               style={{ marginLeft: depth * 12 }}
               className={cn(
                 "mb-2 rounded-xl transition-colors",
@@ -852,6 +885,7 @@ export function LayerPanel() {
             >
               <div
                 data-group-header-id={group.id}
+                data-group-drop-id={group.id}
                 className={cn(
                   "relative flex items-center rounded-lg text-muted-foreground hover:bg-sidebar-accent",
                   groupSelected && "bg-accent text-foreground ring-1 ring-primary/40",
@@ -966,13 +1000,7 @@ export function LayerPanel() {
                   type="button"
                   onPointerDown={(event) => startPointerGroupDrag(event, group.id)}
                   onPointerMove={updatePointerGroupDropTarget}
-                  onPointerUp={(event) => {
-                    if (draggedGroupPointerRef.current !== event.pointerId) return;
-                    updatePointerGroupDropTarget(event);
-                    if (event.currentTarget.hasPointerCapture(event.pointerId))
-                      event.currentTarget.releasePointerCapture(event.pointerId);
-                    finishGroupDrag();
-                  }}
+                  onPointerUp={endPointerGroupDrag}
                   onPointerCancel={resetGroupDrag}
                   aria-label={`Drag ${group.name} group to reorder or nest`}
                   title="Drop on a group to nest it, on a layer to add it as sublayers, or between groups to reorder"
@@ -1026,7 +1054,6 @@ export function LayerPanel() {
                     return (
                       <div
                         key={layer.id}
-                        data-layer-drop-id={layer.id}
                         className={cn(
                           "rounded-xl border px-1.5 py-1.5 transition-all",
                           selected
@@ -1035,13 +1062,18 @@ export function LayerPanel() {
                           draggedLayerId === layer.id && "opacity-40",
                           dropTarget === `layer:${layer.id}:before` &&
                             "border-primary shadow-[0_-3px_0_0_hsl(var(--primary))]",
+                          dropTarget === `layer:${layer.id}:inside` &&
+                            "border-primary bg-primary/10 ring-2 ring-primary/70",
                           dropTarget === `layer:${layer.id}:after` &&
                             "border-primary shadow-[0_3px_0_0_hsl(var(--primary))]",
                           groupDropTarget === `layer:${layer.id}` &&
                             "border-primary bg-primary/10 ring-2 ring-primary/70",
                         )}
                       >
-                        <div className="flex min-h-8 items-center gap-1.5">
+                        <div
+                          data-layer-drop-id={layer.id}
+                          className="flex min-h-8 items-center gap-1.5"
+                        >
                           <input
                             type="checkbox"
                             checked={selected}
@@ -1108,6 +1140,12 @@ export function LayerPanel() {
                               </div>
                             )}
                           </button>
+                          {wb.groups.some((group) => group.containerLayerId === layer.id) && (
+                            <Layers
+                              className="size-3.5 shrink-0 text-primary"
+                              aria-label="Layer contains sublayers and groups"
+                            />
+                          )}
                           <button
                             onClick={() => {
                               if (layer.style.labelTemplate.trim())
@@ -1144,16 +1182,10 @@ export function LayerPanel() {
                             type="button"
                             onPointerDown={(event) => startPointerLayerDrag(event, layer.id)}
                             onPointerMove={updatePointerDropTarget}
-                            onPointerUp={(event) => {
-                              if (draggedPointerRef.current !== event.pointerId) return;
-                              updatePointerDropTarget(event);
-                              if (event.currentTarget.hasPointerCapture(event.pointerId))
-                                event.currentTarget.releasePointerCapture(event.pointerId);
-                              finishLayerDrag();
-                            }}
+                            onPointerUp={endPointerLayerDrag}
                             onPointerCancel={resetLayerDrag}
-                            aria-label={`Drag ${layer.name} to reorder`}
-                            title="Drag layer up, down, or into another group"
+                            aria-label={`Drag ${layer.name} to reorder or nest`}
+                            title="Drop on the middle of a layer to make a sublayer, on a group to move it, or near an edge to reorder"
                             className={cn(
                               "-mr-0.5 flex size-7 shrink-0 touch-none select-none items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground",
                               draggedLayerId === layer.id
@@ -1172,6 +1204,22 @@ export function LayerPanel() {
                                 `${layer.data.features.length.toLocaleString()} features`}
                               {sqm > 0 ? ` · ${formatArea(sqm, wb.units.area)}` : ""}
                             </div>
+                            <LayerChildrenTree
+                              parentLayerId={layer.id}
+                              onZoom={zoomTo}
+                              draggedLayerId={draggedLayerId}
+                              draggedGroupId={draggedGroupId}
+                              layerDropTarget={dropTarget}
+                              groupDropTarget={groupDropTarget}
+                              onLayerPointerDown={startPointerLayerDrag}
+                              onLayerPointerMove={updatePointerDropTarget}
+                              onLayerPointerUp={endPointerLayerDrag}
+                              onLayerPointerCancel={resetLayerDrag}
+                              onGroupPointerDown={startPointerGroupDrag}
+                              onGroupPointerMove={updatePointerGroupDropTarget}
+                              onGroupPointerUp={endPointerGroupDrag}
+                              onGroupPointerCancel={resetGroupDrag}
+                            />
                             <div className="flex flex-wrap gap-1">
                               <IconBtn
                                 label="Zoom to layer"
@@ -1773,6 +1821,363 @@ export function LayerPanel() {
   );
 }
 
+interface LayerChildrenTreeProps {
+  parentLayerId: string;
+  onZoom: (data: GisLayer["data"]) => void;
+  draggedLayerId: string | null;
+  draggedGroupId: string | null;
+  layerDropTarget: string | null;
+  groupDropTarget: string | null;
+  onLayerPointerDown: (event: ReactPointerEvent<HTMLButtonElement>, layerId: string) => void;
+  onLayerPointerMove: (event: ReactPointerEvent<HTMLButtonElement>) => void;
+  onLayerPointerUp: (event: ReactPointerEvent<HTMLButtonElement>) => void;
+  onLayerPointerCancel: () => void;
+  onGroupPointerDown: (event: ReactPointerEvent<HTMLButtonElement>, groupId: string) => void;
+  onGroupPointerMove: (event: ReactPointerEvent<HTMLButtonElement>) => void;
+  onGroupPointerUp: (event: ReactPointerEvent<HTMLButtonElement>) => void;
+  onGroupPointerCancel: () => void;
+}
+
+function LayerChildrenTree({
+  parentLayerId,
+  onZoom,
+  draggedLayerId,
+  draggedGroupId,
+  layerDropTarget,
+  groupDropTarget,
+  onLayerPointerDown,
+  onLayerPointerMove,
+  onLayerPointerUp,
+  onLayerPointerCancel,
+  onGroupPointerDown,
+  onGroupPointerMove,
+  onGroupPointerUp,
+  onGroupPointerCancel,
+}: LayerChildrenTreeProps) {
+  const wb = useWorkbench();
+  const { setTableOpen } = useMapRef();
+  const [expandedLayerIds, setExpandedLayerIds] = useState<Set<string>>(() => new Set());
+  const [styleFor, setStyleFor] = useState<string | null>(null);
+  const [groupStyleFor, setGroupStyleFor] = useState<string | null>(null);
+  const [groupMenuFor, setGroupMenuFor] = useState<string | null>(null);
+  const container = wb.groups.find((group) => group.containerLayerId === parentLayerId);
+  if (!container) return null;
+
+  const renderLayer = (layer: GisLayer, depth: number): ReactNode => {
+    const selected = wb.selectedLayerIds.includes(layer.id);
+    const expanded = expandedLayerIds.has(layer.id);
+    const hasChildren = wb.groups.some((group) => group.containerLayerId === layer.id);
+    return (
+      <div
+        key={layer.id}
+        style={{ marginLeft: depth * 10 }}
+        className={cn(
+          "rounded-lg border px-1 py-1 transition-all",
+          selected ? "border-primary bg-accent/60" : "border-border/70 bg-card/70",
+          draggedLayerId === layer.id && "opacity-40",
+          layerDropTarget === `layer:${layer.id}:before` &&
+            "shadow-[0_-3px_0_0_hsl(var(--primary))]",
+          layerDropTarget === `layer:${layer.id}:inside` &&
+            "border-primary bg-primary/10 ring-2 ring-primary/70",
+          layerDropTarget === `layer:${layer.id}:after` && "shadow-[0_3px_0_0_hsl(var(--primary))]",
+          groupDropTarget === `layer:${layer.id}` &&
+            "border-primary bg-primary/10 ring-2 ring-primary/70",
+        )}
+      >
+        <div data-layer-drop-id={layer.id} className="flex min-h-7 items-center gap-1">
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={() => wb.toggleLayerSelection(layer.id, true)}
+            onClick={(event) => event.stopPropagation()}
+            aria-label={`Select ${layer.name} sublayer`}
+            className="size-3 shrink-0 accent-primary"
+          />
+          <button
+            type="button"
+            onClick={() =>
+              setExpandedLayerIds((current) => {
+                const next = new Set(current);
+                if (next.has(layer.id)) next.delete(layer.id);
+                else next.add(layer.id);
+                return next;
+              })
+            }
+            aria-label={expanded ? `Collapse ${layer.name}` : `Expand ${layer.name}`}
+            className="rounded p-0.5 text-muted-foreground hover:bg-accent"
+          >
+            {expanded ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
+          </button>
+          <button
+            type="button"
+            onClick={() => wb.toggleVisible(layer.id)}
+            aria-label={layer.visible ? `Hide ${layer.name}` : `Show ${layer.name}`}
+            className="rounded p-0.5 text-muted-foreground hover:text-foreground"
+          >
+            {layer.visible ? <Eye className="size-3.5" /> : <EyeOff className="size-3.5" />}
+          </button>
+          <LayerStyleSwatch layer={layer} />
+          <button
+            type="button"
+            onClick={(event) => wb.toggleLayerSelection(layer.id, event.metaKey || event.ctrlKey)}
+            onDoubleClick={() => {
+              const name = window.prompt("Rename sublayer", layer.name)?.trim();
+              if (name) wb.updateLayer(layer.id, { name });
+            }}
+            title={`${layer.name} · Double-click to rename`}
+            className="min-w-0 flex-1 truncate text-left text-[10px] font-medium"
+          >
+            {layer.name}
+          </button>
+          {hasChildren && <Layers className="size-3 shrink-0 text-primary" aria-hidden="true" />}
+          <button
+            type="button"
+            onPointerDown={(event) => onLayerPointerDown(event, layer.id)}
+            onPointerMove={onLayerPointerMove}
+            onPointerUp={onLayerPointerUp}
+            onPointerCancel={onLayerPointerCancel}
+            aria-label={`Drag ${layer.name} sublayer`}
+            title="Drag onto another layer to nest it, or onto a data group to move it out"
+            className={cn(
+              "flex size-6 shrink-0 touch-none select-none items-center justify-center rounded text-muted-foreground hover:bg-accent",
+              draggedLayerId === layer.id ? "cursor-grabbing" : "cursor-grab",
+            )}
+          >
+            <GripVertical className="pointer-events-none size-3.5" />
+          </button>
+        </div>
+        {expanded && (
+          <div className="mt-1.5 space-y-1.5 border-l border-primary/20 pl-2">
+            <p className="num text-[9px] text-muted-foreground">
+              {remoteLoadLabel(layer) ?? `${layer.data.features.length.toLocaleString()} features`}
+            </p>
+            <div className="flex flex-wrap gap-1">
+              <IconBtn
+                label="Zoom to sublayer"
+                onClick={() => onZoom(layer.data)}
+                icon={<Crosshair className="size-3" />}
+              />
+              <IconBtn
+                label="Style sublayer"
+                onClick={() => setStyleFor(styleFor === layer.id ? null : layer.id)}
+                icon={<Palette className="size-3" />}
+                active={styleFor === layer.id}
+              />
+              <IconBtn
+                label="Attribute table"
+                onClick={() => {
+                  wb.setActiveLayer(layer.id);
+                  setTableOpen(true);
+                }}
+                icon={<Table2 className="size-3" />}
+              />
+              <IconBtn
+                label="Duplicate sublayer"
+                onClick={() => wb.duplicateLayer(layer.id, layer.groupId)}
+                icon={<Copy className="size-3" />}
+              />
+              <IconBtn
+                label="Delete sublayer"
+                onClick={() => wb.removeLayers([layer.id])}
+                icon={<Trash2 className="size-3" />}
+                danger
+              />
+            </div>
+            {styleFor === layer.id && <StyleEditor layer={layer} />}
+            <LayerChildrenTree
+              parentLayerId={layer.id}
+              onZoom={onZoom}
+              draggedLayerId={draggedLayerId}
+              draggedGroupId={draggedGroupId}
+              layerDropTarget={layerDropTarget}
+              groupDropTarget={groupDropTarget}
+              onLayerPointerDown={onLayerPointerDown}
+              onLayerPointerMove={onLayerPointerMove}
+              onLayerPointerUp={onLayerPointerUp}
+              onLayerPointerCancel={onLayerPointerCancel}
+              onGroupPointerDown={onGroupPointerDown}
+              onGroupPointerMove={onGroupPointerMove}
+              onGroupPointerUp={onGroupPointerUp}
+              onGroupPointerCancel={onGroupPointerCancel}
+            />
+            <FeatureSublayers layer={layer} onZoom={onZoom} />
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderGroup = (group: LayerGroup, depth: number): ReactNode => {
+    const groupIds = nestedGroupIds(group.id, wb.groups);
+    const groupedLayers = wb.layers.filter((layer) => groupIds.has(layer.groupId));
+    const allVisible = groupedLayers.length > 0 && groupedLayers.every((layer) => layer.visible);
+    const directGroups = wb.groups.filter(
+      (item) => item.parentId === group.id && !item.containerLayerId,
+    );
+    const directLayers = wb.layers.filter((layer) => layer.groupId === group.id);
+    const selected = wb.selectedGroupIds.includes(group.id);
+    const renameGroup = () => {
+      const name = window.prompt("Rename subgroup", group.name)?.trim();
+      if (name) wb.renameGroup(group.id, name);
+    };
+    return (
+      <div
+        key={group.id}
+        style={{ marginLeft: depth * 10 }}
+        className={cn(
+          "rounded-lg transition-all",
+          selected && "bg-accent ring-1 ring-primary/40",
+          draggedGroupId === group.id && "opacity-40",
+          groupDropTarget === `${group.id}:inside` && "bg-primary/10 ring-2 ring-primary/70",
+          groupDropTarget === `${group.id}:before` && "shadow-[0_-3px_0_0_hsl(var(--primary))]",
+          groupDropTarget === `${group.id}:after` && "shadow-[0_3px_0_0_hsl(var(--primary))]",
+        )}
+      >
+        <div
+          data-group-drop-id={group.id}
+          className="relative flex min-h-7 items-center gap-1 rounded-lg bg-secondary/60 px-1"
+        >
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={() => wb.toggleGroupSelection(group.id)}
+            aria-label={`Select ${group.name} subgroup`}
+            className="size-3 shrink-0 accent-primary"
+          />
+          <button
+            type="button"
+            onClick={() => wb.toggleGroup(group.id)}
+            onDoubleClick={(event) => {
+              event.preventDefault();
+              renameGroup();
+            }}
+            title={`${group.name} · Double-click to rename`}
+            className="flex min-w-0 flex-1 items-center gap-1 text-left text-[10px] font-semibold"
+          >
+            {group.collapsed ? (
+              <ChevronRight className="size-3 shrink-0" />
+            ) : (
+              <ChevronDown className="size-3 shrink-0" />
+            )}
+            <Layers className="size-3 shrink-0 text-primary" />
+            <span className="truncate">{group.name}</span>
+            <span className="num ml-auto text-[9px] text-muted-foreground">
+              {groupedLayers.length}
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => wb.setGroupVisible(group.id, !allVisible)}
+            aria-label={allVisible ? `Hide ${group.name}` : `Show ${group.name}`}
+            className="rounded p-0.5 text-muted-foreground hover:text-foreground"
+          >
+            {allVisible ? <Eye className="size-3.5" /> : <EyeOff className="size-3.5" />}
+          </button>
+          <button
+            type="button"
+            onClick={() => setGroupMenuFor(groupMenuFor === group.id ? null : group.id)}
+            aria-label={`Open actions for ${group.name}`}
+            className="rounded p-0.5 text-muted-foreground hover:bg-accent"
+          >
+            <MoreHorizontal className="size-3.5" />
+          </button>
+          {groupMenuFor === group.id && (
+            <div className="absolute right-7 top-7 z-40 w-40 rounded-xl border border-border bg-popover p-1 text-[10px] text-popover-foreground shadow-xl">
+              <button
+                type="button"
+                onClick={() => {
+                  renameGroup();
+                  setGroupMenuFor(null);
+                }}
+                className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-accent"
+              >
+                <Pencil className="size-3" /> Rename
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setGroupStyleFor(groupStyleFor === group.id ? null : group.id);
+                  setGroupMenuFor(null);
+                }}
+                className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-accent"
+              >
+                <Palette className="size-3" /> Style all layers
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const name = window
+                    .prompt(`Name a subgroup inside ${group.name}`, "New subgroup")
+                    ?.trim();
+                  if (name) wb.addSubgroup(group.id, name);
+                  setGroupMenuFor(null);
+                }}
+                className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-accent"
+              >
+                <FolderPlus className="size-3" /> Add subgroup
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (
+                    window.confirm(`Delete the “${group.name}” subgroup? Its layers will be kept.`)
+                  )
+                    wb.removeGroup(group.id);
+                  setGroupMenuFor(null);
+                }}
+                className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-destructive hover:bg-destructive/10"
+              >
+                <Trash2 className="size-3" /> Delete subgroup
+              </button>
+            </div>
+          )}
+          <button
+            type="button"
+            onPointerDown={(event) => onGroupPointerDown(event, group.id)}
+            onPointerMove={onGroupPointerMove}
+            onPointerUp={onGroupPointerUp}
+            onPointerCancel={onGroupPointerCancel}
+            aria-label={`Drag ${group.name} subgroup`}
+            title="Drag this subgroup onto a layer, another group, or a data group"
+            className={cn(
+              "flex size-6 shrink-0 touch-none select-none items-center justify-center rounded text-muted-foreground hover:bg-accent",
+              draggedGroupId === group.id ? "cursor-grabbing" : "cursor-grab",
+            )}
+          >
+            <GripVertical className="pointer-events-none size-3.5" />
+          </button>
+        </div>
+        {groupStyleFor === group.id && <GroupStyleEditor group={group} layers={groupedLayers} />}
+        {!group.collapsed && (
+          <div className="mt-1 space-y-1 border-l border-primary/20 pl-1">
+            {directLayers.map((layer) => renderLayer(layer, depth + 1))}
+            {directGroups.map((child) => renderGroup(child, depth + 1))}
+            {directGroups.length === 0 && directLayers.length === 0 && (
+              <p className="px-2 py-1 text-[9px] text-muted-foreground">Nothing here yet</p>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const directGroups = wb.groups.filter(
+    (group) => group.parentId === container.id && !group.containerLayerId,
+  );
+  const directLayers = wb.layers.filter((layer) => layer.groupId === container.id);
+  if (directGroups.length === 0 && directLayers.length === 0) return null;
+
+  return (
+    <section className="space-y-1 rounded-lg border border-primary/20 bg-primary/5 p-1.5">
+      <p className="flex items-center gap-1 px-1 text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
+        <Layers className="size-3 text-primary" /> Sublayers &amp; groups
+      </p>
+      {directLayers.map((layer) => renderLayer(layer, 0))}
+      {directGroups.map((group) => renderGroup(group, 0))}
+    </section>
+  );
+}
+
 function featureDisplayName(layer: GisLayer, index: number): string {
   const properties = layer.data.features[index]?.properties ?? {};
   const preferred = ["NAME", "name", "LABEL", "label", "OWNER", "owner", "ID", "id"];
@@ -2130,14 +2535,36 @@ function nestedGroupIds(groupId: string, groups: LayerGroup[]): Set<string> {
   return ids;
 }
 
+function nestedLayerIds(layerId: string, groups: LayerGroup[], layers: GisLayer[]): Set<string> {
+  const ids = new Set([layerId]);
+  const container = groups.find((group) => group.containerLayerId === layerId);
+  if (!container) return ids;
+  const childGroupIds = nestedGroupIds(container.id, groups);
+  for (const layer of layers) if (childGroupIds.has(layer.groupId)) ids.add(layer.id);
+  return ids;
+}
+
 function flattenVisibleGroups(groups: LayerGroup[]): Array<{ group: LayerGroup; depth: number }> {
   const result: Array<{ group: LayerGroup; depth: number }> = [];
   const uniqueGroups = groups.filter(
     (group, index) => groups.findIndex((candidate) => candidate.id === group.id) === index,
   );
+  const containerIds = new Set(
+    uniqueGroups.filter((group) => group.containerLayerId).map((group) => group.id),
+  );
+  const belongsToLayerContainer = (group: LayerGroup) => {
+    const visited = new Set<string>();
+    let parentId = group.parentId;
+    while (parentId && !visited.has(parentId)) {
+      if (containerIds.has(parentId)) return true;
+      visited.add(parentId);
+      parentId = uniqueGroups.find((candidate) => candidate.id === parentId)?.parentId;
+    }
+    return false;
+  };
   const reachable = new Set<string>();
   const visit = (group: LayerGroup, depth: number, hiddenByCollapsedParent = false) => {
-    if (reachable.has(group.id)) return;
+    if (reachable.has(group.id) || group.containerLayerId || belongsToLayerContainer(group)) return;
     reachable.add(group.id);
     if (!hiddenByCollapsedParent) result.push({ group, depth });
     const hideChildren = hiddenByCollapsedParent || group.collapsed;
@@ -2148,12 +2575,19 @@ function flattenVisibleGroups(groups: LayerGroup[]): Array<{ group: LayerGroup; 
   uniqueGroups
     .filter(
       (group) =>
-        !group.parentId || !uniqueGroups.some((candidate) => candidate.id === group.parentId),
+        !group.containerLayerId &&
+        !belongsToLayerContainer(group) &&
+        (!group.parentId || !uniqueGroups.some((candidate) => candidate.id === group.parentId)),
     )
     .forEach((group) => visit(group, 0));
   // Any remaining group belongs to malformed legacy cyclic data. Render it once as a root;
   // `reachable` prevents the cycle from ever repeating in the visible tree.
-  uniqueGroups.filter((group) => !reachable.has(group.id)).forEach((group) => visit(group, 0));
+  uniqueGroups
+    .filter(
+      (group) =>
+        !reachable.has(group.id) && !group.containerLayerId && !belongsToLayerContainer(group),
+    )
+    .forEach((group) => visit(group, 0));
   return result;
 }
 
