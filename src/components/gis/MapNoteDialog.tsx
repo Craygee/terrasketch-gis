@@ -71,20 +71,29 @@ export function MapNoteDialog() {
       ),
     [wb.records.layerNotes],
   );
+  const associationLayers = useMemo(() => {
+    const seen = new Set<string>();
+    return wb.displayLayers.filter((layer) => {
+      if (seen.has(layer.id)) return false;
+      seen.add(layer.id);
+      return true;
+    });
+  }, [wb.displayLayers]);
   const suggestions = tagSuggestions(tagText, availableTags);
 
   useEffect(() => {
     if (!location) return;
     const current = wbRef.current;
     const defaultLayer =
-      current.layers.find(
+      current.displayLayers.find(
         (layer) =>
           layer.id === current.activeLayerId &&
           !(layer.source.kind === "draw" && layer.source.purpose === "map-notes"),
       ) ??
-      current.layers.find(
+      current.displayLayers.find(
         (layer) => !(layer.source.kind === "draw" && layer.source.purpose === "map-notes"),
-      );
+      ) ??
+      current.displayLayers[0];
     setDestination("project");
     setLayerId(defaultLayer?.id ?? "");
     setSubject("");
@@ -116,11 +125,9 @@ export function MapNoteDialog() {
       toast.error("Enter a note");
       return;
     }
-    const layer = destination === "layer" ? wb.layers.find((item) => item.id === layerId) : null;
-    if (
-      destination === "layer" &&
-      (!layer || (layer.source.kind === "draw" && layer.source.purpose === "map-notes"))
-    ) {
+    const layer =
+      destination === "layer" ? associationLayers.find((item) => item.id === layerId) : null;
+    if (destination === "layer" && !layer) {
       toast.error("Choose a layer for this note");
       return;
     }
@@ -322,16 +329,11 @@ export function MapNoteDialog() {
               className="mt-1 w-full rounded-xl border border-border bg-card px-3 py-2 text-xs font-normal"
             >
               <option value="">Choose a layer</option>
-              {wb.layers
-                .filter(
-                  (layer) =>
-                    !(layer.source.kind === "draw" && layer.source.purpose === "map-notes"),
-                )
-                .map((layer) => (
-                  <option key={layer.id} value={layer.id}>
-                    {layer.name}
-                  </option>
-                ))}
+              {associationLayers.map((layer) => (
+                <option key={layer.id} value={layer.id}>
+                  {layer.name}
+                </option>
+              ))}
             </select>
           </label>
         )}

@@ -168,7 +168,7 @@ export function ProjectRecordsPanel() {
   );
   const layerNoteRows = records.layerNotes
     .flatMap((note) => {
-      const order = wb.layers.findIndex((item) => item.id === note.layerId);
+      const order = wb.displayLayers.findIndex((item) => item.id === note.layerId);
       const layer = wb.layers[order];
       if (!layer) return [];
       const group = wb.groups.find((item) => item.id === layer.groupId);
@@ -450,7 +450,7 @@ export function ProjectRecordsPanel() {
       toast.error("Sign in before attaching files to a layer note");
       return;
     }
-    const layer = wb.layers.find((item) => item.id === layerId);
+    const layer = wb.displayLayers.find((item) => item.id === layerId);
     if (!layer) return;
     setLayerAttachmentBusyId(layerId);
     try {
@@ -642,7 +642,7 @@ export function ProjectRecordsPanel() {
       await deleteProjectAsset(document);
       update({ documents: records.documents.filter((item) => item.id !== document.id) });
       const layer = document.layerId
-        ? wb.layers.find((item) => item.id === document.layerId)
+        ? wb.displayLayers.find((item) => item.id === document.layerId)
         : undefined;
       wb.addProjectEvent({
         type: "project",
@@ -744,12 +744,12 @@ export function ProjectRecordsPanel() {
         content = `<p class="attachment">Attached file: ${escapeHtml(document.name)} (${formatBytes(document.size)}). The original is included in the downloadable packet.</p>`;
       }
       renderedDocuments.push(
-        `<section class="page"><h2>${escapeHtml(document.name)}</h2><p class="meta">${escapeHtml(folderPath(document.folderId))}${document.layerId ? ` · Layer: ${escapeHtml(wb.layers.find((layer) => layer.id === document.layerId)?.name ?? "Removed layer")}` : ""} · ${new Date(document.createdAt).toLocaleString()}</p>${content}</section>`,
+        `<section class="page"><h2>${escapeHtml(document.name)}</h2><p class="meta">${escapeHtml(folderPath(document.folderId))}${document.layerId ? ` · Layer: ${escapeHtml(wb.displayLayers.find((layer) => layer.id === document.layerId)?.name ?? "Removed layer")}` : ""} · ${new Date(document.createdAt).toLocaleString()}</p>${content}</section>`,
       );
     }
     return `<!doctype html><html><head><title>${escapeHtml(wb.projectName)} packet</title><style>@page{margin:.65in}body{font:12pt Arial,sans-serif;color:#173328}h1,h2{color:#1f7044}.cover,.page{break-after:page}.meta{color:#647067;font-size:9pt}.tags{color:#1f7044;font-size:9pt}article{white-space:pre-wrap;line-height:1.5}img{max-width:100%;max-height:8in;object-fit:contain}pre{white-space:pre-wrap;font:10pt Arial;line-height:1.45}dl{display:grid;grid-template-columns:70px 1fr;gap:4px}dt{font-weight:bold}.attachment{border:1px solid #ccd4ce;padding:16px;border-radius:8px}</style></head><body><section class="cover"><h1>${escapeHtml(wb.projectName)}</h1><p>${escapeHtml(records.summary || "Project records packet")}</p><p class="meta">Created ${new Date().toLocaleString()} · ${notes.length} project notes · ${layerNotes.length} layer notes · ${documents.length} files</p></section>${notes.map((note) => `<section class="page"><h2>${escapeHtml(note.title)}</h2><p class="meta">${escapeHtml(note.author)} · ${new Date(note.createdAt).toLocaleString()}</p><article>${escapeHtml(note.body)}</article></section>`).join("")}${layerNotes
       .map((note) => {
-        const layer = wb.layers.find((item) => item.id === note.layerId);
+        const layer = wb.displayLayers.find((item) => item.id === note.layerId);
         const group = wb.groups.find((item) => item.id === layer?.groupId);
         return `<section class="page"><h2>${escapeHtml(note.subject)}</h2><p class="meta">Layer: ${escapeHtml(layer?.name ?? "Removed layer")} · Group: ${escapeHtml(group?.name ?? "Removed group")} · ${escapeHtml(note.author)} · ${new Date(note.createdAt).toLocaleString()}</p>${note.tags.length ? `<p class="tags">${escapeHtml(layerNoteTagDraft(note.tags))}</p>` : ""}<article>${escapeHtml(note.body)}</article></section>`;
       })
@@ -1372,7 +1372,9 @@ export function ProjectRecordsPanel() {
 
               {layerNoteEditor &&
                 (() => {
-                  const layer = wb.layers.find((item) => item.id === layerNoteEditor.layerId);
+                  const layer = wb.displayLayers.find(
+                    (item) => item.id === layerNoteEditor.layerId,
+                  );
                   if (!layer) return null;
                   const group = wb.groups.find((item) => item.id === layer.groupId);
                   const attachments = attachmentsForLayerNote(layer.id, layerNoteEditor.id);
@@ -1710,8 +1712,8 @@ export function ProjectRecordsPanel() {
                           <>
                             {" "}
                             · Layer:{" "}
-                            {wb.layers.find((layer) => layer.id === document.layerId)?.name ??
-                              "Removed layer"}
+                            {wb.displayLayers.find((layer) => layer.id === document.layerId)
+                              ?.name ?? "Removed layer"}
                           </>
                         )}
                         {document.layerNoteId && (
