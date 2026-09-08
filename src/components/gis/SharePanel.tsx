@@ -249,7 +249,10 @@ export function SharePanel({ onClose }: { onClose: () => void }) {
       await refresh();
       setManagedShareId(share.id);
       await navigator.clipboard.writeText(shareUrl(share.id));
-      toast.success("Shared map created", { description: "The secure link was copied." });
+      toast.success("Private share link created", {
+        description:
+          "Link copied. It grants no access by itself; new invitations default to View only.",
+      });
     } catch (error) {
       toast.error("Shared map could not be created", {
         description: error instanceof Error ? error.message : "Try again.",
@@ -506,6 +509,7 @@ export function SharePanel({ onClose }: { onClose: () => void }) {
               <button
                 onClick={() => void createShare()}
                 disabled={busy}
+                title="Create a private link. Add people afterward; new invitations default to View only."
                 className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-3 py-2.5 font-semibold text-primary-foreground disabled:opacity-50"
               >
                 {busy ? (
@@ -513,8 +517,12 @@ export function SharePanel({ onClose }: { onClose: () => void }) {
                 ) : (
                   <ShieldCheck className="size-4" />
                 )}
-                Create secure share
+                Create private share link
               </button>
+              <p className="text-center text-[10px] leading-relaxed text-muted-foreground">
+                The link alone grants no access. Add people below; invitations default to View only,
+                with optional Editor copy or Admin access.
+              </p>
             </>
           )}
 
