@@ -482,6 +482,22 @@
   cursor: grabbing;
 }
 
+.feature-edit-marker[data-mode="add"] {
+  cursor: default;
+  opacity: 0.72;
+}
+
+.feature-edit-marker[data-mode="delete"] {
+  border-color: #b0453a;
+  background: #fff4f1;
+  cursor: pointer;
+}
+
+.feature-edit-marker[data-mode="delete"]:hover,
+.feature-edit-marker[data-mode="delete"]:focus-visible {
+  outline-color: rgb(176 69 58 / 35%);
+}
+
 .print-map-marker {
   position: relative;
   display: flex;

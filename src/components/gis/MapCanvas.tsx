@@ -27,6 +27,8 @@ import {
   Move,
   ZoomIn,
   StickyNote,
+  Plus,
+  RotateCcw,
 } from "lucide-react";
 
 import { useWorkbench } from "@/lib/gis/store";
@@ -81,6 +83,16 @@ interface PreparedCacheEntry {
   fc: FeatureCollection;
 }
 
+type VertexEditMode = "move" | "add" | "delete";
+type DraftVertexMode = "add" | "delete";
+
+interface EditGeometrySnapshot {
+  key: string;
+  layerId: string;
+  featureIndex: number;
+  geometry: Geometry;
+}
+
 const sourcePerformanceOptions = (layer: GisLayer, featureCount: number) => {
   if (layer.source.kind === "remote" && layer.source.requiresViewport)
     return { tolerance: 0.8, maxzoom: 17, buffer: 64, generateId: true };
@@ -126,9 +138,13 @@ export function MapCanvas() {
   const [selectionBox, setSelectionBox] = useState<SelectionBoxState | null>(null);
   const [panLocked, setPanLocked] = useState(false);
   const [zoomLocked, setZoomLocked] = useState(false);
+  const [editVertexMode, setEditVertexMode] = useState<VertexEditMode>("move");
+  const [draftVertexMode, setDraftVertexMode] = useState<DraftVertexMode>("add");
   const selectionBoxRef = useRef<SelectionBoxState | null>(null);
   const boxDidSelectRef = useRef(false);
   const editMarkerRefs = useRef<Marker[]>([]);
+  const editSnapshotRef = useRef<EditGeometrySnapshot | null>(null);
+  const editHistoryRef = useRef<Geometry[]>([]);
   const styledBasemapRef = useRef(wb.basemapId);
   const preparedCacheRef = useRef(new Map<string, PreparedCacheEntry>());
   const sourcePayloadRef = useRef(new Map<string, FeatureCollection>());
@@ -483,31 +499,57 @@ export function MapCanvas() {
     if (editEnabled && wb.drawMode !== "none") setEditEnabled(false);
   }, [editEnabled, setEditEnabled, wb.drawMode]);
 
-  const changeEditableGeometry = useCallback(
-    (coordinate: Position, vertexIndex: number, insert = false) => {
+  useEffect(() => {
+    const selection = wb.selectedFeature;
+    if (!editEnabled || !editableFeature || !selection) {
+      editSnapshotRef.current = null;
+      editHistoryRef.current = [];
+      setEditVertexMode("move");
+      return;
+    }
+    const key = `${selection.layerId}:${selection.index}`;
+    if (editSnapshotRef.current?.key === key) return;
+    editSnapshotRef.current = {
+      key,
+      layerId: selection.layerId,
+      featureIndex: selection.index,
+      geometry: structuredClone(editableFeature.geometry),
+    };
+    editHistoryRef.current = [];
+    setEditVertexMode("move");
+  }, [editEnabled, editableFeature, wb.selectedFeature]);
+
+  const persistEditableGeometry = useCallback(
+    (nextGeometry: Geometry, trackHistory = true) => {
       const selection = wb.selectedFeature;
       if (!selection || !editableFeature) return;
+      if (trackHistory) editHistoryRef.current.push(structuredClone(editableFeature.geometry));
+      wb.updateFeatureGeometry(selection.layerId, selection.index, nextGeometry);
+      const measured = { type: "Feature", properties: {}, geometry: nextGeometry } as Feature;
+      if (nextGeometry.type === "Point")
+        wb.updateFeatureProperties(selection.layerId, selection.index, {
+          LON: Number(nextGeometry.coordinates[0]?.toFixed(6)),
+          LAT: Number(nextGeometry.coordinates[1]?.toFixed(6)),
+        });
+      else {
+        const sqm = squareMeters(measured);
+        const length = meters(measured);
+        wb.updateFeatureProperties(selection.layerId, selection.index, {
+          ACRES: Number((sqm / 4046.8564224).toFixed(3)),
+          SQ_FT: Number((sqm * 10.7639104167).toFixed(0)),
+          LENGTH_MI: Number((length / 1609.344).toFixed(3)),
+        });
+      }
+    },
+    [editableFeature, wb],
+  );
+
+  const changeEditableGeometry = useCallback(
+    (coordinate: Position, vertexIndex: number, insert = false) => {
+      if (!wb.selectedFeature || !editableFeature) return;
       const geometry = editableFeature.geometry;
-      const saveGeometry = (nextGeometry: Geometry) => {
-        wb.updateFeatureGeometry(selection.layerId, selection.index, nextGeometry);
-        const measured = { type: "Feature", properties: {}, geometry: nextGeometry } as Feature;
-        if (nextGeometry.type === "Point")
-          wb.updateFeatureProperties(selection.layerId, selection.index, {
-            LON: Number(nextGeometry.coordinates[0]?.toFixed(6)),
-            LAT: Number(nextGeometry.coordinates[1]?.toFixed(6)),
-          });
-        else {
-          const sqm = squareMeters(measured);
-          const length = meters(measured);
-          wb.updateFeatureProperties(selection.layerId, selection.index, {
-            ACRES: Number((sqm / 4046.8564224).toFixed(3)),
-            SQ_FT: Number((sqm * 10.7639104167).toFixed(0)),
-            LENGTH_MI: Number((length / 1609.344).toFixed(3)),
-          });
-        }
-      };
       if (geometry.type === "Point") {
-        saveGeometry({
+        persistEditableGeometry({
           ...geometry,
           coordinates: coordinate,
         });
@@ -515,20 +557,83 @@ export function MapCanvas() {
         const coordinates = geometry.coordinates.map((item) => [...item] as Position);
         if (insert) coordinates.splice(vertexIndex + 1, 0, coordinate);
         else coordinates[vertexIndex] = coordinate;
-        saveGeometry({ ...geometry, coordinates });
+        persistEditableGeometry({ ...geometry, coordinates });
       } else if (geometry.type === "Polygon") {
         const rings = geometry.coordinates.map((ring) => ring.map((item) => [...item] as Position));
         const vertices = (rings[0] ?? []).slice(0, -1);
         if (insert) vertices.splice(vertexIndex + 1, 0, coordinate);
         else vertices[vertexIndex] = coordinate;
         if (vertices[0]) rings[0] = [...vertices, [...vertices[0]] as Position];
-        saveGeometry({
+        persistEditableGeometry({
           ...geometry,
           coordinates: rings,
         });
       }
     },
-    [editableFeature, wb],
+    [editableFeature, persistEditableGeometry, wb.selectedFeature],
+  );
+
+  const deleteEditableVertex = useCallback(
+    (vertexIndex: number) => {
+      if (!editableFeature) return;
+      const geometry = editableFeature.geometry;
+      if (geometry.type === "Point") {
+        toast.error("A point can be moved, but its only vertex cannot be deleted");
+        return;
+      }
+      if (geometry.type === "LineString") {
+        if (geometry.coordinates.length <= 2) {
+          toast.error("A line needs at least 2 vertices");
+          return;
+        }
+        const coordinates = geometry.coordinates
+          .filter((_, index) => index !== vertexIndex)
+          .map((coordinate) => [...coordinate] as Position);
+        persistEditableGeometry({ ...geometry, coordinates });
+      } else if (geometry.type === "Polygon") {
+        const rings = geometry.coordinates.map((ring) => ring.map((item) => [...item] as Position));
+        const vertices = (rings[0] ?? []).slice(0, -1);
+        if (vertices.length <= 3) {
+          toast.error("A shape needs at least 3 vertices");
+          return;
+        }
+        vertices.splice(vertexIndex, 1);
+        if (vertices[0]) rings[0] = [...vertices, [...vertices[0]] as Position];
+        persistEditableGeometry({ ...geometry, coordinates: rings });
+      }
+      toast.success("Vertex deleted");
+    },
+    [editableFeature, persistEditableGeometry],
+  );
+
+  const undoEditableGeometry = useCallback(() => {
+    const previous = editHistoryRef.current.pop();
+    if (!previous) {
+      toast.info("No earlier vertex change to undo");
+      return;
+    }
+    persistEditableGeometry(previous, false);
+  }, [persistEditableGeometry]);
+
+  const restoreEditableGeometry = useCallback(
+    (exitAfterRestore = false) => {
+      const snapshot = editSnapshotRef.current;
+      if (!snapshot) {
+        if (exitAfterRestore) setEditEnabled(false);
+        return;
+      }
+      if (
+        wb.selectedFeature?.layerId !== snapshot.layerId ||
+        wb.selectedFeature.index !== snapshot.featureIndex
+      )
+        return;
+      persistEditableGeometry(structuredClone(snapshot.geometry), !exitAfterRestore);
+      if (exitAfterRestore) {
+        setEditEnabled(false);
+        toast.success("Vertex changes canceled");
+      } else toast.success("Shape restored to the start of this edit");
+    },
+    [persistEditableGeometry, setEditEnabled, wb.selectedFeature],
   );
 
   useEffect(() => {
@@ -541,17 +646,31 @@ export function MapCanvas() {
       const element = document.createElement("button");
       element.type = "button";
       element.className = "feature-edit-marker";
-      element.title = `Drag vertex ${vertexIndex + 1}`;
-      element.setAttribute("aria-label", `Drag vertex ${vertexIndex + 1}`);
-      element.addEventListener("click", (event) => event.stopPropagation());
+      element.dataset["mode"] = editVertexMode;
+      element.title =
+        editVertexMode === "delete"
+          ? `Delete vertex ${vertexIndex + 1}`
+          : editVertexMode === "move"
+            ? `Drag vertex ${vertexIndex + 1}`
+            : `Vertex ${vertexIndex + 1}`;
+      element.setAttribute("aria-label", element.title);
+      element.addEventListener("click", (event) => {
+        event.stopPropagation();
+        if (editVertexMode === "delete") deleteEditableVertex(vertexIndex);
+      });
 
-      const marker = new Marker({ element, draggable: true, anchor: "center" })
+      const marker = new Marker({
+        element,
+        draggable: editVertexMode === "move",
+        anchor: "center",
+      })
         .setLngLat([Number(coordinate[0]), Number(coordinate[1])])
         .addTo(map);
-      marker.on("dragend", () => {
-        const next = marker.getLngLat();
-        changeEditableGeometry([next.lng, next.lat], vertexIndex);
-      });
+      if (editVertexMode === "move")
+        marker.on("dragend", () => {
+          const next = marker.getLngLat();
+          changeEditableGeometry([next.lng, next.lat], vertexIndex);
+        });
       return marker;
     });
 
@@ -559,7 +678,7 @@ export function MapCanvas() {
       editMarkerRefs.current.forEach((marker) => marker.remove());
       editMarkerRefs.current = [];
     };
-  }, [changeEditableGeometry, editableFeature, ready]);
+  }, [changeEditableGeometry, deleteEditableVertex, editableFeature, editVertexMode, ready]);
 
   /* ---------------- interactions ---------------- */
   const finishDraft = useCallback(() => {
@@ -622,16 +741,28 @@ export function MapCanvas() {
           const vertexHit = map.queryRenderedFeatures(e.point, {
             layers: ["feature-edit-vertex"],
           })[0];
-          if (vertexHit) return;
-          const segmentHit = map.queryRenderedFeatures(e.point, {
-            layers: ["feature-edit-segment-hit"],
-          })[0];
-          const segmentIndex = Number(segmentHit?.properties?.["segmentIndex"] ?? -1);
-          if (segmentIndex >= 0) {
-            changeEditableGeometry([e.lngLat.lng, e.lngLat.lat], segmentIndex, true);
-            toast.success("Vertex added — drag it to refine the shape");
+          const vertexIndex = Number(vertexHit?.properties?.["vertexIndex"] ?? -1);
+          if (vertexIndex >= 0) {
+            if (editVertexMode === "delete") deleteEditableVertex(vertexIndex);
             return;
           }
+          if (editVertexMode === "add") {
+            const segmentHit = map.queryRenderedFeatures(e.point, {
+              layers: ["feature-edit-segment-hit"],
+            })[0];
+            const segmentIndex = Number(segmentHit?.properties?.["segmentIndex"] ?? -1);
+            if (segmentIndex >= 0) {
+              changeEditableGeometry([e.lngLat.lng, e.lngLat.lat], segmentIndex, true);
+              toast.success("Vertex added — switch to Move to refine it");
+            } else toast.info("Click a highlighted edge to add a vertex");
+            return;
+          }
+          if (editVertexMode === "delete") {
+            toast.info("Click a white vertex to delete it");
+            return;
+          }
+          // Keep the edited feature selected while its move controls are active.
+          return;
         }
         if (boxDidSelectRef.current) {
           boxDidSelectRef.current = false;
@@ -687,6 +818,19 @@ export function MapCanvas() {
         return;
       }
       if (mode === "select-box") return;
+      const isVertexDraft =
+        mode === "polygon" || mode === "line" || mode === "measure-area" || mode === "measure-line";
+      if (isVertexDraft && draftVertexMode === "delete") {
+        const vertexHit = map.getLayer("draft-vertex")
+          ? map.queryRenderedFeatures(e.point, { layers: ["draft-vertex"] })[0]
+          : undefined;
+        const vertexIndex = Number(vertexHit?.properties?.["vertex"] ?? 0) - 1;
+        if (vertexIndex >= 0) {
+          setDraft((current) => current.filter((_, index) => index !== vertexIndex));
+          toast.success("Draft vertex deleted");
+        } else toast.info("Click a white draft vertex to delete it");
+        return;
+      }
       const coord: Position = wb.snapEnabled
         ? (nearestVisibleVertex(map, e.point.x, e.point.y) ?? [e.lngLat.lng, e.lngLat.lat])
         : [e.lngLat.lng, e.lngLat.lat];
@@ -816,18 +960,30 @@ export function MapCanvas() {
     setPendingFeatureSave,
     setPendingMapNoteLocation,
     editEnabled,
+    editVertexMode,
+    draftVertexMode,
     changeEditableGeometry,
+    deleteEditableVertex,
   ]);
 
   useEffect(() => {
     const map = mapObj.current;
     if (!map) return;
-    map.getCanvas().style.cursor =
-      wb.drawMode === "none" || wb.drawMode === "select-multiple" ? "" : "crosshair";
+    map.getCanvas().style.cursor = editEnabled
+      ? editVertexMode === "move"
+        ? ""
+        : "crosshair"
+      : wb.drawMode === "none" || wb.drawMode === "select-multiple"
+        ? ""
+        : "crosshair";
     if (wb.drawMode !== "select-box") boxDidSelectRef.current = false;
     if (wb.drawMode === "select-box" || panLocked) map.dragPan.disable();
     else map.dragPan.enable();
-  }, [wb.drawMode, panLocked]);
+  }, [editEnabled, editVertexMode, wb.drawMode, panLocked]);
+
+  useEffect(() => {
+    setDraftVertexMode("add");
+  }, [wb.drawMode]);
 
   useEffect(() => {
     const map = mapObj.current;
@@ -841,15 +997,22 @@ export function MapCanvas() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
+        if (editEnabled) {
+          restoreEditableGeometry(true);
+          return;
+        }
         setDraft([]);
         wb.setDrawMode("none");
         setMenu(null);
       }
-      if (e.key === "Enter") finishDraft();
+      if (e.key === "Enter") {
+        if (editEnabled) setEditEnabled(false);
+        else finishDraft();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [finishDraft, wb]);
+  }, [editEnabled, finishDraft, restoreEditableGeometry, setEditEnabled, wb]);
 
   /* ---------------- live readout ---------------- */
   const readout = useMemo(() => {
@@ -910,6 +1073,18 @@ export function MapCanvas() {
     });
   };
 
+  const vertexDrawingActive =
+    wb.drawMode === "polygon" ||
+    wb.drawMode === "line" ||
+    wb.drawMode === "measure-area" ||
+    wb.drawMode === "measure-line";
+  const editableVertexCount = editableFeature ? editableVertices(editableFeature).length : 0;
+  const canAddEditableVertex =
+    editableFeature?.geometry.type === "LineString" || editableFeature?.geometry.type === "Polygon";
+  const canDeleteEditableVertex =
+    (editableFeature?.geometry.type === "LineString" && editableVertexCount > 2) ||
+    (editableFeature?.geometry.type === "Polygon" && editableVertexCount > 3);
+
   return (
     <div className="relative h-full w-full">
       <div ref={containerRef} className="h-full w-full" />
@@ -954,15 +1129,83 @@ export function MapCanvas() {
       )}
 
       {editEnabled && editableFeature && (
-        <div className="pointer-events-none absolute left-1/2 top-16 z-20 -translate-x-1/2 rounded-full bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground shadow-float">
-          Drag white vertices · click a highlighted edge to add a vertex
+        <div
+          data-tour="vertex-editor"
+          className="float-surface pointer-events-auto absolute left-1/2 top-16 z-20 w-[min(94vw,620px)] -translate-x-1/2 rounded-2xl p-2 shadow-float"
+        >
+          <div className="flex flex-wrap items-center justify-center gap-1">
+            <span className="mr-1 px-1 text-[10px] font-semibold">
+              Edit{" "}
+              {editableFeature.geometry.type === "Polygon"
+                ? "shape"
+                : editableFeature.geometry.type.toLowerCase()}{" "}
+              · {editableVertexCount} {editableVertexCount === 1 ? "vertex" : "vertices"}
+            </span>
+            <VertexToolButton
+              icon={<Move />}
+              label="Move"
+              title="Move vertices by dragging the white handles"
+              active={editVertexMode === "move"}
+              onClick={() => setEditVertexMode("move")}
+            />
+            <VertexToolButton
+              icon={<Plus />}
+              label="Add"
+              title="Add a vertex by clicking a highlighted edge"
+              active={editVertexMode === "add"}
+              disabled={!canAddEditableVertex}
+              onClick={() => setEditVertexMode("add")}
+            />
+            <VertexToolButton
+              icon={<Trash2 />}
+              label="Delete"
+              title="Delete a vertex by clicking its white handle"
+              active={editVertexMode === "delete"}
+              disabled={!canDeleteEditableVertex}
+              onClick={() => setEditVertexMode("delete")}
+            />
+            <span className="mx-0.5 h-6 w-px bg-border" />
+            <VertexToolButton
+              icon={<Undo2 />}
+              label="Undo"
+              title="Undo the last vertex change"
+              disabled={editHistoryRef.current.length === 0}
+              onClick={undoEditableGeometry}
+            />
+            <VertexToolButton
+              icon={<RotateCcw />}
+              label="Reset"
+              title="Restore the shape to the start of this editing session"
+              onClick={() => restoreEditableGeometry(false)}
+            />
+            <VertexToolButton
+              icon={<X />}
+              label="Cancel"
+              title="Cancel all changes and leave vertex editing"
+              onClick={() => restoreEditableGeometry(true)}
+            />
+            <VertexToolButton
+              icon={<Check />}
+              label="Finish"
+              title="Keep these changes and finish editing"
+              primary
+              onClick={() => setEditEnabled(false)}
+            />
+          </div>
+          <p className="mt-1 text-center text-[9px] text-muted-foreground">
+            {editVertexMode === "move"
+              ? "Drag a white vertex to reshape the feature."
+              : editVertexMode === "add"
+                ? "Click a highlighted edge to insert a new vertex."
+                : "Click a white vertex to remove it."}
+          </p>
         </div>
       )}
 
       {/* drawing helper bar */}
       {(wb.drawMode !== "none" || draft.length > 0) && (
         <div className="pointer-events-auto absolute left-1/2 top-16 z-20 -translate-x-1/2 md:top-16">
-          <div className="float-surface flex items-center gap-2 rounded-full px-3 py-2 text-xs">
+          <div className="float-surface flex max-w-[calc(100vw-1rem)] flex-wrap items-center justify-center gap-1 rounded-2xl px-2 py-2 text-xs">
             <Crosshair className="size-4 text-primary" />
             <span className="font-medium">
               {wb.drawMode === "none"
@@ -975,12 +1218,33 @@ export function MapCanvas() {
                       ? "Click the map to drop points"
                       : wb.drawMode === "note"
                         ? "Click the map to place a note marker"
-                        : "Click to add points, double-click or Enter to finish"}
+                        : vertexDrawingActive && draftVertexMode === "delete"
+                          ? "Click a white draft vertex to delete it"
+                          : "Click to add points, double-click or Enter to finish"}
             </span>
             {readout && (
               <span className="num rounded-full bg-accent px-2 py-0.5 text-accent-foreground">
                 {readout.primary} · {readout.secondary}
               </span>
+            )}
+            {vertexDrawingActive && (
+              <>
+                <VertexToolButton
+                  icon={<Plus />}
+                  label="Add"
+                  title="Add the next vertex by clicking the map"
+                  active={draftVertexMode === "add"}
+                  onClick={() => setDraftVertexMode("add")}
+                />
+                <VertexToolButton
+                  icon={<Trash2 />}
+                  label="Delete"
+                  title="Delete a draft vertex by clicking it"
+                  active={draftVertexMode === "delete"}
+                  disabled={draft.length === 0}
+                  onClick={() => setDraftVertexMode("delete")}
+                />
+              </>
             )}
             {draft.length > 0 && (
               <button
@@ -1136,6 +1400,45 @@ function MenuItem({
     >
       {icon}
       {label}
+    </button>
+  );
+}
+
+function VertexToolButton({
+  icon,
+  label,
+  title,
+  active = false,
+  disabled = false,
+  primary = false,
+  onClick,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  title: string;
+  active?: boolean;
+  disabled?: boolean;
+  primary?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-pressed={active || undefined}
+      title={title}
+      className={cn(
+        "flex min-h-8 items-center gap-1 rounded-lg px-2 text-[10px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-35",
+        primary
+          ? "bg-primary text-primary-foreground hover:bg-primary/90"
+          : active
+            ? "bg-primary/15 text-primary ring-1 ring-primary/40"
+            : "bg-secondary hover:bg-accent",
+      )}
+    >
+      <span className="[&>svg]:size-3.5">{icon}</span>
+      <span>{label}</span>
     </button>
   );
 }
