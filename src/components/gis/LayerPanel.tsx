@@ -27,6 +27,7 @@ import {
   MoreHorizontal,
   Clock3,
   Pin,
+  ArrowUpFromLine,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -477,6 +478,20 @@ export function LayerPanel() {
       return;
     }
 
+    if (target.startsWith("layer-repository:")) {
+      const targetLayerId = target.slice("layer-repository:".length);
+      const targetLayer = wb.layers.find((layer) => layer.id === targetLayerId);
+      if (targetLayer && targetLayer.id !== dragged) {
+        wb.nestLayerInLayer(dragged, targetLayer.id);
+        setExpandedLayers((current) => new Set(current).add(targetLayer.id));
+        toast.success("Layer added to Layer sublayers", {
+          description: `Moved inside ${targetLayer.name}.`,
+        });
+      }
+      resetLayerDrag();
+      return;
+    }
+
     if (target.startsWith("group:")) {
       const groupId = target.slice("group:".length);
       const group = wb.groups.find((item) => item.id === groupId);
@@ -527,8 +542,21 @@ export function LayerPanel() {
     }
 
     const hit = document.elementFromPoint(event.clientX, event.clientY);
-    const layerRow = hit?.closest<HTMLElement>("[data-layer-drop-id]");
+    const layerRepository = hit?.closest<HTMLElement>("[data-layer-sublayer-drop-id]");
     const dragged = draggedLayerRef.current;
+    if (layerRepository) {
+      const targetLayerId = layerRepository.dataset["layerSublayerDropId"];
+      const invalidLayerTargets = dragged
+        ? nestedLayerIds(dragged, wb.groups, wb.layers)
+        : new Set<string>();
+      if (!targetLayerId || targetLayerId === dragged || invalidLayerTargets.has(targetLayerId)) {
+        updateDropTarget(null);
+        return;
+      }
+      updateDropTarget(`layer-repository:${targetLayerId}`);
+      return;
+    }
+    const layerRow = hit?.closest<HTMLElement>("[data-layer-drop-id]");
     if (layerRow) {
       const targetLayerId = layerRow.dataset["layerDropId"];
       const invalidLayerTargets = dragged
@@ -540,9 +568,9 @@ export function LayerPanel() {
       }
       const bounds = layerRow.getBoundingClientRect();
       const position: LayerDropPosition =
-        event.clientY < bounds.top + bounds.height * 0.25
+        event.clientY < bounds.top + bounds.height * 0.15
           ? "before"
-          : event.clientY > bounds.bottom - bounds.height * 0.25
+          : event.clientY > bounds.bottom - bounds.height * 0.15
             ? "after"
             : "inside";
       updateDropTarget(`layer:${targetLayerId}:${position}`);
@@ -611,6 +639,18 @@ export function LayerPanel() {
     }
 
     const invalidTargets = nestedGroupIds(dragged.id, wb.groups);
+    const hit = document.elementFromPoint(event.clientX, event.clientY);
+    const groupRepository = hit?.closest<HTMLElement>("[data-group-sublayer-drop-id]");
+    if (groupRepository) {
+      const targetLayerId = groupRepository.dataset["groupSublayerDropId"];
+      const targetLayer = wb.layers.find((layer) => layer.id === targetLayerId);
+      if (targetLayerId && targetLayer && !invalidTargets.has(targetLayer.groupId)) {
+        updateGroupDropTarget(`layer-repository:${targetLayerId}`);
+        return;
+      }
+      updateGroupDropTarget(null);
+      return;
+    }
     const layerTarget = Array.from(list.querySelectorAll<HTMLElement>("[data-layer-drop-id]"))
       .flatMap((element) => {
         const id = element.dataset["layerDropId"];
@@ -668,8 +708,10 @@ export function LayerPanel() {
       resetGroupDrag();
       return;
     }
-    if (target.startsWith("layer:")) {
-      const targetLayerId = target.slice("layer:".length);
+    if (target.startsWith("layer:") || target.startsWith("layer-repository:")) {
+      const targetLayerId = target.startsWith("layer-repository:")
+        ? target.slice("layer-repository:".length)
+        : target.slice("layer:".length);
       const targetLayerName = wb.layers.find((layer) => layer.id === targetLayerId)?.name;
       wb.nestGroupInLayer(dragged, targetLayerId);
       setExpandedLayers((current) => new Set(current).add(targetLayerId));
@@ -1064,9 +1106,13 @@ export function LayerPanel() {
                             "border-primary shadow-[0_-3px_0_0_hsl(var(--primary))]",
                           dropTarget === `layer:${layer.id}:inside` &&
                             "border-primary bg-primary/10 ring-2 ring-primary/70",
+                          dropTarget === `layer-repository:${layer.id}` &&
+                            "border-primary bg-primary/10 ring-2 ring-primary/70",
                           dropTarget === `layer:${layer.id}:after` &&
                             "border-primary shadow-[0_3px_0_0_hsl(var(--primary))]",
                           groupDropTarget === `layer:${layer.id}` &&
+                            "border-primary bg-primary/10 ring-2 ring-primary/70",
+                          groupDropTarget === `layer-repository:${layer.id}` &&
                             "border-primary bg-primary/10 ring-2 ring-primary/70",
                         )}
                       >
@@ -1858,10 +1904,12 @@ function LayerChildrenTree({
   const { setTableOpen } = useMapRef();
   const [expandedLayerIds, setExpandedLayerIds] = useState<Set<string>>(() => new Set());
   const [styleFor, setStyleFor] = useState<string | null>(null);
+  const [exportFor, setExportFor] = useState<string | null>(null);
   const [groupStyleFor, setGroupStyleFor] = useState<string | null>(null);
   const [groupMenuFor, setGroupMenuFor] = useState<string | null>(null);
   const container = wb.groups.find((group) => group.containerLayerId === parentLayerId);
-  if (!container) return null;
+  const parentLayer = wb.layers.find((layer) => layer.id === parentLayerId);
+  const moveOutGroupId = container?.parentId ?? parentLayer?.groupId;
 
   const renderLayer = (layer: GisLayer, depth: number): ReactNode => {
     const selected = wb.selectedLayerIds.includes(layer.id);
@@ -1879,8 +1927,12 @@ function LayerChildrenTree({
             "shadow-[0_-3px_0_0_hsl(var(--primary))]",
           layerDropTarget === `layer:${layer.id}:inside` &&
             "border-primary bg-primary/10 ring-2 ring-primary/70",
+          layerDropTarget === `layer-repository:${layer.id}` &&
+            "border-primary bg-primary/10 ring-2 ring-primary/70",
           layerDropTarget === `layer:${layer.id}:after` && "shadow-[0_3px_0_0_hsl(var(--primary))]",
           groupDropTarget === `layer:${layer.id}` &&
+            "border-primary bg-primary/10 ring-2 ring-primary/70",
+          groupDropTarget === `layer-repository:${layer.id}` &&
             "border-primary bg-primary/10 ring-2 ring-primary/70",
         )}
       >
@@ -1932,6 +1984,24 @@ function LayerChildrenTree({
           {hasChildren && <Layers className="size-3 shrink-0 text-primary" aria-hidden="true" />}
           <button
             type="button"
+            onClick={() => {
+              if (layer.style.labelTemplate.trim())
+                wb.updateStyle(layer.id, { labelEnabled: !layer.style.labelEnabled });
+              else setStyleFor(layer.id);
+            }}
+            aria-label={
+              layer.style.labelEnabled ? "Turn sublayer labels off" : "Turn sublayer labels on"
+            }
+            title={layer.style.labelTemplate.trim() ? "Toggle labels" : "Set up labels in Style"}
+            className={cn(
+              "rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground",
+              layer.style.labelEnabled && "bg-primary text-primary-foreground",
+            )}
+          >
+            <Tag className="size-3" />
+          </button>
+          <button
+            type="button"
             onPointerDown={(event) => onLayerPointerDown(event, layer.id)}
             onPointerMove={onLayerPointerMove}
             onPointerUp={onLayerPointerUp}
@@ -1972,10 +2042,23 @@ function LayerChildrenTree({
                 icon={<Table2 className="size-3" />}
               />
               <IconBtn
+                label="Export sublayer"
+                onClick={() => setExportFor(exportFor === layer.id ? null : layer.id)}
+                icon={<Download className="size-3" />}
+                active={exportFor === layer.id}
+              />
+              <IconBtn
                 label="Duplicate sublayer"
                 onClick={() => wb.duplicateLayer(layer.id, layer.groupId)}
                 icon={<Copy className="size-3" />}
               />
+              {moveOutGroupId && (
+                <IconBtn
+                  label="Move out one level"
+                  onClick={() => wb.reorderLayer(layer.id, moveOutGroupId)}
+                  icon={<ArrowUpFromLine className="size-3" />}
+                />
+              )}
               <IconBtn
                 label="Delete sublayer"
                 onClick={() => wb.removeLayers([layer.id])}
@@ -1983,6 +2066,23 @@ function LayerChildrenTree({
                 danger
               />
             </div>
+            {exportFor === layer.id && (
+              <div className="grid grid-cols-2 gap-1 rounded-lg bg-secondary p-1">
+                {exportFormats.map((format) => (
+                  <button
+                    key={format.id}
+                    type="button"
+                    onClick={() => {
+                      void exportLayer(layer.data, layer.name, format.id);
+                      setExportFor(null);
+                    }}
+                    className="rounded-md bg-card px-2 py-1 text-[9px] hover:bg-accent"
+                  >
+                    {format.label}
+                  </button>
+                ))}
+              </div>
+            )}
             {styleFor === layer.id && <StyleEditor layer={layer} />}
             <LayerChildrenTree
               parentLayerId={layer.id}
@@ -2116,6 +2216,18 @@ function LayerChildrenTree({
               >
                 <FolderPlus className="size-3" /> Add subgroup
               </button>
+              {moveOutGroupId && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    wb.reorderGroup(group.id, moveOutGroupId, "inside");
+                    setGroupMenuFor(null);
+                  }}
+                  className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-accent"
+                >
+                  <ArrowUpFromLine className="size-3" /> Move out one level
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => {
@@ -2161,19 +2273,50 @@ function LayerChildrenTree({
     );
   };
 
-  const directGroups = wb.groups.filter(
-    (group) => group.parentId === container.id && !group.containerLayerId,
-  );
-  const directLayers = wb.layers.filter((layer) => layer.groupId === container.id);
-  if (directGroups.length === 0 && directLayers.length === 0) return null;
+  const directGroups = container
+    ? wb.groups.filter((group) => group.parentId === container.id && !group.containerLayerId)
+    : [];
+  const directLayers = container ? wb.layers.filter((layer) => layer.groupId === container.id) : [];
 
   return (
-    <section className="space-y-1 rounded-lg border border-primary/20 bg-primary/5 p-1.5">
-      <p className="flex items-center gap-1 px-1 text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
-        <Layers className="size-3 text-primary" /> Sublayers &amp; groups
-      </p>
-      {directLayers.map((layer) => renderLayer(layer, 0))}
-      {directGroups.map((group) => renderGroup(group, 0))}
+    <section className="space-y-1.5 rounded-lg border border-primary/20 bg-primary/5 p-1.5">
+      <div className="space-y-1 rounded-md border border-border/70 bg-card/50 p-1">
+        <p className="flex items-center gap-1 px-1 text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
+          <Layers className="size-3 text-primary" /> Layer sublayers
+          <span className="num ml-auto">{directLayers.length}</span>
+        </p>
+        {directLayers.map((layer) => renderLayer(layer, 0))}
+        <div
+          data-layer-sublayer-drop-id={parentLayerId}
+          className={cn(
+            "rounded-md border border-dashed px-2 py-1.5 text-center text-[9px] text-muted-foreground transition-colors",
+            layerDropTarget === `layer-repository:${parentLayerId}`
+              ? "border-primary bg-primary/15 font-semibold text-primary"
+              : "border-primary/30 bg-background/50",
+          )}
+        >
+          Drop a layer here
+        </div>
+      </div>
+
+      <div className="space-y-1 rounded-md border border-border/70 bg-card/50 p-1">
+        <p className="flex items-center gap-1 px-1 text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
+          <FolderPlus className="size-3 text-primary" /> Group sublayers
+          <span className="num ml-auto">{directGroups.length}</span>
+        </p>
+        {directGroups.map((group) => renderGroup(group, 0))}
+        <div
+          data-group-sublayer-drop-id={parentLayerId}
+          className={cn(
+            "rounded-md border border-dashed px-2 py-1.5 text-center text-[9px] text-muted-foreground transition-colors",
+            groupDropTarget === `layer-repository:${parentLayerId}`
+              ? "border-primary bg-primary/15 font-semibold text-primary"
+              : "border-primary/30 bg-background/50",
+          )}
+        >
+          Drop a group here
+        </div>
+      </div>
     </section>
   );
 }

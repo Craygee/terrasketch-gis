@@ -31,7 +31,10 @@ export function ProjectMenu({ onClose }: { onClose: () => void }) {
   const [view, setView] = useState<View>("projects");
   const [subprojectName, setSubprojectName] = useState("");
 
-  const roots = wb.projects.filter((project) => !project.parentProjectId);
+  const projectIds = new Set(wb.projects.map((project) => project.id));
+  const roots = wb.projects.filter(
+    (project) => !project.parentProjectId || !projectIds.has(project.parentProjectId),
+  );
   const childrenOf = (parentId: string) =>
     wb.projects.filter((project) => project.parentProjectId === parentId);
 
@@ -41,6 +44,60 @@ export function ProjectMenu({ onClose }: { onClose: () => void }) {
       setNewName("");
       toast.success("New project created");
     });
+  };
+
+  const renderProjectTree = (project: (typeof wb.projects)[number], depth = 0): React.ReactNode => {
+    const children = childrenOf(project.id);
+    const isSubproject = depth > 0;
+    const parentOpen = Boolean(project.parentProjectId && wb.projectId === project.parentProjectId);
+    return (
+      <div
+        key={project.id}
+        className={cn(depth === 0 && "rounded-xl bg-secondary p-1")}
+        style={depth > 0 ? { marginLeft: Math.min(depth, 6) * 12 } : undefined}
+      >
+        <ProjectRow
+          project={project}
+          active={project.id === wb.projectId}
+          subproject={isSubproject}
+          overlayEnabled={parentOpen && wb.enabledSubprojectIds.includes(project.id)}
+          {...(parentOpen
+            ? {
+                onToggleOverlay: (enabled: boolean) =>
+                  void wb.toggleSubprojectOverlay(project.id, enabled),
+              }
+            : {})}
+          onOpen={() => void wb.openProject(project.id).then(onClose)}
+          onDuplicate={() =>
+            void wb
+              .duplicateProject(project.id)
+              .then(() =>
+                toast.success(isSubproject ? "Subproject duplicated" : "Project duplicated"),
+              )
+          }
+          {...(isSubproject
+            ? {
+                onPromote: () =>
+                  void wb
+                    .promoteProject(project.id)
+                    .then(() => toast.success("Subproject moved to top level")),
+              }
+            : {})}
+          onDelete={() => {
+            const suffix = children.length > 0 ? " and detach its subprojects" : "";
+            if (!window.confirm(`Delete “${project.name}”${suffix}?`)) return;
+            void wb
+              .deleteProject(project.id)
+              .then(() => toast.success(isSubproject ? "Subproject deleted" : "Project deleted"));
+          }}
+        />
+        {children.length > 0 && (
+          <div className="space-y-1 border-l border-border pl-1">
+            {children.map((child) => renderProjectTree(child, depth + 1))}
+          </div>
+        )}
+      </div>
+    );
   };
 
   return (
@@ -106,68 +163,7 @@ export function ProjectMenu({ onClose }: { onClose: () => void }) {
                 {wb.projects.length} maps
               </span>
             </h3>
-            <div className="space-y-1">
-              {roots.map((project) => (
-                <div key={project.id} className="rounded-xl bg-secondary p-1">
-                  <ProjectRow
-                    project={project}
-                    active={project.id === wb.projectId}
-                    onOpen={() => void wb.openProject(project.id).then(onClose)}
-                    onDuplicate={() =>
-                      void wb
-                        .duplicateProject(project.id)
-                        .then(() => toast.success("Project duplicated"))
-                    }
-                    onDelete={() => {
-                      if (!window.confirm(`Delete “${project.name}” and detach its subprojects?`))
-                        return;
-                      void wb
-                        .deleteProject(project.id)
-                        .then(() => toast.success("Project deleted"));
-                    }}
-                  />
-                  {childrenOf(project.id).length > 0 && (
-                    <div className="ml-5 space-y-1 border-l border-border pl-2">
-                      {childrenOf(project.id).map((child) => (
-                        <ProjectRow
-                          key={child.id}
-                          project={child}
-                          active={child.id === wb.projectId}
-                          subproject
-                          overlayEnabled={
-                            wb.projectId === project.id &&
-                            wb.enabledSubprojectIds.includes(child.id)
-                          }
-                          {...(wb.projectId === project.id
-                            ? {
-                                onToggleOverlay: (enabled: boolean) =>
-                                  void wb.toggleSubprojectOverlay(child.id, enabled),
-                              }
-                            : {})}
-                          onOpen={() => void wb.openProject(child.id).then(onClose)}
-                          onDuplicate={() =>
-                            void wb
-                              .duplicateProject(child.id)
-                              .then(() => toast.success("Subproject duplicated"))
-                          }
-                          onPromote={() =>
-                            void wb
-                              .promoteProject(child.id)
-                              .then(() => toast.success("Subproject moved to top level"))
-                          }
-                          onDelete={() => {
-                            if (!window.confirm(`Delete “${child.name}”?`)) return;
-                            void wb
-                              .deleteProject(child.id)
-                              .then(() => toast.success("Subproject deleted"));
-                          }}
-                        />
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
+            <div className="space-y-1">{roots.map((project) => renderProjectTree(project))}</div>
           </section>
 
           <details className="group mt-3 rounded-xl border border-border">
