@@ -281,6 +281,7 @@ export interface WorkbenchApi extends WorkbenchState {
   }) => GisLayer;
   updateLayer: (id: string, patch: Partial<Omit<GisLayer, "id">>) => void;
   updateDisplayLayer: (id: string, patch: Partial<Omit<GisLayer, "id">>) => void;
+  setLayerNote: (id: string, note: string) => void;
   updateStyle: (id: string, patch: Partial<LayerStyle>) => void;
   removeLayers: (ids: string[]) => void;
   duplicateLayer: (id: string, targetGroupId?: string) => void;
@@ -572,6 +573,36 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       })),
     }));
   }, []);
+
+  const setLayerNote = useCallback<WorkbenchApi["setLayerNote"]>(
+    (id, note) => {
+      const nextNote = note.trim();
+      const now = Date.now();
+      setState((s) => {
+        const layer = s.layers.find((item) => item.id === id);
+        if (!layer || (layer.note ?? "") === nextNote) return s;
+        const event: ProjectEvent = {
+          id: uid(),
+          type: s.accessRole === "admin" ? "remote-change" : "note",
+          title: `${nextNote ? "Updated" : "Cleared"} layer note: ${layer.name}`,
+          detail: nextNote.slice(0, 180),
+          createdAt: now,
+          actor: auth.user?.name || auth.user?.email || "LandDraft user",
+          projectId: s.projectId,
+          projectName: s.projectName,
+          relatedId: layer.id,
+        };
+        return {
+          ...s,
+          layers: s.layers.map((item) =>
+            item.id === id ? { ...item, note: nextNote, noteUpdatedAt: now } : item,
+          ),
+          records: { ...s.records, events: [event, ...s.records.events].slice(0, 1000) },
+        };
+      });
+    },
+    [auth.user?.email, auth.user?.name],
+  );
 
   const updateStyle = useCallback<WorkbenchApi["updateStyle"]>((id, p) => {
     setState((s) => ({
@@ -1375,6 +1406,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       addLayer,
       updateLayer,
       updateDisplayLayer,
+      setLayerNote,
       updateStyle,
       removeLayers,
       duplicateLayer,
@@ -1453,6 +1485,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       addLayer,
       updateLayer,
       updateDisplayLayer,
+      setLayerNote,
       updateStyle,
       removeLayers,
       duplicateLayer,

@@ -19,9 +19,9 @@ import {
   Loader2,
   Tag,
   Pencil,
+  NotebookPen,
+  Save,
   Search,
-  ArrowUpToLine,
-  ArrowDownToLine,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -73,6 +73,8 @@ export function LayerPanel() {
   const [busy, setBusy] = useState(false);
   const [styleFor, setStyleFor] = useState<string | null>(null);
   const [exportFor, setExportFor] = useState<string | null>(null);
+  const [noteFor, setNoteFor] = useState<string | null>(null);
+  const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
   const [expandedLayers, setExpandedLayers] = useState<Set<string>>(() => new Set());
   const [draggedLayerId, setDraggedLayerId] = useState<string | null>(null);
   const draggedLayerRef = useRef<string | null>(null);
@@ -693,14 +695,16 @@ export function LayerPanel() {
                                 icon={<Copy className="size-3.5" />}
                               />
                               <IconBtn
-                                label="Bring to front"
-                                onClick={() => wb.moveLayerToEdge(layer.id, "front")}
-                                icon={<ArrowUpToLine className="size-3.5" />}
-                              />
-                              <IconBtn
-                                label="Send to back"
-                                onClick={() => wb.moveLayerToEdge(layer.id, "back")}
-                                icon={<ArrowDownToLine className="size-3.5" />}
+                                label={layer.note?.trim() ? "Edit layer note" : "Add layer note"}
+                                onClick={() => {
+                                  setNoteDrafts((current) => ({
+                                    ...current,
+                                    [layer.id]: layer.note ?? "",
+                                  }));
+                                  setNoteFor(noteFor === layer.id ? null : layer.id);
+                                }}
+                                icon={<NotebookPen className="size-3.5" />}
+                                active={noteFor === layer.id || Boolean(layer.note?.trim())}
                               />
                               <IconBtn
                                 label="Delete"
@@ -709,6 +713,71 @@ export function LayerPanel() {
                                 danger
                               />
                             </div>
+
+                            {noteFor === layer.id && (
+                              <section className="rounded-xl border border-primary/30 bg-primary/5 p-2">
+                                <label
+                                  htmlFor={`layer-note-${layer.id}`}
+                                  className="text-[10px] font-semibold text-foreground"
+                                >
+                                  Note for {layer.name}
+                                </label>
+                                <textarea
+                                  id={`layer-note-${layer.id}`}
+                                  value={noteDrafts[layer.id] ?? layer.note ?? ""}
+                                  onChange={(event) =>
+                                    setNoteDrafts((current) => ({
+                                      ...current,
+                                      [layer.id]: event.target.value,
+                                    }))
+                                  }
+                                  rows={4}
+                                  autoFocus
+                                  placeholder="Add context, source details, decisions, or follow-up items for this layer…"
+                                  className="mt-1 w-full resize-y rounded-lg border border-border bg-card px-2 py-1.5 text-[11px] leading-relaxed outline-none focus:border-primary"
+                                />
+                                <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const note = noteDrafts[layer.id] ?? layer.note ?? "";
+                                      wb.setLayerNote(layer.id, note);
+                                      setNoteFor(null);
+                                      toast.success(
+                                        note.trim() ? "Layer note saved" : "Layer note cleared",
+                                      );
+                                    }}
+                                    className="flex items-center gap-1 rounded-lg bg-primary px-2 py-1 text-[10px] font-semibold text-primary-foreground"
+                                  >
+                                    <Save className="size-3" /> Save note
+                                  </button>
+                                  {layer.note?.trim() && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        wb.setLayerNote(layer.id, "");
+                                        setNoteDrafts((current) => ({
+                                          ...current,
+                                          [layer.id]: "",
+                                        }));
+                                        setNoteFor(null);
+                                        toast.success("Layer note removed");
+                                      }}
+                                      className="rounded-lg px-2 py-1 text-[10px] font-semibold text-destructive hover:bg-destructive/10"
+                                    >
+                                      Remove note
+                                    </button>
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={() => setNoteFor(null)}
+                                    className="rounded-lg px-2 py-1 text-[10px] font-semibold text-muted-foreground hover:bg-accent"
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              </section>
+                            )}
 
                             {exportFor === layer.id && (
                               <div className="grid grid-cols-2 gap-1">

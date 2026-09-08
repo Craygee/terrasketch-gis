@@ -85,6 +85,8 @@ export type LayerSource =
 export interface GisLayer {
   id: string;
   name: string;
+  note?: string;
+  noteUpdatedAt?: number;
   groupId: string;
   visible: boolean;
   data: FeatureCollection;

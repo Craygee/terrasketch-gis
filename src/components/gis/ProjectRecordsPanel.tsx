@@ -7,6 +7,7 @@ import {
   FileText,
   Folder,
   FolderPlus,
+  Layers3,
   Mail,
   NotebookPen,
   Paperclip,
@@ -14,6 +15,7 @@ import {
   Printer,
   RefreshCw,
   Search,
+  Save,
   Trash2,
   Upload,
   X,
@@ -43,10 +45,11 @@ import {
 import type { ProjectDocument, ProjectEventType, ProjectRecords } from "@/lib/gis/types";
 import { cn } from "@/lib/utils";
 
-type Tab = "notes" | "files" | "activity" | "email" | "summary";
+type Tab = "notes" | "layer-notes" | "files" | "activity" | "email" | "summary";
 
 const tabs: Array<{ id: Tab; label: string; icon: React.ReactNode }> = [
   { id: "notes", label: "Notes", icon: <NotebookPen /> },
+  { id: "layer-notes", label: "Layer notes", icon: <Layers3 /> },
   { id: "files", label: "Files", icon: <Folder /> },
   { id: "activity", label: "Activity", icon: <Clock3 /> },
   { id: "email", label: "Email", icon: <Mail /> },
@@ -98,6 +101,7 @@ export function ProjectRecordsPanel() {
   const [tab, setTab] = useState<Tab>("notes");
   const [noteTitle, setNoteTitle] = useState("");
   const [noteBody, setNoteBody] = useState("");
+  const [layerNoteDrafts, setLayerNoteDrafts] = useState<Record<string, string>>({});
   const [folderId, setFolderId] = useState("general");
   const [newFolder, setNewFolder] = useState("");
   const [eventType, setEventType] = useState<"all" | ProjectEventType>("all");
@@ -111,6 +115,9 @@ export function ProjectRecordsPanel() {
   const fileInput = useRef<HTMLInputElement>(null);
   const emailInput = useRef<HTMLInputElement>(null);
   const records = wb.records;
+  const layerNotes = wb.layers
+    .map((layer, index) => ({ layer, order: index + 1 }))
+    .filter(({ layer }) => Boolean(layer.note?.trim()));
 
   const refreshInboundEmail = async () => {
     if (!auth.user || !auth.cloudEnabled) return;
@@ -545,6 +552,89 @@ export function ProjectRecordsPanel() {
               ))}
               {!records.notes.length && (
                 <Empty text="No notes yet. Notes can be included on maps and in project packets." />
+              )}
+            </div>
+          )}
+
+          {tab === "layer-notes" && (
+            <div className="space-y-3">
+              <section className="rounded-2xl border border-border bg-secondary/40 p-3">
+                <div className="flex items-center gap-2">
+                  <Layers3 className="size-4 text-primary" />
+                  <div>
+                    <h3 className="text-xs font-semibold">Notes attached to map layers</h3>
+                    <p className="mt-0.5 text-[10px] text-muted-foreground">
+                      Listed from front to back in the same order as the Layers panel.
+                    </p>
+                  </div>
+                </div>
+              </section>
+              {layerNotes.map(({ layer, order }) => {
+                const group = wb.groups.find((item) => item.id === layer.groupId);
+                return (
+                  <article key={layer.id} className="rounded-2xl border border-border p-3">
+                    <div className="flex items-start gap-2">
+                      <span className="num flex size-7 shrink-0 items-center justify-center rounded-lg bg-secondary text-[10px] font-semibold">
+                        {order}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <h3 className="truncate text-xs font-semibold">{layer.name}</h3>
+                        <p className="text-[9px] text-muted-foreground">
+                          {group?.name ?? "Layer group"}
+                          {layer.noteUpdatedAt
+                            ? ` · Updated ${new Date(layer.noteUpdatedAt).toLocaleString()}`
+                            : ""}
+                        </p>
+                      </div>
+                    </div>
+                    <textarea
+                      value={layerNoteDrafts[layer.id] ?? layer.note ?? ""}
+                      onChange={(event) =>
+                        setLayerNoteDrafts((current) => ({
+                          ...current,
+                          [layer.id]: event.target.value,
+                        }))
+                      }
+                      rows={4}
+                      aria-label={`Note for ${layer.name}`}
+                      className="mt-2 w-full resize-y rounded-xl border border-border bg-card px-3 py-2 text-xs leading-relaxed outline-none focus:border-primary"
+                    />
+                    <div className="mt-2 flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const note = layerNoteDrafts[layer.id] ?? layer.note ?? "";
+                          wb.setLayerNote(layer.id, note);
+                          setLayerNoteDrafts((current) => ({
+                            ...current,
+                            [layer.id]: note.trim(),
+                          }));
+                          toast.success("Layer note saved");
+                        }}
+                        className="flex items-center gap-1 rounded-lg bg-primary px-2.5 py-1.5 text-[10px] font-semibold text-primary-foreground"
+                      >
+                        <Save className="size-3" /> Save changes
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          wb.setLayerNote(layer.id, "");
+                          setLayerNoteDrafts((current) => ({
+                            ...current,
+                            [layer.id]: "",
+                          }));
+                          toast.success("Layer note removed");
+                        }}
+                        className="rounded-lg px-2.5 py-1.5 text-[10px] font-semibold text-destructive hover:bg-destructive/10"
+                      >
+                        Remove note
+                      </button>
+                    </div>
+                  </article>
+                );
+              })}
+              {!layerNotes.length && (
+                <Empty text="No layer notes yet. Expand a layer in the Layers panel and use its note button to add one." />
               )}
             </div>
           )}

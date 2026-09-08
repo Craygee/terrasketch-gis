@@ -852,6 +852,8 @@ function contextualAnswer(layers: GisLayer[], active: GisLayer | null, projectNa
 function helpAnswer(prompt: string): string | null {
   if (/\b(log ?out|sign ?out)\b/.test(prompt))
     return "Open the information (i) menu in the upper-right corner, then choose Log out under Account. On mobile, open the same i menu and tap Log out at the bottom.";
+  if (/\b(layer note|note.*layer)\b/.test(prompt))
+    return "Expand a layer and choose its note button to add or edit a note. Layer notes stay attached to the layer, sync with the project, and are also listed front-to-back under Project records → Layer notes.";
   if (/\b(add|create|make|load|import)\b.*\blayer\b/.test(prompt) && /\bedit/.test(prompt))
     return "Add a layer in any of three ways: open Public data and choose Add, drop a supported GIS file onto the Layers panel, or draw a point, line, or polygon and choose its destination. To edit it, make the layer active, select a feature, then edit its attributes in Table or use Edit vertices to move points and reshape lines or polygons. Click a faint midpoint to insert a new vertex.";
   if (/\b(add|create|make|load)\b.*\blayer\b/.test(prompt))
