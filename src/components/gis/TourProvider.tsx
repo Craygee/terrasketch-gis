@@ -379,7 +379,19 @@ function readPreference(): OnboardingPreference | null {
 }
 
 function findTourTarget(target: string): HTMLElement | null {
-  const nodes = Array.from(document.querySelectorAll<HTMLElement>(`[data-tour="${target}"]`));
+  const compactMenuTarget: Partial<Record<string, string>> = {
+    "top-public-data": "compact-data-menu",
+    "top-analysis": "compact-data-menu",
+    "top-table": "compact-data-menu",
+    "top-share": "compact-file-menu",
+    "top-print": "compact-file-menu",
+    "top-projects": "compact-file-menu",
+    "top-export": "compact-file-menu",
+  };
+  const selectors = [target, compactMenuTarget[target]].filter(Boolean) as string[];
+  const nodes = selectors.flatMap((selector) =>
+    Array.from(document.querySelectorAll<HTMLElement>(`[data-tour="${selector}"]`)),
+  );
   return (
     nodes.find((node) => {
       const rect = node.getBoundingClientRect();

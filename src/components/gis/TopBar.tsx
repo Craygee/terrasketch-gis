@@ -16,6 +16,7 @@ import {
   Share2,
   Navigation,
   NotebookTabs,
+  ChevronDown,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -57,10 +58,17 @@ export function TopBar({
   const [showProjects, setShowProjects] = useState(false);
   const [showExport, setShowExport] = useState(false);
   const [showShare, setShowShare] = useState(false);
+  const [showDataMenu, setShowDataMenu] = useState(false);
+  const [showFileMenu, setShowFileMenu] = useState(false);
 
   const save = async () => {
     await wb.saveProject();
     toast.success("Project saved", { description: "A new restore point was added to history." });
+  };
+
+  const closeCompactMenus = () => {
+    setShowDataMenu(false);
+    setShowFileMenu(false);
   };
 
   return (
@@ -94,26 +102,26 @@ export function TopBar({
         <Navigation className="size-4" />
       </button>
 
-      <div className="flex items-center gap-2">
+      <div className="flex shrink-0 items-center gap-2">
         <span className="flex size-8 items-center justify-center rounded-xl bg-primary text-primary-foreground">
           <LandDraftMark className="size-5" />
         </span>
-        <div className="leading-tight">
+        <div className="hidden leading-tight min-[420px]:block">
           <h1 className="text-sm font-bold tracking-tight">LandDraft</h1>
-          <p className="hidden text-[10px] text-muted-foreground sm:block">
+          <p className="hidden text-[10px] text-muted-foreground min-[1100px]:block">
             Map, measure and shape the land
           </p>
         </div>
       </div>
 
       {wb.canEditProject && (
-        <label className="ml-2 hidden items-center gap-1 md:flex">
+        <label className="ml-1 hidden items-center gap-1 md:flex lg:ml-2">
           <FolderOpen className="size-3.5 text-muted-foreground" />
           <select
             value={wb.projectId}
             onChange={(event) => void wb.openProject(event.target.value)}
             aria-label="Switch project"
-            className="w-44 rounded-xl border border-transparent bg-secondary px-3 py-1.5 text-xs font-medium outline-none focus:border-primary"
+            className="w-36 rounded-xl border border-transparent bg-secondary px-3 py-1.5 text-xs font-medium outline-none focus:border-primary lg:w-44"
           >
             {wb.projects.map((project) => (
               <option key={project.id} value={project.id}>
@@ -126,7 +134,7 @@ export function TopBar({
 
       <ProjectAreaControl />
 
-      <div className="ml-auto flex items-center gap-1">
+      <div className="ml-auto hidden items-center gap-1 min-[1480px]:flex">
         <BarBtn
           icon={<Sparkles className="size-4" />}
           label="AI"
@@ -187,6 +195,8 @@ export function TopBar({
             setShowShare((value) => !value);
             setShowProjects(false);
             setShowExport(false);
+            setShowAbout(false);
+            closeCompactMenus();
           }}
           tourId="top-share"
         />
@@ -198,6 +208,9 @@ export function TopBar({
             onClick={() => {
               setShowProjects((value) => !value);
               setShowExport(false);
+              setShowShare(false);
+              setShowAbout(false);
+              closeCompactMenus();
             }}
             tourId="top-projects"
           />
@@ -219,24 +232,74 @@ export function TopBar({
             onClick={() => {
               setShowExport((value) => !value);
               setShowProjects(false);
+              setShowShare(false);
+              setShowAbout(false);
+              closeCompactMenus();
             }}
             tourId="top-export"
           />
         )}
-        <button
+      </div>
+
+      <div className="ml-auto flex items-center gap-1 min-[1480px]:hidden">
+        <BarBtn
+          icon={<Sparkles className="size-4" />}
+          label="AI"
+          help="Ask LandDraft AI to search, select, explain, or report"
           onClick={() => {
-            setShowAbout((s) => !s);
+            closeCompactMenus();
+            setAssistantOpen(!assistantOpen);
+          }}
+          primary
+          tourId="top-ai"
+        />
+        <MenuBarButton
+          icon={<Database className="size-4" />}
+          label="Data"
+          help="Public data, analysis, and attribute tables"
+          open={showDataMenu}
+          tourId="compact-data-menu"
+          onClick={() => {
+            setShowDataMenu((value) => !value);
+            setShowFileMenu(false);
             setShowProjects(false);
             setShowExport(false);
+            setShowShare(false);
+            setShowAbout(false);
           }}
-          aria-label="Help, account, and disclaimers"
-          title="Help, account, and LandDraft information"
-          data-tour="top-info"
-          className="rounded-xl p-2 text-muted-foreground transition-colors hover:bg-accent"
-        >
-          <Info className="size-4" />
-        </button>
+        />
+        <MenuBarButton
+          icon={<FolderOpen className="size-4" />}
+          label="File"
+          help="Save, print, share, projects, records, and export"
+          open={showFileMenu}
+          tourId="compact-file-menu"
+          onClick={() => {
+            setShowFileMenu((value) => !value);
+            setShowDataMenu(false);
+            setShowProjects(false);
+            setShowExport(false);
+            setShowShare(false);
+            setShowAbout(false);
+          }}
+        />
       </div>
+
+      <button
+        onClick={() => {
+          setShowAbout((s) => !s);
+          setShowProjects(false);
+          setShowExport(false);
+          setShowShare(false);
+          closeCompactMenus();
+        }}
+        aria-label="Help, account, and disclaimers"
+        title="Help, account, and LandDraft information"
+        data-tour="top-info"
+        className="shrink-0 rounded-xl p-2 text-muted-foreground transition-colors hover:bg-accent"
+      >
+        <Info className="size-4" />
+      </button>
 
       {wb.lastSavedAt && (
         <span className="num absolute -bottom-6 right-4 rounded-full bg-card px-2 py-0.5 text-[10px] text-muted-foreground shadow-panel">
@@ -259,6 +322,123 @@ export function TopBar({
       {showShare && (
         <div className="float-surface absolute right-2 top-14 rounded-2xl">
           <SharePanel onClose={() => setShowShare(false)} />
+        </div>
+      )}
+
+      {showDataMenu && (
+        <div
+          role="menu"
+          className="float-surface absolute right-2 top-14 max-h-[calc(100dvh-4rem)] w-64 overflow-y-auto rounded-2xl p-2 min-[1480px]:hidden"
+        >
+          <div className="px-2 pb-1 pt-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            Data & analysis
+          </div>
+          {wb.canEditProject && (
+            <MenuAction
+              icon={<Database className="size-4" />}
+              label="Public data"
+              help="Find and add official public datasets"
+              onClick={() => {
+                closeCompactMenus();
+                setDrawerOpen(true);
+              }}
+            />
+          )}
+          {wb.canEditProject && (
+            <MenuAction
+              icon={<Beaker className="size-4" />}
+              label="Spatial analysis"
+              help="Buffers, intersections, centroids, and derived layers"
+              onClick={() => {
+                closeCompactMenus();
+                setAnalysisOpen(!analysisOpen);
+              }}
+            />
+          )}
+          <MenuAction
+            icon={<Table2 className="size-4" />}
+            label="Attribute table"
+            help={
+              wb.canEditProject ? "Search and edit layer attributes" : "Search shared attributes"
+            }
+            onClick={() => {
+              closeCompactMenus();
+              setTableOpen(!tableOpen);
+            }}
+          />
+        </div>
+      )}
+
+      {showFileMenu && (
+        <div
+          role="menu"
+          className="float-surface absolute right-2 top-14 max-h-[calc(100dvh-4rem)] w-64 overflow-y-auto rounded-2xl p-2 min-[1480px]:hidden"
+        >
+          <div className="px-2 pb-1 pt-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            Project & file
+          </div>
+          {wb.canEditProject && (
+            <MenuAction
+              icon={<Save className="size-4" />}
+              label="Save project"
+              help="Save now and add a restore point"
+              onClick={() => {
+                closeCompactMenus();
+                void save();
+              }}
+            />
+          )}
+          <MenuAction
+            icon={<Printer className="size-4" />}
+            label="Print map"
+            help="Open the printable map composer"
+            onClick={() => {
+              closeCompactMenus();
+              setPrintOpen(true);
+            }}
+          />
+          <MenuAction
+            icon={<Share2 className="size-4" />}
+            label="Share map"
+            help="Create a secure live-map link and manage access"
+            onClick={() => {
+              closeCompactMenus();
+              setShowShare(true);
+            }}
+          />
+          {wb.canEditProject && (
+            <MenuAction
+              icon={<FolderOpen className="size-4" />}
+              label="Projects"
+              help="Switch, duplicate, or organize projects"
+              onClick={() => {
+                closeCompactMenus();
+                setShowProjects(true);
+              }}
+            />
+          )}
+          {wb.canEditProject && (
+            <MenuAction
+              icon={<NotebookTabs className="size-4" />}
+              label="Records & files"
+              help="Project notes, documents, activity, email, and packets"
+              onClick={() => {
+                closeCompactMenus();
+                setRecordsOpen(!recordsOpen);
+              }}
+            />
+          )}
+          {wb.canEditProject && (
+            <MenuAction
+              icon={<FileDown className="size-4" />}
+              label="Export GIS data"
+              help="Export GeoJSON, KML, KMZ, or Shapefile"
+              onClick={() => {
+                closeCompactMenus();
+                setShowExport(true);
+              }}
+            />
+          )}
         </div>
       )}
 
@@ -404,6 +584,72 @@ function BarBtn({
     >
       {icon}
       <span className="hidden sm:inline">{label}</span>
+    </button>
+  );
+}
+
+function MenuBarButton({
+  icon,
+  label,
+  help,
+  open,
+  onClick,
+  tourId,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  help: string;
+  open: boolean;
+  onClick: () => void;
+  tourId: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-expanded={open}
+      aria-haspopup="menu"
+      aria-label={label}
+      title={help}
+      data-tour={tourId}
+      className={cn(
+        "flex items-center gap-1 rounded-xl bg-secondary px-2.5 py-2 text-xs font-medium text-secondary-foreground transition-colors hover:bg-accent",
+        open && "bg-accent",
+      )}
+    >
+      {icon}
+      <span className="hidden sm:inline">{label}</span>
+      <ChevronDown
+        className={cn("hidden size-3 transition-transform sm:block", open && "rotate-180")}
+      />
+    </button>
+  );
+}
+
+function MenuAction({
+  icon,
+  label,
+  help,
+  onClick,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  help: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={help}
+      role="menuitem"
+      className="flex w-full items-start gap-3 rounded-xl px-2.5 py-2 text-left transition-colors hover:bg-accent"
+    >
+      <span className="mt-0.5 shrink-0 text-primary">{icon}</span>
+      <span className="min-w-0">
+        <strong className="block text-xs font-semibold">{label}</strong>
+        <span className="block text-[10px] leading-snug text-muted-foreground">{help}</span>
+      </span>
     </button>
   );
 }
