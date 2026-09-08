@@ -567,35 +567,58 @@ export function LayerPanel() {
     event.preventDefault();
 
     const list = layerListRef.current;
-    if (list) {
-      const bounds = list.getBoundingClientRect();
-      if (event.clientY < bounds.top + 36) list.scrollBy({ top: -14 });
-      else if (event.clientY > bounds.bottom - 36) list.scrollBy({ top: 14 });
-    }
-
-    const hit = document.elementFromPoint(event.clientX, event.clientY);
-    const targetHeader = hit?.closest<HTMLElement>("[data-group-header-id]");
-    if (!targetHeader) {
+    if (!list) {
       updateGroupDropTarget(null);
       return;
     }
-    const targetGroupId = targetHeader.dataset["groupHeaderId"];
+    const listBounds = list.getBoundingClientRect();
+    if (event.clientY < listBounds.top + 36) list.scrollBy({ top: -14 });
+    else if (event.clientY > listBounds.bottom - 36) list.scrollBy({ top: 14 });
+    if (event.clientX < listBounds.left || event.clientX > listBounds.right) {
+      updateGroupDropTarget(null);
+      return;
+    }
+
     const dragged = wb.groups.find((group) => group.id === draggedGroupRef.current);
-    const target = wb.groups.find((group) => group.id === targetGroupId);
-    if (
-      !dragged ||
-      !target ||
-      dragged.id === target.id ||
-      nestedGroupIds(dragged.id, wb.groups).has(target.id)
-    ) {
+    if (!dragged) {
       updateGroupDropTarget(null);
       return;
     }
 
-    const bounds = targetHeader.getBoundingClientRect();
-    const ratio = (event.clientY - bounds.top) / Math.max(bounds.height, 1);
-    const position: GroupDropPosition = ratio < 0.25 ? "before" : ratio > 0.75 ? "after" : "inside";
-    updateGroupDropTarget(`${target.id}:${position}`);
+    const invalidTargets = nestedGroupIds(dragged.id, wb.groups);
+    const headers = Array.from(
+      list.querySelectorAll<HTMLElement>("[data-group-header-id]"),
+    ).flatMap((element) => {
+      const id = element.dataset["groupHeaderId"];
+      const target = wb.groups.find((group) => group.id === id);
+      return id && target && !invalidTargets.has(id)
+        ? [{ id, bounds: element.getBoundingClientRect() }]
+        : [];
+    });
+
+    // Dropping anywhere on a visible group header means "make this a subgroup". Computing
+    // against the header rectangles avoids Safari pointer-capture hit-testing quirks on iPad.
+    const nestedTarget = headers.find(
+      ({ bounds }) => event.clientY >= bounds.top && event.clientY <= bounds.bottom,
+    );
+    if (nestedTarget) {
+      updateGroupDropTarget(`${nestedTarget.id}:inside`);
+      return;
+    }
+
+    // Reordering remains available in the small gaps between headers. Pick the nearest edge so
+    // it does not compete with the much larger and more intuitive nesting target.
+    const edgeTarget = headers
+      .flatMap(({ id, bounds }) => [
+        { id, position: "before" as const, distance: Math.abs(event.clientY - bounds.top) },
+        { id, position: "after" as const, distance: Math.abs(event.clientY - bounds.bottom) },
+      ])
+      .sort((a, b) => a.distance - b.distance)[0];
+    if (!edgeTarget || edgeTarget.distance > 10) {
+      updateGroupDropTarget(null);
+      return;
+    }
+    updateGroupDropTarget(`${edgeTarget.id}:${edgeTarget.position}`);
   };
 
   const finishGroupDrag = () => {
@@ -921,8 +944,8 @@ export function LayerPanel() {
                     finishGroupDrag();
                   }}
                   onPointerCancel={resetGroupDrag}
-                  aria-label={`Drag ${group.name} group to reorder`}
-                  title="Drag above or below to reorder, or drop directly on another group to make this a subgroup"
+                  aria-label={`Drag ${group.name} group to reorder or nest`}
+                  title="Drop on another group to make this a subgroup; drop between groups to reorder"
                   className={cn(
                     "mr-0.5 flex size-7 shrink-0 touch-none select-none items-center justify-center rounded hover:bg-accent hover:text-foreground",
                     draggedGroupId === group.id
