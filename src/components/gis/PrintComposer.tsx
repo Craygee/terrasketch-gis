@@ -5,6 +5,7 @@ import {
   Crosshair,
   LocateFixed,
   MapPin,
+  Maximize2,
   MessageSquareText,
   Minus,
   Move,
@@ -13,6 +14,8 @@ import {
   Trash2,
   Type,
   X,
+  ZoomIn,
+  ZoomOut,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Map as MlMap, Marker, NavigationControl, type GeoJSONSource } from "maplibre-gl";
@@ -36,6 +39,40 @@ import { createMapSnapshotBlob } from "@/lib/gis/mapPdf";
 import { uploadProjectAsset } from "@/lib/gis/projectRecords";
 
 const uid = () => window.crypto.randomUUID();
+
+const CSS_PIXELS_PER_INCH = 96;
+
+const printPageGeometry = (
+  paper: PrintComposition["paper"],
+  orientation: PrintComposition["orientation"],
+) => {
+  const portrait =
+    paper === "a4"
+      ? { widthInches: 210 / 25.4, heightInches: 297 / 25.4, label: "A4" }
+      : paper === "legal"
+        ? { widthInches: 8.5, heightInches: 14, label: "Legal" }
+        : { widthInches: 8.5, heightInches: 11, label: "Letter" };
+  const dimensions =
+    orientation === "portrait"
+      ? portrait
+      : {
+          ...portrait,
+          widthInches: portrait.heightInches,
+          heightInches: portrait.widthInches,
+        };
+  const displayDimensions =
+    paper === "a4"
+      ? `${Math.round(dimensions.widthInches * 25.4)} × ${Math.round(dimensions.heightInches * 25.4)} mm`
+      : `${dimensions.widthInches} × ${dimensions.heightInches} in`;
+  return {
+    ...dimensions,
+    widthPixels: dimensions.widthInches * CSS_PIXELS_PER_INCH,
+    heightPixels: dimensions.heightInches * CSS_PIXELS_PER_INCH,
+    cssWidth: `${dimensions.widthInches}in`,
+    cssHeight: `${dimensions.heightInches}in`,
+    displayDimensions,
+  };
+};
 
 const defaultPrintFrame = (
   paper: PrintComposition["paper"],
@@ -127,6 +164,7 @@ export function PrintComposer() {
     null | { kind: "line" | "arrow"; start?: { x: number; y: number } } | { kind: "callout" }
   >(null);
   const pageRef = useRef<HTMLDivElement>(null);
+  const previewViewportRef = useRef<HTMLElement>(null);
   const mapFrameRef = useRef<HTMLDivElement>(null);
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const printMapRef = useRef<MlMap | null>(null);
@@ -136,7 +174,15 @@ export function PrintComposer() {
   const [mapRevision, setMapRevision] = useState(0);
   const [saveMapCopy, setSaveMapCopy] = useState(false);
   const [mapCopyFormat, setMapCopyFormat] = useState<"png" | "pdf">("pdf");
+  const [fittedPageScale, setFittedPageScale] = useState(1);
+  const [pageScaleOverride, setPageScaleOverride] = useState<number | null>(null);
   const setSavedComposition = wb.setPrintComposition;
+
+  const pageGeometry = useMemo(
+    () => printPageGeometry(composition.paper, composition.orientation),
+    [composition.orientation, composition.paper],
+  );
+  const pagePreviewScale = pageScaleOverride ?? fittedPageScale;
 
   const selected = composition.annotations.find((item) => item.id === selectedId);
   const includedLayers = useMemo(
@@ -179,6 +225,39 @@ export function PrintComposer() {
     const timer = window.setTimeout(() => setSavedComposition(composition), 500);
     return () => window.clearTimeout(timer);
   }, [composition, setSavedComposition]);
+
+  useEffect(() => {
+    const viewport = previewViewportRef.current;
+    if (!viewport) return;
+    const fitPage = () => {
+      const styles = window.getComputedStyle(viewport);
+      const availableWidth =
+        viewport.clientWidth -
+        Number.parseFloat(styles.paddingLeft) -
+        Number.parseFloat(styles.paddingRight) -
+        4;
+      const availableHeight =
+        viewport.clientHeight -
+        Number.parseFloat(styles.paddingTop) -
+        Number.parseFloat(styles.paddingBottom) -
+        4;
+      const nextScale = Math.max(
+        0.1,
+        Math.min(
+          1,
+          availableWidth / pageGeometry.widthPixels,
+          availableHeight / pageGeometry.heightPixels,
+        ),
+      );
+      setFittedPageScale((current) =>
+        Math.abs(current - nextScale) < 0.002 ? current : nextScale,
+      );
+    };
+    fitPage();
+    const observer = new ResizeObserver(fitPage);
+    observer.observe(viewport);
+    return () => observer.disconnect();
+  }, [pageGeometry.heightPixels, pageGeometry.widthPixels]);
 
   useEffect(() => {
     if (!mapContainerRef.current || printMapRef.current) return;
@@ -449,17 +528,18 @@ export function PrintComposer() {
       void mapRevision;
       const map = printMapRef.current;
       const mapElement = mapContainerRef.current;
-      const page = pageRef.current;
-      if (!map || !mapElement || !page) return { x: 50, y: 50 };
+      if (!map || !mapElement) return { x: 50, y: 50 };
       const point = map.project([item.lng, item.lat]);
-      const mapRect = mapElement.getBoundingClientRect();
-      const pageRect = page.getBoundingClientRect();
       return {
-        x: ((mapRect.left - pageRect.left + point.x) / pageRect.width) * 100,
-        y: ((mapRect.top - pageRect.top + point.y) / pageRect.height) * 100,
+        x:
+          composition.frame.x +
+          (point.x / Math.max(1, mapElement.clientWidth)) * composition.frame.width,
+        y:
+          composition.frame.y +
+          (point.y / Math.max(1, mapElement.clientHeight)) * composition.frame.height,
       };
     },
-    [mapRevision],
+    [composition.frame, mapRevision],
   );
 
   const arrangeCallouts = (annotations: PrintAnnotation[], map: MlMap): PrintAnnotation[] => {
@@ -520,7 +600,10 @@ export function PrintComposer() {
       event.clientY > rect.bottom
     )
       return;
-    const lngLat = map.unproject([event.clientX - rect.left, event.clientY - rect.top]);
+    const lngLat = map.unproject([
+      ((event.clientX - rect.left) / rect.width) * mapElement.clientWidth,
+      ((event.clientY - rect.top) / rect.height) * mapElement.clientHeight,
+    ]);
     const item: PrintAnnotation = {
       id: uid(),
       type: "callout",
@@ -652,7 +735,6 @@ export function PrintComposer() {
     window.print();
   };
 
-  const pageRatio = pageAspect(composition.paper, composition.orientation);
   const furnitureKeys: PrintFurnitureKey[] = ["legend", "compass", "scale", "attribution"];
   const furnitureVisible = (key: PrintFurnitureKey) =>
     key === "legend"
@@ -711,6 +793,7 @@ export function PrintComposer() {
 
   return (
     <div className="app-overlay-viewport print-composer fixed inset-0 z-[100] flex flex-col bg-[#e9e8e2] text-foreground">
+      <style media="print">{`@page { size: ${pageGeometry.cssWidth} ${pageGeometry.cssHeight}; margin: 0; }`}</style>
       <header className="print-composer-ui flex h-14 shrink-0 items-center gap-2 overflow-x-auto border-b border-border bg-card px-3">
         <button
           onClick={close}
@@ -791,6 +874,7 @@ export function PrintComposer() {
               value={composition.paper}
               onChange={(paper) => {
                 const nextPaper = paper as PrintComposition["paper"];
+                setPageScaleOverride(null);
                 update({
                   paper: nextPaper,
                   frame: defaultPrintFrame(nextPaper, composition.orientation),
@@ -802,6 +886,7 @@ export function PrintComposer() {
               value={composition.orientation}
               onChange={(orientation) => {
                 const nextOrientation = orientation as PrintComposition["orientation"];
+                setPageScaleOverride(null);
                 update({
                   orientation: nextOrientation,
                   frame: defaultPrintFrame(composition.paper, nextOrientation),
@@ -809,6 +894,53 @@ export function PrintComposer() {
               }}
               options={["landscape", "portrait"]}
             />
+          </div>
+          <div className="mt-2 rounded-xl border border-border bg-secondary/60 p-2">
+            <div className="flex items-center justify-between gap-1">
+              <button
+                type="button"
+                onClick={() =>
+                  setPageScaleOverride(
+                    Math.max(0.1, Math.round((pagePreviewScale - 0.1) * 100) / 100),
+                  )
+                }
+                className="rounded-lg bg-card p-1.5 hover:bg-accent disabled:opacity-40"
+                aria-label="Zoom page preview out"
+                title="Zoom the page preview out"
+                disabled={pagePreviewScale <= 0.1}
+              >
+                <ZoomOut className="size-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setPageScaleOverride(null)}
+                className={cn(
+                  "flex min-w-0 flex-1 items-center justify-center gap-1 rounded-lg px-2 py-1.5 text-[10px] font-semibold hover:bg-accent",
+                  pageScaleOverride === null ? "bg-primary text-primary-foreground" : "bg-card",
+                )}
+                aria-label="Fit the whole page in the preview"
+                title="Fit the entire paper inside the available preview area"
+              >
+                <Maximize2 className="size-3" /> Fit page · {Math.round(pagePreviewScale * 100)}%
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  setPageScaleOverride(
+                    Math.min(1.5, Math.round((pagePreviewScale + 0.1) * 100) / 100),
+                  )
+                }
+                className="rounded-lg bg-card p-1.5 hover:bg-accent disabled:opacity-40"
+                aria-label="Zoom page preview in"
+                title="Zoom the page preview in"
+                disabled={pagePreviewScale >= 1.5}
+              >
+                <ZoomIn className="size-3.5" />
+              </button>
+            </div>
+            <p className="mt-1.5 text-center text-[9px] text-muted-foreground">
+              {pageGeometry.label} · {pageGeometry.displayDimensions} · {composition.orientation}
+            </p>
           </div>
           <Field label="Title" value={composition.title} onChange={(title) => update({ title })} />
           <Field
@@ -1104,7 +1236,7 @@ export function PrintComposer() {
           </div>
         </aside>
 
-        <main className="min-w-0 flex-1 overflow-auto p-6">
+        <main ref={previewViewportRef} className="min-w-0 flex-1 overflow-auto p-6">
           {placementMode && (
             <div className="print-composer-ui sticky top-0 z-50 mx-auto mb-2 w-fit rounded-full bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground shadow-float">
               {placementMode.kind === "callout"
@@ -1121,268 +1253,287 @@ export function PrintComposer() {
             </div>
           )}
           <div
-            ref={pageRef}
-            data-tour="print-page"
-            className="print-composer-page relative mx-auto overflow-hidden bg-white shadow-2xl"
+            className="print-composer-stage relative mx-auto overflow-hidden bg-white shadow-2xl"
             style={{
-              aspectRatio: pageRatio,
-              width: pageRatio > 1 ? "min(100%, 1100px)" : "min(70%, 720px)",
+              width: `${pageGeometry.widthPixels * pagePreviewScale}px`,
+              height: `${pageGeometry.heightPixels * pagePreviewScale}px`,
             }}
           >
-            {composition.showTitle && (
-              <div className="absolute inset-x-[5%] top-[3%] z-20 pointer-events-none">
-                <h2 className="text-center text-[clamp(16px,2.2vw,30px)] font-bold tracking-tight">
-                  {composition.title}
-                </h2>
-                {composition.subtitle && (
-                  <p className="mt-0.5 text-center text-[clamp(9px,1vw,14px)] text-slate-600">
-                    {composition.subtitle}
-                  </p>
-                )}
-              </div>
-            )}
             <div
-              ref={mapFrameRef}
-              className={cn(
-                "absolute overflow-hidden bg-slate-100 [container-type:inline-size]",
-                composition.frameBorder && "ring-1 ring-slate-700",
-              )}
-              style={{
-                left: `${composition.frame.x}%`,
-                top: `${composition.frame.y}%`,
-                width: `${composition.frame.width}%`,
-                height: `${composition.frame.height}%`,
-              }}
+              ref={pageRef}
+              data-tour="print-page"
+              className="print-composer-page relative overflow-hidden bg-white"
+              style={
+                {
+                  width: `${pageGeometry.widthPixels}px`,
+                  height: `${pageGeometry.heightPixels}px`,
+                  transform: `scale(${pagePreviewScale})`,
+                  transformOrigin: "top left",
+                  "--print-page-width": pageGeometry.cssWidth,
+                  "--print-page-height": pageGeometry.cssHeight,
+                } as React.CSSProperties
+              }
             >
-              <div ref={mapContainerRef} className="h-full w-full" />
-              {(["top-left", "top-right", "bottom-left", "bottom-right"] as const).map((corner) => {
-                const keys = furnitureKeys.filter(
-                  (key) => furnitureVisible(key) && composition.furniture[key].corner === corner,
-                );
-                if (keys.length === 0) return null;
-                return (
-                  <div
-                    key={corner}
-                    className={cn(
-                      "pointer-events-none absolute z-20 flex gap-1.5",
-                      corner.startsWith("top") ? "flex-col" : "flex-col-reverse",
-                      corner.endsWith("left") ? "items-start" : "items-end",
-                      corner === "top-left" && "left-2 top-12",
-                      corner === "top-right" && "right-2 top-2",
-                      corner === "bottom-left" && "bottom-2 left-2",
-                      corner === "bottom-right" && "bottom-2 right-2",
-                    )}
-                  >
-                    {keys.map((key) => (
+              {composition.showTitle && (
+                <div className="absolute inset-x-[5%] top-[3%] z-20 pointer-events-none">
+                  <h2 className="text-center text-[clamp(16px,2.2vw,30px)] font-bold tracking-tight">
+                    {composition.title}
+                  </h2>
+                  {composition.subtitle && (
+                    <p className="mt-0.5 text-center text-[clamp(9px,1vw,14px)] text-slate-600">
+                      {composition.subtitle}
+                    </p>
+                  )}
+                </div>
+              )}
+              <div
+                ref={mapFrameRef}
+                className={cn(
+                  "absolute overflow-hidden bg-slate-100 [container-type:inline-size]",
+                  composition.frameBorder && "ring-1 ring-slate-700",
+                )}
+                style={{
+                  left: `${composition.frame.x}%`,
+                  top: `${composition.frame.y}%`,
+                  width: `${composition.frame.width}%`,
+                  height: `${composition.frame.height}%`,
+                }}
+              >
+                <div ref={mapContainerRef} className="h-full w-full" />
+                {(["top-left", "top-right", "bottom-left", "bottom-right"] as const).map(
+                  (corner) => {
+                    const keys = furnitureKeys.filter(
+                      (key) =>
+                        furnitureVisible(key) && composition.furniture[key].corner === corner,
+                    );
+                    if (keys.length === 0) return null;
+                    return (
                       <div
-                        key={key}
-                        className="pointer-events-auto cursor-move touch-none"
-                        onPointerDown={(event) => startFurnitureDrag(event, key)}
-                        title={`Drag ${furnitureLabel(key)} to place it anywhere`}
+                        key={corner}
+                        className={cn(
+                          "pointer-events-none absolute z-20 flex gap-1.5",
+                          corner.startsWith("top") ? "flex-col" : "flex-col-reverse",
+                          corner.endsWith("left") ? "items-start" : "items-end",
+                          corner === "top-left" && "left-2 top-12",
+                          corner === "top-right" && "right-2 top-2",
+                          corner === "bottom-left" && "bottom-2 left-2",
+                          corner === "bottom-right" && "bottom-2 right-2",
+                        )}
                       >
-                        {furnitureContent(key)}
+                        {keys.map((key) => (
+                          <div
+                            key={key}
+                            className="pointer-events-auto cursor-move touch-none"
+                            onPointerDown={(event) => startFurnitureDrag(event, key)}
+                            title={`Drag ${furnitureLabel(key)} to place it anywhere`}
+                          >
+                            {furnitureContent(key)}
+                          </div>
+                        ))}
                       </div>
-                    ))}
-                  </div>
-                );
-              })}
-              {furnitureKeys
-                .filter(
-                  (key) => furnitureVisible(key) && composition.furniture[key].corner === "custom",
-                )
-                .map((key) => (
-                  <div
-                    key={key}
-                    className="pointer-events-auto absolute z-20 -translate-x-1/2 -translate-y-1/2 cursor-move touch-none"
-                    style={{
-                      left: `${composition.furniture[key].x}%`,
-                      top: `${composition.furniture[key].y}%`,
-                    }}
-                    onPointerDown={(event) => startFurnitureDrag(event, key)}
-                    title={`Drag ${furnitureLabel(key)} to reposition it`}
-                  >
-                    {furnitureContent(key)}
-                  </div>
-                ))}
-            </div>
+                    );
+                  },
+                )}
+                {furnitureKeys
+                  .filter(
+                    (key) =>
+                      furnitureVisible(key) && composition.furniture[key].corner === "custom",
+                  )
+                  .map((key) => (
+                    <div
+                      key={key}
+                      className="pointer-events-auto absolute z-20 -translate-x-1/2 -translate-y-1/2 cursor-move touch-none"
+                      style={{
+                        left: `${composition.furniture[key].x}%`,
+                        top: `${composition.furniture[key].y}%`,
+                      }}
+                      onPointerDown={(event) => startFurnitureDrag(event, key)}
+                      title={`Drag ${furnitureLabel(key)} to reposition it`}
+                    >
+                      {furnitureContent(key)}
+                    </div>
+                  ))}
+              </div>
 
-            <svg className="pointer-events-none absolute inset-0 z-30 h-full w-full overflow-visible">
-              <defs>
-                <marker
-                  id="print-arrow"
-                  viewBox="0 0 10 10"
-                  refX="9"
-                  refY="5"
-                  markerWidth="6"
-                  markerHeight="6"
-                  orient="auto-start-reverse"
-                >
-                  <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke" />
-                </marker>
-              </defs>
+              <svg className="pointer-events-none absolute inset-0 z-30 h-full w-full overflow-visible">
+                <defs>
+                  <marker
+                    id="print-arrow"
+                    viewBox="0 0 10 10"
+                    refX="9"
+                    refY="5"
+                    markerWidth="6"
+                    markerHeight="6"
+                    orient="auto-start-reverse"
+                  >
+                    <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke" />
+                  </marker>
+                </defs>
+                {composition.annotations
+                  .filter(
+                    (item): item is Extract<PrintAnnotation, { type: "line" | "arrow" }> =>
+                      item.type === "line" || item.type === "arrow",
+                  )
+                  .map((item) => (
+                    <g key={item.id}>
+                      <line
+                        x1={`${item.x}%`}
+                        y1={`${item.y}%`}
+                        x2={`${item.x2}%`}
+                        y2={`${item.y2}%`}
+                        stroke="transparent"
+                        strokeWidth={Math.max(14, item.width + 10)}
+                        className="pointer-events-auto cursor-move"
+                        onPointerDown={(event) => startPointDrag(event, item, "whole")}
+                      />
+                      <line
+                        x1={`${item.x}%`}
+                        y1={`${item.y}%`}
+                        x2={`${item.x2}%`}
+                        y2={`${item.y2}%`}
+                        stroke={item.color}
+                        strokeWidth={item.width}
+                        markerEnd={item.type === "arrow" ? "url(#print-arrow)" : undefined}
+                        className="pointer-events-none"
+                      />
+                      {selectedId === item.id && (
+                        <>
+                          <circle
+                            cx={`${item.x}%`}
+                            cy={`${item.y}%`}
+                            r="7"
+                            fill="white"
+                            stroke={item.color}
+                            strokeWidth="3"
+                            className="pointer-events-auto cursor-grab"
+                            onPointerDown={(event) => startPointDrag(event, item, "start")}
+                          />
+                          <circle
+                            cx={`${item.x2}%`}
+                            cy={`${item.y2}%`}
+                            r="7"
+                            fill="white"
+                            stroke={item.color}
+                            strokeWidth="3"
+                            className="pointer-events-auto cursor-grab"
+                            onPointerDown={(event) => startPointDrag(event, item, "end")}
+                          />
+                        </>
+                      )}
+                    </g>
+                  ))}
+                {composition.annotations
+                  .filter(
+                    (item): item is Extract<PrintAnnotation, { type: "callout" }> =>
+                      item.type === "callout",
+                  )
+                  .map((item) => {
+                    const target = calloutTarget(item);
+                    return (
+                      <line
+                        key={`line-${item.id}`}
+                        x1={`${item.x}%`}
+                        y1={`${item.y}%`}
+                        x2={`${target.x}%`}
+                        y2={`${target.y}%`}
+                        stroke={item.color}
+                        strokeWidth="2.5"
+                        markerEnd="url(#print-arrow)"
+                        className="pointer-events-none"
+                      />
+                    );
+                  })}
+              </svg>
               {composition.annotations
                 .filter(
-                  (item): item is Extract<PrintAnnotation, { type: "line" | "arrow" }> =>
-                    item.type === "line" || item.type === "arrow",
+                  (item): item is Extract<PrintAnnotation, { type: "text" }> =>
+                    item.type === "text",
                 )
                 .map((item) => (
-                  <g key={item.id}>
-                    <line
-                      x1={`${item.x}%`}
-                      y1={`${item.y}%`}
-                      x2={`${item.x2}%`}
-                      y2={`${item.y2}%`}
-                      stroke="transparent"
-                      strokeWidth={Math.max(14, item.width + 10)}
-                      className="pointer-events-auto cursor-move"
-                      onPointerDown={(event) => startPointDrag(event, item, "whole")}
-                    />
-                    <line
-                      x1={`${item.x}%`}
-                      y1={`${item.y}%`}
-                      x2={`${item.x2}%`}
-                      y2={`${item.y2}%`}
-                      stroke={item.color}
-                      strokeWidth={item.width}
-                      markerEnd={item.type === "arrow" ? "url(#print-arrow)" : undefined}
-                      className="pointer-events-none"
-                    />
-                    {selectedId === item.id && (
-                      <>
-                        <circle
-                          cx={`${item.x}%`}
-                          cy={`${item.y}%`}
-                          r="7"
-                          fill="white"
-                          stroke={item.color}
-                          strokeWidth="3"
-                          className="pointer-events-auto cursor-grab"
-                          onPointerDown={(event) => startPointDrag(event, item, "start")}
-                        />
-                        <circle
-                          cx={`${item.x2}%`}
-                          cy={`${item.y2}%`}
-                          r="7"
-                          fill="white"
-                          stroke={item.color}
-                          strokeWidth="3"
-                          className="pointer-events-auto cursor-grab"
-                          onPointerDown={(event) => startPointDrag(event, item, "end")}
-                        />
-                      </>
+                  <button
+                    key={item.id}
+                    onClick={() => setSelectedId(item.id)}
+                    onPointerDown={(event) => startBoxDrag(event, item)}
+                    className={cn(
+                      "absolute z-40 -translate-x-1/2 -translate-y-1/2 rounded px-2 py-1 text-left",
+                      selectedId === item.id && "ring-2 ring-primary ring-offset-1",
                     )}
-                  </g>
+                    style={{
+                      left: `${item.x}%`,
+                      top: `${item.y}%`,
+                      color: item.textColor,
+                      backgroundColor: item.backgroundColor ?? "transparent",
+                      fontFamily: item.font,
+                      fontSize: `${item.fontSize}px`,
+                    }}
+                  >
+                    {item.text}
+                  </button>
                 ))}
               {composition.annotations
                 .filter(
                   (item): item is Extract<PrintAnnotation, { type: "callout" }> =>
                     item.type === "callout",
                 )
-                .map((item) => {
-                  const target = calloutTarget(item);
-                  return (
-                    <line
-                      key={`line-${item.id}`}
-                      x1={`${item.x}%`}
-                      y1={`${item.y}%`}
-                      x2={`${target.x}%`}
-                      y2={`${target.y}%`}
-                      stroke={item.color}
-                      strokeWidth="2.5"
-                      markerEnd="url(#print-arrow)"
-                      className="pointer-events-none"
-                    />
-                  );
-                })}
-            </svg>
-            {composition.annotations
-              .filter(
-                (item): item is Extract<PrintAnnotation, { type: "text" }> => item.type === "text",
-              )
-              .map((item) => (
-                <button
-                  key={item.id}
-                  onClick={() => setSelectedId(item.id)}
-                  onPointerDown={(event) => startBoxDrag(event, item)}
-                  className={cn(
-                    "absolute z-40 -translate-x-1/2 -translate-y-1/2 rounded px-2 py-1 text-left",
-                    selectedId === item.id && "ring-2 ring-primary ring-offset-1",
-                  )}
-                  style={{
-                    left: `${item.x}%`,
-                    top: `${item.y}%`,
-                    color: item.textColor,
-                    backgroundColor: item.backgroundColor ?? "transparent",
-                    fontFamily: item.font,
-                    fontSize: `${item.fontSize}px`,
-                  }}
-                >
-                  {item.text}
-                </button>
-              ))}
-            {composition.annotations
-              .filter(
-                (item): item is Extract<PrintAnnotation, { type: "callout" }> =>
-                  item.type === "callout",
-              )
-              .map((item) => (
-                <button
-                  key={item.id}
-                  onClick={() => setSelectedId(item.id)}
-                  onPointerDown={(event) => startBoxDrag(event, item)}
-                  className={cn(
-                    "absolute z-40 w-[15%] -translate-x-1/2 -translate-y-1/2 rounded-md border px-2 py-1.5 text-left shadow-sm",
-                    selectedId === item.id && "ring-2 ring-primary ring-offset-1",
-                  )}
-                  style={{
-                    left: `${item.x}%`,
-                    top: `${item.y}%`,
-                    color: item.textColor,
-                    backgroundColor: item.backgroundColor,
-                    borderColor: item.color,
-                  }}
-                >
-                  <span className="block text-[clamp(7px,.75vw,11px)] font-semibold leading-tight">
-                    {item.contentMode === "gps"
-                      ? formatDecimalGps(item)
-                      : item.contentMode === "dms"
-                        ? formatDmsGps(item)
-                        : item.text}
-                  </span>
-                  {(item.contentMode === "label-gps" || item.contentMode === "label-dms") && (
-                    <span className="num mt-1 block text-[clamp(6px,.6vw,9px)] opacity-75">
-                      {item.contentMode === "label-dms"
-                        ? formatDmsGps(item)
-                        : formatDecimalGps(item)}
+                .map((item) => (
+                  <button
+                    key={item.id}
+                    onClick={() => setSelectedId(item.id)}
+                    onPointerDown={(event) => startBoxDrag(event, item)}
+                    className={cn(
+                      "absolute z-40 w-[15%] -translate-x-1/2 -translate-y-1/2 rounded-md border px-2 py-1.5 text-left shadow-sm",
+                      selectedId === item.id && "ring-2 ring-primary ring-offset-1",
+                    )}
+                    style={{
+                      left: `${item.x}%`,
+                      top: `${item.y}%`,
+                      color: item.textColor,
+                      backgroundColor: item.backgroundColor,
+                      borderColor: item.color,
+                    }}
+                  >
+                    <span className="block text-[clamp(7px,.75vw,11px)] font-semibold leading-tight">
+                      {item.contentMode === "gps"
+                        ? formatDecimalGps(item)
+                        : item.contentMode === "dms"
+                          ? formatDmsGps(item)
+                          : item.text}
                     </span>
-                  )}
-                </button>
-              ))}
-            {composition.showDate && (
-              <div className="absolute bottom-[2%] right-[5%] text-[clamp(6px,.65vw,9px)] text-slate-500">
-                {new Date().toLocaleDateString()}
-              </div>
-            )}
-            {(composition.showProjectNotes ?? false) && selectedProjectNotes.length > 0 && (
-              <aside className="absolute bottom-[3%] left-[5%] z-40 max-h-[20%] w-[42%] overflow-hidden rounded-md border border-slate-300 bg-white/95 p-[1.2%] shadow-sm">
-                <strong className="block text-[clamp(7px,.8vw,11px)]">Project notes</strong>
-                <div className="mt-1 space-y-1">
-                  {selectedProjectNotes.slice(0, 4).map((note) => (
-                    <div key={note.id} className="text-[clamp(6px,.62vw,9px)] leading-tight">
-                      <strong>{note.title}:</strong> {note.body.slice(0, 180)}
-                      {note.body.length > 180 ? "…" : ""}
-                    </div>
-                  ))}
+                    {(item.contentMode === "label-gps" || item.contentMode === "label-dms") && (
+                      <span className="num mt-1 block text-[clamp(6px,.6vw,9px)] opacity-75">
+                        {item.contentMode === "label-dms"
+                          ? formatDmsGps(item)
+                          : formatDecimalGps(item)}
+                      </span>
+                    )}
+                  </button>
+                ))}
+              {composition.showDate && (
+                <div className="absolute bottom-[2%] right-[5%] text-[clamp(6px,.65vw,9px)] text-slate-500">
+                  {new Date().toLocaleDateString()}
                 </div>
-              </aside>
-            )}
-            {placementMode && (
-              <div
-                className="absolute inset-0 z-[60] cursor-crosshair bg-transparent"
-                onPointerDown={handlePlacement}
-                aria-label="Print item placement surface"
-              />
-            )}
+              )}
+              {(composition.showProjectNotes ?? false) && selectedProjectNotes.length > 0 && (
+                <aside className="absolute bottom-[3%] left-[5%] z-40 max-h-[20%] w-[42%] overflow-hidden rounded-md border border-slate-300 bg-white/95 p-[1.2%] shadow-sm">
+                  <strong className="block text-[clamp(7px,.8vw,11px)]">Project notes</strong>
+                  <div className="mt-1 space-y-1">
+                    {selectedProjectNotes.slice(0, 4).map((note) => (
+                      <div key={note.id} className="text-[clamp(6px,.62vw,9px)] leading-tight">
+                        <strong>{note.title}:</strong> {note.body.slice(0, 180)}
+                        {note.body.length > 180 ? "…" : ""}
+                      </div>
+                    ))}
+                  </div>
+                </aside>
+              )}
+              {placementMode && (
+                <div
+                  className="absolute inset-0 z-[60] cursor-crosshair bg-transparent"
+                  onPointerDown={handlePlacement}
+                  aria-label="Print item placement surface"
+                />
+              )}
+            </div>
           </div>
         </main>
 
@@ -1825,14 +1976,6 @@ function Color({
       <span className="text-[10px] text-muted-foreground">{label}</span>
     </label>
   );
-}
-
-function pageAspect(
-  paper: PrintComposition["paper"],
-  orientation: PrintComposition["orientation"],
-) {
-  const portrait = paper === "a4" ? 210 / 297 : paper === "legal" ? 8.5 / 14 : 8.5 / 11;
-  return orientation === "portrait" ? portrait : 1 / portrait;
 }
 
 function escapeHtml(value: string) {
