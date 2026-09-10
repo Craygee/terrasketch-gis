@@ -8,6 +8,7 @@ import {
   FolderOpen,
   FolderPlus,
   LogOut,
+  Navigation,
   Plus,
   RotateCcw,
   Settings2,
@@ -15,7 +16,7 @@ import {
   UserRound,
   ArrowUpFromLine,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import { useAuth } from "@/lib/auth";
@@ -30,6 +31,9 @@ export function ProjectMenu({ onClose }: { onClose: () => void }) {
   const [newName, setNewName] = useState("");
   const [view, setView] = useState<View>("projects");
   const [subprojectName, setSubprojectName] = useState("");
+  const [expandedProjects, setExpandedProjects] = useState<Set<string>>(
+    () => new Set(projectAncestorIds(wb.projectId, wb.projects)),
+  );
 
   const projectIds = new Set(wb.projects.map((project) => project.id));
   const roots = wb.projects.filter(
@@ -37,6 +41,12 @@ export function ProjectMenu({ onClose }: { onClose: () => void }) {
   );
   const childrenOf = (parentId: string) =>
     wb.projects.filter((project) => project.parentProjectId === parentId);
+
+  useEffect(() => {
+    const ancestors = projectAncestorIds(wb.projectId, wb.projects);
+    if (ancestors.length === 0) return;
+    setExpandedProjects((current) => new Set([...current, ...ancestors]));
+  }, [wb.projectId, wb.projects]);
 
   const createProject = () => {
     if (!newName.trim()) return;
@@ -50,6 +60,7 @@ export function ProjectMenu({ onClose }: { onClose: () => void }) {
     const children = childrenOf(project.id);
     const isSubproject = depth > 0;
     const parentOpen = Boolean(project.parentProjectId && wb.projectId === project.parentProjectId);
+    const expanded = expandedProjects.has(project.id);
     return (
       <div
         key={project.id}
@@ -61,6 +72,16 @@ export function ProjectMenu({ onClose }: { onClose: () => void }) {
           active={project.id === wb.projectId}
           subproject={isSubproject}
           overlayEnabled={parentOpen && wb.enabledSubprojectIds.includes(project.id)}
+          hasChildren={children.length > 0}
+          expanded={expanded}
+          onToggleExpanded={() =>
+            setExpandedProjects((current) => {
+              const next = new Set(current);
+              if (next.has(project.id)) next.delete(project.id);
+              else next.add(project.id);
+              return next;
+            })
+          }
           {...(parentOpen
             ? {
                 onToggleOverlay: (enabled: boolean) =>
@@ -90,8 +111,15 @@ export function ProjectMenu({ onClose }: { onClose: () => void }) {
               .deleteProject(project.id)
               .then(() => toast.success(isSubproject ? "Subproject deleted" : "Project deleted"));
           }}
+          onNavigationChange={(visibility) =>
+            wb.setProjectNavigationVisibility(project.id, visibility).catch((error) => {
+              toast.error("Navigation settings could not be saved", {
+                description: error instanceof Error ? error.message : "Please try again.",
+              });
+            })
+          }
         />
-        {children.length > 0 && (
+        {children.length > 0 && expanded && (
           <div className="space-y-1 border-l border-border pl-1">
             {children.map((child) => renderProjectTree(child, depth + 1))}
           </div>
@@ -310,68 +338,180 @@ function ProjectRow({
   active,
   subproject,
   overlayEnabled,
+  hasChildren,
+  expanded,
+  onToggleExpanded,
   onToggleOverlay,
   onOpen,
   onDuplicate,
   onPromote,
   onDelete,
+  onNavigationChange,
 }: {
   project: ReturnType<typeof useWorkbench>["projects"][number];
   active: boolean;
   subproject?: boolean;
   overlayEnabled?: boolean;
+  hasChildren: boolean;
+  expanded: boolean;
+  onToggleExpanded: () => void;
   onToggleOverlay?: (enabled: boolean) => void;
   onOpen: () => void;
   onDuplicate: () => void;
   onPromote?: () => void;
   onDelete: () => void;
+  onNavigationChange: (visibility: {
+    showInQuickSwitch: boolean;
+    showInMobileBar: boolean;
+  }) => Promise<void>;
 }) {
+  const [navigationOpen, setNavigationOpen] = useState(false);
+  const [savingNavigation, setSavingNavigation] = useState(false);
+
+  const updateNavigation = async (visibility: {
+    showInQuickSwitch: boolean;
+    showInMobileBar: boolean;
+  }) => {
+    setSavingNavigation(true);
+    try {
+      await onNavigationChange(visibility);
+    } finally {
+      setSavingNavigation(false);
+    }
+  };
+
   return (
-    <div
-      className={cn(
-        "flex items-center gap-0.5 rounded-lg p-0.5",
-        active && "bg-accent ring-1 ring-primary",
-      )}
-    >
-      {onToggleOverlay && (
-        <button
-          onClick={() => onToggleOverlay(!overlayEnabled)}
-          className="rounded-lg p-1.5 text-primary hover:bg-card"
-          aria-label={`${overlayEnabled ? "Hide" : "Show"} ${project.name} on parent`}
-          title="Toggle live overlay on the open parent"
-        >
-          {overlayEnabled ? <Eye className="size-3.5" /> : <EyeOff className="size-3.5" />}
-        </button>
-      )}
-      <button onClick={onOpen} className="min-w-0 flex-1 px-2 py-1.5 text-left">
-        <span className="block truncate font-medium">{project.name}</span>
-        <span className="block text-[10px] text-muted-foreground">
-          {active ? "Open now · " : ""}
-          {subproject ? "Subproject · " : ""}
-          {project.versionCount} saves
-        </span>
-      </button>
-      <button onClick={onDuplicate} className="rounded-lg p-1.5 hover:bg-card" title="Duplicate">
-        <Copy className="size-3.5" />
-      </button>
-      {onPromote && (
-        <button
-          onClick={onPromote}
-          className="rounded-lg p-1.5 hover:bg-card"
-          title="Move to top level"
-        >
-          <ArrowUpFromLine className="size-3.5" />
-        </button>
-      )}
-      <button
-        onClick={onDelete}
-        className="rounded-lg p-1.5 text-destructive hover:bg-destructive/10"
-        aria-label={`Delete ${project.name}`}
+    <div>
+      <div
+        className={cn(
+          "flex items-center gap-0.5 rounded-lg p-0.5",
+          active && "bg-accent ring-1 ring-primary",
+        )}
       >
-        <Trash2 className="size-3.5" />
-      </button>
+        {hasChildren ? (
+          <button
+            type="button"
+            onClick={onToggleExpanded}
+            className="rounded-lg p-1.5 hover:bg-card"
+            aria-label={`${expanded ? "Collapse" : "Expand"} ${project.name}`}
+            aria-expanded={expanded}
+          >
+            <ChevronRight
+              className={cn("size-3.5 transition-transform", expanded && "rotate-90")}
+            />
+          </button>
+        ) : (
+          <span className="w-6 shrink-0" aria-hidden="true" />
+        )}
+        {onToggleOverlay && (
+          <button
+            onClick={() => onToggleOverlay(!overlayEnabled)}
+            className="rounded-lg p-1.5 text-primary hover:bg-card"
+            aria-label={`${overlayEnabled ? "Hide" : "Show"} ${project.name} on parent`}
+            title="Toggle live overlay on the open parent"
+          >
+            {overlayEnabled ? <Eye className="size-3.5" /> : <EyeOff className="size-3.5" />}
+          </button>
+        )}
+        <button onClick={onOpen} className="min-w-0 flex-1 px-1.5 py-1.5 text-left">
+          <span className="block truncate font-medium" title={project.name}>
+            {project.name}
+          </span>
+          <span className="block truncate text-[10px] text-muted-foreground">
+            {active ? "Open now · " : ""}
+            {subproject ? "Subproject · " : ""}
+            {project.versionCount} saves
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setNavigationOpen((current) => !current)}
+          className={cn("rounded-lg p-1.5 hover:bg-card", navigationOpen && "bg-card text-primary")}
+          title="Navigation visibility"
+          aria-label={`Navigation visibility for ${project.name}`}
+          aria-expanded={navigationOpen}
+        >
+          <Navigation className="size-3.5" />
+        </button>
+        <button onClick={onDuplicate} className="rounded-lg p-1.5 hover:bg-card" title="Duplicate">
+          <Copy className="size-3.5" />
+        </button>
+        {onPromote && (
+          <button
+            onClick={onPromote}
+            className="rounded-lg p-1.5 hover:bg-card"
+            title="Move to top level"
+          >
+            <ArrowUpFromLine className="size-3.5" />
+          </button>
+        )}
+        <button
+          onClick={onDelete}
+          className="rounded-lg p-1.5 text-destructive hover:bg-destructive/10"
+          aria-label={`Delete ${project.name}`}
+        >
+          <Trash2 className="size-3.5" />
+        </button>
+      </div>
+
+      {navigationOpen && (
+        <section className="mx-1 mb-1 mt-1 rounded-lg border border-border bg-card p-2.5">
+          <h4 className="mb-2 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            <Navigation className="size-3" /> Navigation
+          </h4>
+          <label className="flex cursor-pointer items-center gap-2 rounded-lg px-1 py-1.5 hover:bg-accent">
+            <input
+              type="checkbox"
+              checked={project.showInQuickSwitch}
+              disabled={savingNavigation}
+              onChange={(event) =>
+                void updateNavigation({
+                  showInQuickSwitch: event.target.checked,
+                  showInMobileBar: project.showInMobileBar,
+                })
+              }
+              className="accent-primary"
+            />
+            <span className="font-medium">Show in Quick Switch</span>
+          </label>
+          <label className="flex cursor-pointer items-center gap-2 rounded-lg px-1 py-1.5 hover:bg-accent">
+            <input
+              type="checkbox"
+              checked={project.showInMobileBar}
+              disabled={savingNavigation}
+              onChange={(event) =>
+                void updateNavigation({
+                  showInQuickSwitch: project.showInQuickSwitch,
+                  showInMobileBar: event.target.checked,
+                })
+              }
+              className="accent-primary"
+            />
+            <span className="font-medium">Show in Mobile Project Bar</span>
+          </label>
+          <p className="mt-1 text-[9px] leading-relaxed text-muted-foreground">
+            These lists are independent. Hiding this project here does not remove or change it.
+          </p>
+        </section>
+      )}
     </div>
   );
+}
+
+function projectAncestorIds(
+  projectId: string,
+  projects: ReturnType<typeof useWorkbench>["projects"],
+): string[] {
+  const byId = new Map(projects.map((project) => [project.id, project]));
+  const ancestors: string[] = [];
+  const visited = new Set<string>();
+  let current = byId.get(projectId);
+  while (current?.parentProjectId && !visited.has(current.parentProjectId)) {
+    visited.add(current.parentProjectId);
+    ancestors.unshift(current.parentProjectId);
+    current = byId.get(current.parentProjectId);
+  }
+  return ancestors;
 }
 
 function TabButton({

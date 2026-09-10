@@ -394,6 +394,10 @@ export interface WorkbenchApi extends WorkbenchState {
   deleteProject: (id: string) => Promise<void>;
   restoreVersion: (versionId: string) => Promise<void>;
   setAutosave: (enabled: boolean) => Promise<void>;
+  setProjectNavigationVisibility: (
+    id: string,
+    visibility: { showInQuickSwitch: boolean; showInMobileBar: boolean },
+  ) => Promise<void>;
   setPrintComposition: (composition: PrintComposition) => void;
   toProjectState: () => ProjectState;
   layersInGroup: (groupId: string) => GisLayer[];
@@ -570,6 +574,8 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
         state: { ...sharedState, name: share.name, mapView: share.mapView },
         versions: [],
         parentProjectId: null,
+        showInQuickSwitch: false,
+        showInMobileBar: false,
       };
       skipNextAutosave.current = true;
       setState((current) => ({
@@ -1379,6 +1385,10 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
         name,
         stateCopy,
         source.parentProjectId,
+        {
+          showInQuickSwitch: source.showInQuickSwitch,
+          showInMobileBar: source.showInMobileBar,
+        },
       );
       const projects = await workspaceProjectStore.list(userId);
       skipNextAutosave.current = true;
@@ -1560,6 +1570,23 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
         autosave: enabled,
         projects: current.projects.map((project) =>
           project.id === projectId ? { ...project, autosave: enabled } : project,
+        ),
+      }));
+    },
+    [auth.user?.id],
+  );
+
+  const setProjectNavigationVisibility = useCallback<
+    WorkbenchApi["setProjectNavigationVisibility"]
+  >(
+    async (id, visibility) => {
+      const userId = auth.user?.id;
+      if (!userId) return;
+      await workspaceProjectStore.setNavigationVisibility(userId, id, visibility);
+      setState((current) => ({
+        ...current,
+        projects: current.projects.map((project) =>
+          project.id === id ? { ...project, ...visibility } : project,
         ),
       }));
     },
@@ -1825,6 +1852,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       deleteProject,
       restoreVersion,
       setAutosave,
+      setProjectNavigationVisibility,
       setPrintComposition,
       toProjectState,
       layersInGroup: (groupId) => state.layers.filter((l) => l.groupId === groupId),
@@ -1882,6 +1910,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       deleteProject,
       restoreVersion,
       setAutosave,
+      setProjectNavigationVisibility,
       setProjectArea,
       setPrintComposition,
       toProjectState,

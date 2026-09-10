@@ -39,6 +39,7 @@ import { TourProvider, useTours } from "./TourProvider";
 import { ConnectionManager } from "./ConnectionManager";
 import { FieldModule } from "./FieldModule";
 import { ProjectAreaControl } from "./ProjectAreaControl";
+import { ProjectSwitcher } from "./ProjectSwitcher";
 
 const AiAssistant = lazy(() =>
   import("./AiAssistant").then((module) => ({ default: module.AiAssistant })),
@@ -130,18 +131,7 @@ function MobileShell() {
           <span className="flex size-8 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground">
             <LandDraftMark className="size-5" />
           </span>
-          <select
-            value={wb.projectId}
-            onChange={(event) => void wb.openProject(event.target.value)}
-            aria-label="Switch project"
-            className="min-w-0 w-16 bg-transparent text-sm font-bold outline-none sm:w-36"
-          >
-            {wb.projects.map((project) => (
-              <option key={project.id} value={project.id}>
-                {project.name}
-              </option>
-            ))}
-          </select>
+          <ProjectSwitcher mode="mobile" />
           <button
             onClick={() => {
               const params = new URLSearchParams(window.location.search);

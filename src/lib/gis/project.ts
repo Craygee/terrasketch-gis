@@ -28,6 +28,8 @@ export interface StoredProject {
   state: ProjectState;
   versions: ProjectVersion[];
   parentProjectId: string | null;
+  showInQuickSwitch: boolean;
+  showInMobileBar: boolean;
 }
 
 export interface ProjectSummary {
@@ -37,6 +39,13 @@ export interface ProjectSummary {
   autosave: boolean;
   versionCount: number;
   parentProjectId: string | null;
+  showInQuickSwitch: boolean;
+  showInMobileBar: boolean;
+}
+
+export interface ProjectNavigationVisibility {
+  showInQuickSwitch: boolean;
+  showInMobileBar: boolean;
 }
 
 const WORKSPACE_KEY = "landdraft.workspace.v2";
@@ -71,6 +80,8 @@ const compactState = (state: ProjectState): ProjectState => {
 
 const compactProject = (project: StoredProject): StoredProject => ({
   ...project,
+  showInQuickSwitch: project.showInQuickSwitch ?? true,
+  showInMobileBar: project.showInMobileBar ?? true,
   state: compactState(project.state),
   versions: (project.versions ?? []).map((version) => ({
     ...version,
@@ -100,6 +111,8 @@ const summary = (project: StoredProject): ProjectSummary => ({
   autosave: project.autosave,
   versionCount: project.versions.length,
   parentProjectId: project.parentProjectId ?? project.state.parentProjectId ?? null,
+  showInQuickSwitch: project.showInQuickSwitch ?? true,
+  showInMobileBar: project.showInMobileBar ?? true,
 });
 
 interface CloudProjectRow {
@@ -111,6 +124,8 @@ interface CloudProjectRow {
   autosave: boolean;
   state_path: string;
   parent_project_id: string | null;
+  show_in_quick_switch: boolean;
+  show_in_mobile_bar: boolean;
   last_opened_at: string;
   map_view: MapViewState;
 }
@@ -192,11 +207,13 @@ const storedFromCloud = async (row: CloudProjectRow): Promise<StoredProject> => 
     state: { ...state, mapView: row.map_view ?? state.mapView },
     versions: await cloudVersions(row.id),
     parentProjectId: row.parent_project_id,
+    showInQuickSwitch: row.show_in_quick_switch ?? true,
+    showInMobileBar: row.show_in_mobile_bar ?? true,
   };
 };
 
 const cloudProjectSelect =
-  "id,owner_id,name,created_at,updated_at,autosave,state_path,parent_project_id,last_opened_at,map_view";
+  "id,owner_id,name,created_at,updated_at,autosave,state_path,parent_project_id,show_in_quick_switch,show_in_mobile_bar,last_opened_at,map_view";
 
 const touchCloudProject = async (projectId: string) => {
   await cloudDataRequest("/rest/v1/rpc/touch_project_opened", {
@@ -212,6 +229,7 @@ const createCloudProject = async (
   id: string = window.crypto.randomUUID(),
   autosave = true,
   parentProjectId: string | null = null,
+  navigation: Partial<ProjectNavigationVisibility> = {},
 ) => {
   const cleanState = { ...compactState(state), name, parentProjectId };
   const statePath = await uploadProjectState(userId, id, cleanState);
@@ -232,6 +250,20 @@ const createCloudProject = async (
       body: JSON.stringify({ p_project_id: id, p_parent_project_id: parentProjectId }),
     });
   row.parent_project_id = parentProjectId;
+  const showInQuickSwitch = navigation.showInQuickSwitch ?? true;
+  const showInMobileBar = navigation.showInMobileBar ?? true;
+  if (!showInQuickSwitch || !showInMobileBar) {
+    await cloudDataRequest(`/rest/v1/projects?id=eq.${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({
+        show_in_quick_switch: showInQuickSwitch,
+        show_in_mobile_bar: showInMobileBar,
+      }),
+    });
+  }
+  row.show_in_quick_switch = showInQuickSwitch;
+  row.show_in_mobile_bar = showInMobileBar;
   return storedFromCloud(row);
 };
 
@@ -239,9 +271,18 @@ export const workspaceProjectStore = {
   async list(userId: string): Promise<ProjectSummary[]> {
     if (cloudConfigured) {
       const rows = await cloudDataRequest<
-        Pick<CloudProjectRow, "id" | "name" | "updated_at" | "autosave" | "parent_project_id">[]
+        Pick<
+          CloudProjectRow,
+          | "id"
+          | "name"
+          | "updated_at"
+          | "autosave"
+          | "parent_project_id"
+          | "show_in_quick_switch"
+          | "show_in_mobile_bar"
+        >[]
       >(
-        "/rest/v1/projects?select=id,name,updated_at,autosave,parent_project_id&order=updated_at.desc",
+        "/rest/v1/projects?select=id,name,updated_at,autosave,parent_project_id,show_in_quick_switch,show_in_mobile_bar&order=updated_at.desc",
       );
       const versionRows = await cloudDataRequest<{ project_id: string }[]>(
         "/rest/v1/project_versions?select=project_id",
@@ -256,6 +297,8 @@ export const workspaceProjectStore = {
         autosave: row.autosave,
         versionCount: counts.get(row.id) ?? 0,
         parentProjectId: row.parent_project_id,
+        showInQuickSwitch: row.show_in_quick_switch ?? true,
+        showInMobileBar: row.show_in_mobile_bar ?? true,
       }));
     }
     return readProjects()
@@ -269,9 +312,10 @@ export const workspaceProjectStore = {
     name: string,
     state: ProjectState,
     parentProjectId: string | null = null,
+    navigation: Partial<ProjectNavigationVisibility> = {},
   ): Promise<StoredProject> {
     if (cloudConfigured)
-      return createCloudProject(userId, name, state, undefined, true, parentProjectId);
+      return createCloudProject(userId, name, state, undefined, true, parentProjectId, navigation);
     const now = Date.now();
     const cleanState = { ...compactState(state), name, parentProjectId };
     const project: StoredProject = {
@@ -286,6 +330,8 @@ export const workspaceProjectStore = {
         { id: window.crypto.randomUUID(), savedAt: now, reason: "manual", state: cleanState },
       ],
       parentProjectId,
+      showInQuickSwitch: navigation.showInQuickSwitch ?? true,
+      showInMobileBar: navigation.showInMobileBar ?? true,
     };
     writeProjects([...readProjects(), project]);
     window.localStorage.setItem(lastProjectKey(userId), project.id);
@@ -424,6 +470,32 @@ export const workspaceProjectStore = {
     writeProjects(projects);
   },
 
+  async setNavigationVisibility(
+    userId: string,
+    projectId: string,
+    visibility: ProjectNavigationVisibility,
+  ): Promise<void> {
+    if (cloudConfigured) {
+      await cloudDataRequest(`/rest/v1/projects?id=eq.${encodeURIComponent(projectId)}`, {
+        method: "PATCH",
+        headers: { Prefer: "return=minimal" },
+        body: JSON.stringify({
+          show_in_quick_switch: visibility.showInQuickSwitch,
+          show_in_mobile_bar: visibility.showInMobileBar,
+        }),
+      });
+      return;
+    }
+    const projects = readProjects();
+    const index = projects.findIndex((item) => item.userId === userId && item.id === projectId);
+    if (index < 0) return;
+    projects[index] = {
+      ...(projects[index] as StoredProject),
+      ...visibility,
+    };
+    writeProjects(projects);
+  },
+
   async setMapView(userId: string, projectId: string, mapView: MapViewState): Promise<void> {
     if (cloudConfigured) {
       await cloudDataRequest("/rest/v1/rpc/update_project_view", {
@@ -504,6 +576,10 @@ export const workspaceProjectStore = {
           project.id,
           project.autosave,
           project.parentProjectId ?? null,
+          {
+            showInQuickSwitch: project.showInQuickSwitch ?? true,
+            showInMobileBar: project.showInMobileBar ?? true,
+          },
         );
         imported += 1;
       }
