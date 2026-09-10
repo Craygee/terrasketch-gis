@@ -138,6 +138,38 @@ const timestampInputValue = (timestamp: number) => {
 type LayerDropPosition = "before" | "inside" | "after";
 type GroupDropPosition = "before" | "inside" | "after";
 
+function LayerInsertionLine({
+  target,
+  active,
+  dragging,
+  position,
+}: {
+  target: string;
+  active: boolean;
+  dragging: boolean;
+  position: "before" | "after";
+}) {
+  return (
+    <div
+      data-layer-insert-target={target}
+      className={cn(
+        "absolute inset-x-0 z-20 h-3 touch-none select-none",
+        position === "before" ? "-top-2" : "-bottom-2",
+        dragging && "cursor-row-resize",
+      )}
+      aria-hidden="true"
+    >
+      <span
+        className={cn(
+          "pointer-events-none absolute inset-x-1 top-1/2 h-px -translate-y-1/2 rounded-full bg-border/70 transition-all",
+          dragging && "bg-primary/35",
+          active && "inset-x-0 h-1 bg-primary shadow-[0_0_0_2px_hsl(var(--background))]",
+        )}
+      />
+    </div>
+  );
+}
+
 export function LayerPanel() {
   const wb = useWorkbench();
   const auth = useAuth();
@@ -554,8 +586,33 @@ export function LayerPanel() {
     }
 
     const hit = document.elementFromPoint(event.clientX, event.clientY);
-    const layerRepository = hit?.closest<HTMLElement>("[data-layer-sublayer-drop-id]");
+    const insertionLine = hit?.closest<HTMLElement>("[data-layer-insert-target]");
     const dragged = draggedLayerRef.current;
+    if (insertionLine) {
+      const insertionTarget = insertionLine.dataset["layerInsertTarget"];
+      const [, targetLayerId, position] = (insertionTarget ?? "").split(":") as [
+        string,
+        string,
+        LayerDropPosition,
+      ];
+      const targetLayer = wb.layers.find((layer) => layer.id === targetLayerId);
+      const invalidLayerTargets = dragged
+        ? nestedLayerIds(dragged, wb.groups, wb.layers)
+        : new Set<string>();
+      if (
+        !insertionTarget ||
+        !targetLayer ||
+        targetLayerId === dragged ||
+        position === "inside" ||
+        invalidLayerTargets.has(targetLayerId)
+      ) {
+        updateDropTarget(null);
+        return;
+      }
+      updateDropTarget(insertionTarget);
+      return;
+    }
+    const layerRepository = hit?.closest<HTMLElement>("[data-layer-sublayer-drop-id]");
     if (layerRepository) {
       const targetLayerId = layerRepository.dataset["layerSublayerDropId"];
       const invalidLayerTargets = dragged
@@ -580,9 +637,9 @@ export function LayerPanel() {
       }
       const bounds = layerRow.getBoundingClientRect();
       const position: LayerDropPosition =
-        event.clientY < bounds.top + bounds.height * 0.15
+        event.clientY < bounds.top + bounds.height * 0.1
           ? "before"
-          : event.clientY > bounds.bottom - bounds.height * 0.15
+          : event.clientY > bounds.bottom - bounds.height * 0.1
             ? "after"
             : "inside";
       updateDropTarget(`layer:${targetLayerId}:${position}`);
@@ -1063,7 +1120,7 @@ export function LayerPanel() {
                   {layers.length === 0 && childGroups.length === 0 && (
                     <p className="px-2 py-1 text-[11px] text-muted-foreground">Nothing here yet</p>
                   )}
-                  {layers.map((layer) => {
+                  {layers.map((layer, layerIndex) => {
                     const selected = wb.selectedLayerIds.includes(layer.id);
                     const expanded = expandedLayers.has(layer.id);
                     const sqm = expanded ? squareMeters(layer.data) : 0;
@@ -1096,25 +1153,29 @@ export function LayerPanel() {
                       <div
                         key={layer.id}
                         className={cn(
-                          "rounded-xl border px-1.5 py-1.5 transition-all",
+                          "relative rounded-xl border px-1.5 py-1.5 transition-all",
                           selected
                             ? "border-primary bg-accent/60"
                             : "border-transparent hover:bg-sidebar-accent",
                           draggedLayerId === layer.id && "opacity-40",
-                          dropTarget === `layer:${layer.id}:before` &&
-                            "border-primary shadow-[0_-3px_0_0_hsl(var(--primary))]",
+                          dropTarget === `layer:${layer.id}:before` && "border-primary",
                           dropTarget === `layer:${layer.id}:inside` &&
                             "border-primary bg-primary/10 ring-2 ring-primary/70",
                           dropTarget === `layer-repository:${layer.id}` &&
                             "border-primary bg-primary/10 ring-2 ring-primary/70",
-                          dropTarget === `layer:${layer.id}:after` &&
-                            "border-primary shadow-[0_3px_0_0_hsl(var(--primary))]",
+                          dropTarget === `layer:${layer.id}:after` && "border-primary",
                           groupDropTarget === `layer:${layer.id}` &&
                             "border-primary bg-primary/10 ring-2 ring-primary/70",
                           groupDropTarget === `layer-repository:${layer.id}` &&
                             "border-primary bg-primary/10 ring-2 ring-primary/70",
                         )}
                       >
+                        <LayerInsertionLine
+                          target={`layer:${layer.id}:before`}
+                          active={dropTarget === `layer:${layer.id}:before`}
+                          dragging={draggedLayerId !== null}
+                          position="before"
+                        />
                         <div
                           data-layer-drop-id={layer.id}
                           className="flex min-h-8 items-center gap-1.5"
@@ -1230,7 +1291,7 @@ export function LayerPanel() {
                             onPointerUp={endPointerLayerDrag}
                             onPointerCancel={resetLayerDrag}
                             aria-label={`Drag ${layer.name} to reorder or nest`}
-                            title="Drop on the middle of a layer to make a sublayer, on a group to move it, or near an edge to reorder"
+                            title="Drag to a line between layers to reorder, onto a layer to nest, or onto a group to move"
                             className={cn(
                               "-mr-0.5 flex size-7 shrink-0 touch-none select-none items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground",
                               draggedLayerId === layer.id
@@ -1846,6 +1907,14 @@ export function LayerPanel() {
                             <FeatureSublayers layer={layer} onZoom={zoomTo} />
                           </div>
                         )}
+                        {layerIndex === layers.length - 1 && (
+                          <LayerInsertionLine
+                            target={`layer:${layer.id}:after`}
+                            active={dropTarget === `layer:${layer.id}:after`}
+                            dragging={draggedLayerId !== null}
+                            position="after"
+                          />
+                        )}
                       </div>
                     );
                   })}
@@ -1947,7 +2016,7 @@ function LayerChildrenTree({
   const parentLayer = wb.layers.find((layer) => layer.id === parentLayerId);
   const moveOutGroupId = container?.parentId ?? parentLayer?.groupId;
 
-  const renderLayer = (layer: GisLayer, depth: number): ReactNode => {
+  const renderLayer = (layer: GisLayer, depth: number, isLast = false): ReactNode => {
     const selected = wb.selectedLayerIds.includes(layer.id);
     const expanded = expandedLayerIds.has(layer.id);
     const hasChildren = wb.groups.some((group) => group.containerLayerId === layer.id);
@@ -1956,22 +2025,35 @@ function LayerChildrenTree({
         key={layer.id}
         style={{ marginLeft: depth * 10 }}
         className={cn(
-          "rounded-lg border px-1 py-1 transition-all",
+          "relative rounded-lg border px-1 py-1 transition-all",
           selected ? "border-primary bg-accent/60" : "border-border/70 bg-card/70",
           draggedLayerId === layer.id && "opacity-40",
-          layerDropTarget === `layer:${layer.id}:before` &&
-            "shadow-[0_-3px_0_0_hsl(var(--primary))]",
+          layerDropTarget === `layer:${layer.id}:before` && "border-primary",
           layerDropTarget === `layer:${layer.id}:inside` &&
             "border-primary bg-primary/10 ring-2 ring-primary/70",
           layerDropTarget === `layer-repository:${layer.id}` &&
             "border-primary bg-primary/10 ring-2 ring-primary/70",
-          layerDropTarget === `layer:${layer.id}:after` && "shadow-[0_3px_0_0_hsl(var(--primary))]",
+          layerDropTarget === `layer:${layer.id}:after` && "border-primary",
           groupDropTarget === `layer:${layer.id}` &&
             "border-primary bg-primary/10 ring-2 ring-primary/70",
           groupDropTarget === `layer-repository:${layer.id}` &&
             "border-primary bg-primary/10 ring-2 ring-primary/70",
         )}
       >
+        <LayerInsertionLine
+          target={`layer:${layer.id}:before`}
+          active={layerDropTarget === `layer:${layer.id}:before`}
+          dragging={draggedLayerId !== null}
+          position="before"
+        />
+        {isLast && (
+          <LayerInsertionLine
+            target={`layer:${layer.id}:after`}
+            active={layerDropTarget === `layer:${layer.id}:after`}
+            dragging={draggedLayerId !== null}
+            position="after"
+          />
+        )}
         <div data-layer-drop-id={layer.id} className="flex min-h-7 items-center gap-1">
           <input
             type="checkbox"
@@ -2043,7 +2125,7 @@ function LayerChildrenTree({
             onPointerUp={onLayerPointerUp}
             onPointerCancel={onLayerPointerCancel}
             aria-label={`Drag ${layer.name} sublayer`}
-            title="Drag onto another layer to nest it, or onto a data group to move it out"
+            title="Drag to a line between layers to reorder, onto another layer to nest, or onto a data group to move"
             className={cn(
               "flex size-6 shrink-0 touch-none select-none items-center justify-center rounded text-muted-foreground hover:bg-accent",
               draggedLayerId === layer.id ? "cursor-grabbing" : "cursor-grab",
@@ -2142,6 +2224,11 @@ function LayerChildrenTree({
       </div>
     );
   };
+
+  const renderLayerList = (siblings: GisLayer[], depth: number): ReactNode =>
+    siblings.map((layer, layerIndex) =>
+      renderLayer(layer, depth, layerIndex === siblings.length - 1),
+    );
 
   const renderGroup = (group: LayerGroup, depth: number): ReactNode => {
     const groupIds = nestedGroupIds(group.id, wb.groups);
@@ -2298,7 +2385,7 @@ function LayerChildrenTree({
         {groupStyleFor === group.id && <GroupStyleEditor group={group} layers={groupedLayers} />}
         {!group.collapsed && (
           <div className="mt-1 space-y-1 border-l border-primary/20 pl-1">
-            {directLayers.map((layer) => renderLayer(layer, depth + 1))}
+            {renderLayerList(directLayers, depth + 1)}
             {directGroups.map((child) => renderGroup(child, depth + 1))}
             {directGroups.length === 0 && directLayers.length === 0 && (
               <p className="px-2 py-1 text-[9px] text-muted-foreground">Nothing here yet</p>
@@ -2348,7 +2435,7 @@ function LayerChildrenTree({
               <Layers className="size-3 text-primary" /> Layer sublayers
               <span className="num ml-auto">{directLayers.length}</span>
             </p>
-            {directLayers.map((layer) => renderLayer(layer, 0))}
+            {renderLayerList(directLayers, 0)}
             <div
               data-layer-sublayer-drop-id={parentLayerId}
               className={cn(

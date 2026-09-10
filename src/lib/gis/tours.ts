@@ -69,7 +69,7 @@ export const TOUR_REGISTRY: Record<TourKind, TourStep[]> = {
       id: "layer-organization",
       target: "layer-panel",
       title: "Groups, subgroups and styling",
-      body: "Drag a layer or entire data group to control drawing order. Drop a group on another group to nest it, or drop either a group or layer on the middle of a layer row to place it in that layer's expandable Sublayers & groups tree. Nested items remain independently draggable and hideable; dropping near a row edge reorders instead. Check multiple groups to make a new parent, or use a group's compact action menu to rename, style, add a subgroup or safely delete its structure without deleting its layers.",
+      body: "Drag a layer or entire data group to control drawing order. Drop a layer on a highlighted line between sibling layers to set its exact top-to-bottom position. Drop a group on another group to nest it, or drop either a group or layer on the middle of a layer row to place it in that layer's expandable Sublayers & groups tree. Nested items remain independently draggable and hideable. Check multiple groups to make a new parent, or use a group's compact action menu to rename, style, add a subgroup or safely delete its structure without deleting its layers.",
     },
     {
       id: "attributes",
