@@ -25,6 +25,7 @@ import { buildPhotographyAssessment } from "./photography.server";
 
 type CacheEntry<T> = { value: T; expiresAt: number };
 const cache = new Map<string, CacheEntry<unknown>>();
+const inFlightCache = new Map<string, Promise<unknown>>();
 
 const nwsHeaders = {
   Accept: "application/geo+json, application/json",
@@ -52,14 +53,25 @@ async function withCache<T>(
     recordWeatherUsage({ ...metric, success: true, cacheHit: true });
     return existing.value;
   }
+
+  const pending = inFlightCache.get(key) as Promise<T> | undefined;
+  if (pending) {
+    recordWeatherUsage({ ...metric, success: true, cacheHit: true });
+    return pending;
+  }
+
+  const loading = loader();
+  inFlightCache.set(key, loading);
   try {
-    const value = await loader();
+    const value = await loading;
     cache.set(key, { value, expiresAt: Date.now() + ttlMs });
     recordWeatherUsage({ ...metric, success: true, cacheHit: false });
     return value;
   } catch (error) {
     recordWeatherUsage({ ...metric, success: false, cacheHit: false });
     throw error;
+  } finally {
+    if (inFlightCache.get(key) === loading) inFlightCache.delete(key);
   }
 }
 
@@ -228,7 +240,15 @@ async function loadWmsRasterFrames(spec: WmsRasterSpec, signal: AbortSignal) {
     spec.temporalKind === "observed" ? 60_000 : 5 * 60_000,
     { providerId: spec.providerId, product: spec.product },
     async (): Promise<WeatherRasterFrame[]> => {
-      const xml = await fetchText(spec.capabilitiesUrl, signal);
+      // Several visible products can share the same NOAA WMS service. Coalesce
+      // the capabilities request so enabling Clouds + Visible does not perform
+      // identical network work at the edge.
+      const xml = await withCache(
+        `wms-capabilities:${spec.capabilitiesUrl}`,
+        spec.temporalKind === "observed" ? 60_000 : 5 * 60_000,
+        { providerId: spec.providerId, product: `${spec.product} capabilities` },
+        () => fetchText(spec.capabilitiesUrl, signal),
+      );
       const advertised = spec.layerNames.filter((name) =>
         new RegExp(`<Name>\\s*${escapeRegex(name)}\\s*</Name>`, "i").test(xml),
       );
@@ -911,7 +931,9 @@ function health(
 export async function loadWeatherBundle(request: WeatherPointRequest): Promise<WeatherBundle> {
   const startedAt = Date.now();
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15_000);
+  const timeout = setTimeout(() => controller.abort(), 20_000);
+  const rasterController = new AbortController();
+  const rasterTimeout = setTimeout(() => rasterController.abort(), 20_000);
   const generatedAt = new Date().toISOString();
   const warnings: string[] = [];
   const providerHealth: WeatherProviderHealth[] = [];
@@ -928,6 +950,17 @@ export async function loadWeatherBundle(request: WeatherPointRequest): Promise<W
   let stationObservations: WeatherStationObservation[] = [];
   let photography: WeatherBundle["photography"] = null;
   let nwsCovered = false;
+
+  // Start requested map imagery immediately. Previously these requests waited
+  // behind current conditions, alerts and radar while sharing their timeout,
+  // which could leave valid NOAA layers with no time to load in an edge worker.
+  const rasterSpecs = rasterSpecsFor({ ...request, requestedLayerIds: [...requestedLayers] });
+  const rasterTask = Promise.allSettled(
+    rasterSpecs.map(async (spec) => ({
+      spec,
+      frames: await loadWmsRasterFrames(spec, rasterController.signal),
+    })),
+  );
 
   try {
     try {
@@ -1140,13 +1173,7 @@ export async function loadWeatherBundle(request: WeatherPointRequest): Promise<W
       }
     }
 
-    const rasterSpecs = rasterSpecsFor({ ...request, requestedLayerIds: [...requestedLayers] });
-    const rasterResults = await Promise.allSettled(
-      rasterSpecs.map(async (spec) => ({
-        spec,
-        frames: await loadWmsRasterFrames(spec, controller.signal),
-      })),
-    );
+    const rasterResults = await rasterTask;
     rasterResults.forEach((result, index) => {
       if (result.status === "fulfilled") {
         rasterFrames.push(...result.value.frames);
@@ -1239,6 +1266,7 @@ export async function loadWeatherBundle(request: WeatherPointRequest): Promise<W
       );
   } finally {
     clearTimeout(timeout);
+    clearTimeout(rasterTimeout);
   }
 
   return {

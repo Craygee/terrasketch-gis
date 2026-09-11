@@ -13,6 +13,12 @@ Users do not need to paste URLs or create accounts for these layers.
 If one of these says `CONNECTION ERROR`, inspect **Weather → Data sources**. `NO DATA HERE` should be
 reserved for a successful connection that has no product covering the inspected point/time.
 
+The Weather point request uses a POST server function so its requested-layer list is preserved across
+the Vite development server and Cloudflare. Requested NOAA WMS overlays start in parallel with point
+conditions/radar, have an independent timeout, and coalesce shared GetCapabilities calls. This keeps
+Clouds, Visible Satellite and Lightning from being starved by a slower unrelated provider while still
+returning source-specific health and warning information when an overlay genuinely fails.
+
 ## What “Setup required” means
 
 These entries have a stable LandDraft layer/capability id but do not yet have a reviewed production

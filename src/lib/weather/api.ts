@@ -25,7 +25,9 @@ function validatePoint(input: unknown): WeatherPointRequest {
   };
 }
 
-export const getWeatherAtPoint = createServerFn({ method: "GET" })
+// POST preserves the requested layer array consistently across the local Vite
+// server and Cloudflare's server-function transport.
+export const getWeatherAtPoint = createServerFn({ method: "POST" })
   .validator(validatePoint)
   .handler(async ({ data }) => {
     const { loadWeatherBundle } = await import("./gateway.server");
