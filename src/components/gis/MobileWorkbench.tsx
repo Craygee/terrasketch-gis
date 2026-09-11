@@ -18,6 +18,7 @@ import {
   Navigation,
 } from "lucide-react";
 import { Toaster } from "@/components/ui/sonner";
+import { LANDDRAFT_APP_CHANNEL, LANDDRAFT_APP_VERSION } from "@/lib/appVersion";
 import { WorkbenchProvider, useWorkbench } from "@/lib/gis/store";
 import { MapRefProvider, useMapRef } from "@/lib/gis/mapRef";
 import { MapCanvas } from "./MapCanvas";
@@ -440,6 +441,13 @@ function MobileTourMenu({ onDone }: { onDone: () => void }) {
         />
         Offer tours when major new features are added
       </label>
+      <div className="flex items-center justify-between rounded-xl bg-secondary px-3 py-2">
+        <span className="font-medium">LandDraft version</span>
+        <span className="font-mono text-[10px]">
+          v{LANDDRAFT_APP_VERSION}
+          {LANDDRAFT_APP_CHANNEL === "test" ? " · test" : ""}
+        </span>
+      </div>
       <div className="mt-3 border-t border-border pt-3">
         <div className="mb-2 flex items-center gap-2 text-muted-foreground">
           <UserRound className="size-4" />

@@ -20,6 +20,7 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import { useAuth } from "@/lib/auth";
+import { projectVersionLabel } from "@/lib/appVersion";
 import { useWorkbench } from "@/lib/gis/store";
 import { cn } from "@/lib/utils";
 
@@ -295,12 +296,24 @@ export function ProjectMenu({ onClose }: { onClose: () => void }) {
                       <div className="min-w-0 flex-1">
                         <span className="block text-[11px] font-medium">
                           {index === 0 ? "Latest · " : ""}
-                          {new Date(version.savedAt).toLocaleString()}
+                          {projectVersionLabel(version.savedAt)}
                         </span>
                         <span className="capitalize text-[10px] text-muted-foreground">
-                          {version.reason}
+                          {new Date(version.savedAt).toLocaleString()} · {version.reason}
                         </span>
                       </div>
+                      <button
+                        onClick={() =>
+                          void wb
+                            .duplicateVersion(version.id)
+                            .then(() => toast.success("Version duplicated as a new project"))
+                        }
+                        className="flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-medium hover:bg-accent"
+                        title={`Duplicate ${projectVersionLabel(version.savedAt)} as a separate project`}
+                        aria-label={`Duplicate ${projectVersionLabel(version.savedAt)} as a separate project`}
+                      >
+                        <Copy className="size-3" /> Copy
+                      </button>
                       <button
                         onClick={() =>
                           void wb
@@ -308,6 +321,7 @@ export function ProjectMenu({ onClose }: { onClose: () => void }) {
                             .then(() => toast.success("Save restored"))
                         }
                         className="flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-medium hover:bg-accent"
+                        title={`Restore ${projectVersionLabel(version.savedAt)}`}
                       >
                         <RotateCcw className="size-3" /> Restore
                       </button>

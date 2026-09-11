@@ -1,5 +1,6 @@
 {
   "name": "landdraft-gis",
+  "version": "0.9.0",
   "private": true,
   "sideEffects": false,
   "type": "module",

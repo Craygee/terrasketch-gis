@@ -22,6 +22,11 @@ import { toast } from "sonner";
 
 import { useWorkbench } from "@/lib/gis/store";
 import { useAuth } from "@/lib/auth";
+import {
+  LANDDRAFT_APP_CHANNEL,
+  LANDDRAFT_APP_VERSION,
+  LANDDRAFT_APP_VERSION_SHORT,
+} from "@/lib/appVersion";
 import { useMapRef } from "@/lib/gis/mapRef";
 import { cn } from "@/lib/utils";
 import { ExportPanel } from "./ExportMenu";
@@ -108,7 +113,20 @@ export function TopBar({
           <LandDraftMark className="size-5" />
         </span>
         <div className="hidden leading-tight min-[420px]:block">
-          <h1 className="text-sm font-bold tracking-tight">LandDraft</h1>
+          <div className="flex items-center gap-1.5">
+            <h1 className="text-sm font-bold tracking-tight">LandDraft</h1>
+            <span
+              className={cn(
+                "hidden rounded-full px-1.5 py-0.5 text-[8px] font-semibold min-[1100px]:inline",
+                LANDDRAFT_APP_CHANNEL === "test"
+                  ? "bg-amber-100 text-amber-800"
+                  : "bg-secondary text-muted-foreground",
+              )}
+              title={`LandDraft ${LANDDRAFT_APP_VERSION}`}
+            >
+              v{LANDDRAFT_APP_VERSION_SHORT}
+            </span>
+          </div>
           <p className="hidden text-[10px] text-muted-foreground min-[1100px]:block">
             Map, measure and shape the land
           </p>
@@ -510,6 +528,12 @@ export function TopBar({
           <h3 className="mb-1 mt-4 border-t border-border pt-3 text-sm font-semibold">
             About LandDraft
           </h3>
+          <div className="mb-2 flex items-center justify-between rounded-lg bg-secondary px-2.5 py-2">
+            <span className="font-medium">Application version</span>
+            <span className="font-mono text-[10px]" title={LANDDRAFT_APP_VERSION}>
+              v{LANDDRAFT_APP_VERSION}
+            </span>
+          </div>
           <p className="text-muted-foreground">
             A friendly browser workbench for maps: bring your own files, stream official public
             datasets, draw, measure, label and organize multiple projects.

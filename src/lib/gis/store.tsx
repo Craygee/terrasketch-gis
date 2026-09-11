@@ -34,6 +34,7 @@ import {
   type StoredProject,
 } from "./project";
 import { useAuth } from "@/lib/auth";
+import { LANDDRAFT_APP_VERSION, projectVersionLabel } from "@/lib/appVersion";
 import { downloadSharedState, shareStore, type MapShare, type ShareRole } from "./sharing";
 
 export type DrawMode =
@@ -133,6 +134,7 @@ const initialState = (): WorkbenchState => ({
 
 const blankProjectState = (name: string): ProjectState => ({
   version: 1,
+  landDraftVersion: LANDDRAFT_APP_VERSION,
   name,
   groups: [
     { id: "working", name: "Working layers", collapsed: false },
@@ -296,6 +298,7 @@ const normalizedProject = (
 
 const stateToProject = (state: WorkbenchState): ProjectState => ({
   version: 1,
+  landDraftVersion: LANDDRAFT_APP_VERSION,
   name: state.projectName,
   groups: state.groups,
   layers: state.layers.map(durableLayer),
@@ -385,6 +388,7 @@ export interface WorkbenchApi extends WorkbenchState {
   createProject: (name: string) => Promise<void>;
   createSubproject: (name: string, parentProjectId?: string) => Promise<void>;
   duplicateProject: (id: string) => Promise<void>;
+  duplicateVersion: (versionId: string) => Promise<void>;
   promoteProject: (id: string) => Promise<void>;
   toggleSubprojectOverlay: (id: string, enabled: boolean) => Promise<void>;
   openProject: (id: string) => Promise<void>;
@@ -1397,6 +1401,39 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
     [auth.user?.id],
   );
 
+  const duplicateVersion = useCallback<WorkbenchApi["duplicateVersion"]>(
+    async (versionId) => {
+      const userId = auth.user?.id;
+      const current = stateRef.current;
+      const version = current.saveHistory.find((item) => item.id === versionId);
+      if (!userId || !version || !current.projectId) return;
+      const versionState = await workspaceProjectStore.loadVersion(version);
+      const versionLabel = projectVersionLabel(version.savedAt);
+      const name = `${current.projectName} — ${versionLabel} copy`;
+      const sourceSummary = current.projects.find((project) => project.id === current.projectId);
+      const stateCopy: ProjectState = {
+        ...versionState,
+        landDraftVersion: LANDDRAFT_APP_VERSION,
+        name,
+        enabledSubprojectIds: [],
+      };
+      const project = await workspaceProjectStore.create(
+        userId,
+        name,
+        stateCopy,
+        current.parentProjectId,
+        {
+          showInQuickSwitch: sourceSummary?.showInQuickSwitch ?? true,
+          showInMobileBar: sourceSummary?.showInMobileBar ?? true,
+        },
+      );
+      const projects = await workspaceProjectStore.list(userId);
+      skipNextAutosave.current = true;
+      setState((value) => ({ ...value, ...normalizedProject(project, projects) }));
+    },
+    [auth.user?.id],
+  );
+
   const promoteProject = useCallback<WorkbenchApi["promoteProject"]>(
     async (id) => {
       const userId = auth.user?.id;
@@ -1843,6 +1880,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       createProject,
       createSubproject,
       duplicateProject,
+      duplicateVersion,
       promoteProject,
       toggleSubprojectOverlay,
       openProject,
@@ -1901,6 +1939,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       createProject,
       createSubproject,
       duplicateProject,
+      duplicateVersion,
       promoteProject,
       toggleSubprojectOverlay,
       openProject,

@@ -1,4 +1,5 @@
 import type { MapViewState, ProjectState } from "./types";
+import { LANDDRAFT_APP_VERSION, projectVersionLabel } from "@/lib/appVersion";
 import {
   cloudConfigured,
   cloudDataRequest,
@@ -610,11 +611,20 @@ export const workspaceProjectStore = {
 };
 
 export function downloadProjectFile(state: ProjectState) {
-  const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
+  const exportedAt = Date.now();
+  const versionedState: ProjectState = {
+    ...state,
+    landDraftVersion: LANDDRAFT_APP_VERSION,
+    savedAt: exportedAt,
+  };
+  const blob = new Blob([JSON.stringify(versionedState, null, 2)], {
+    type: "application/json",
+  });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `${state.name.replace(/[^\w-]+/g, "_") || "landdraft"}.landdraft.json`;
+  const projectName = state.name.replace(/[^\w-]+/g, "_") || "landdraft";
+  a.download = `${projectName}_${projectVersionLabel(exportedAt)}.landdraft.json`;
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 2000);
 }

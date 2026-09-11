@@ -305,6 +305,8 @@ export const emptyProjectRecords = (): ProjectRecords => ({
 
 export interface ProjectState {
   version: 1;
+  /** LandDraft application release that created this project snapshot or backup. */
+  landDraftVersion?: string;
   name: string;
   groups: LayerGroup[];
   layers: GisLayer[];
