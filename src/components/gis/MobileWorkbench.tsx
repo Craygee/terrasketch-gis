@@ -17,6 +17,7 @@ import {
   Monitor,
   Navigation,
   Waypoints,
+  CloudSun,
 } from "lucide-react";
 import { Toaster } from "@/components/ui/sonner";
 import { LANDDRAFT_APP_CHANNEL, LANDDRAFT_APP_VERSION } from "@/lib/appVersion";
@@ -272,6 +273,18 @@ function MobileShell() {
                   <strong className="block text-sm">Pipeline engineering</strong>
                   <span className="text-[10px] text-muted-foreground">
                     Optional route, hydraulic profile, quantities, and estimating workspace.
+                  </span>
+                </span>
+              </button>
+              <button
+                onClick={() => window.location.assign("/weather")}
+                className="flex items-center gap-3 rounded-2xl bg-secondary p-4 text-left"
+              >
+                <CloudSun className="size-5 text-primary" />
+                <span>
+                  <strong className="block text-sm">Weather & meteorology</strong>
+                  <span className="text-[10px] text-muted-foreground">
+                    Radar, alerts, forecasts, weather inspection, and professional layers.
                   </span>
                 </span>
               </button>

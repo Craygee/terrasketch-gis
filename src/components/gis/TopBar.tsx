@@ -18,6 +18,7 @@ import {
   NotebookTabs,
   ChevronDown,
   Waypoints,
+  CloudSun,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -160,6 +161,12 @@ export function TopBar({
             tourId="top-public-data"
           />
         )}
+        <BarBtn
+          icon={<CloudSun className="size-4" />}
+          label="Weather"
+          help="Open the optional Weather & Meteorology workspace"
+          onClick={() => window.location.assign("/weather")}
+        />
         {wb.canEditProject && (
           <BarBtn
             icon={<Waypoints className="size-4" />}
@@ -360,6 +367,12 @@ export function TopBar({
               }}
             />
           )}
+          <MenuAction
+            icon={<CloudSun className="size-4" />}
+            label="Weather & meteorology"
+            help="Radar, warnings, forecasts, weather inspection, and professional layers"
+            onClick={() => window.location.assign("/weather")}
+          />
           {wb.canEditProject && (
             <MenuAction
               icon={<Waypoints className="size-4" />}

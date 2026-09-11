@@ -51,9 +51,9 @@ Every payload uses normalized SI values internally and carries provider, source/
 expiration timestamps, quality, observed/model/forecast/development status, resolution when known,
 and a raw source reference. UI unit preferences format values without changing stored values.
 
-Core types begin with `WeatherObservation`, `WeatherAlert`, `WeatherFrame`, `LightningStrike`,
-`WeatherEvent`, `WindFieldSample`, `WeatherProviderHealth`, `WeatherLayerDefinition`,
-`WeatherTimelineState`, `WeatherPreset`, and `WeatherWorkspaceState`. Future radar sweeps, model
+Current core types are `WeatherObservation`, `WeatherForecastPeriod`, `WeatherAlert`, `RadarFrame`,
+`WeatherProviderHealth`, `WeatherLayerDefinition`, `WeatherTimelineState`, `WeatherPreset`, and
+`WeatherWorkspaceState`. Future lightning strikes, weather events, wind fields, radar sweeps, model
 runs, soundings, tracks and cross sections extend the same metadata contract.
 
 ## Provider selection and failure behavior
@@ -69,21 +69,24 @@ original timestamp and becomes `STALE`; it never becomes `LIVE` because a cache 
 
 ## Cache strategy
 
-| Product | Initial policy |
-| --- | --- |
-| Active warnings | 30 seconds; revalidate, retain issued/updated times |
-| Current/point forecast | 5 minutes |
-| Immutable radar/satellite frames | Content/frame timestamp key; long immutable cache |
-| Forecast grid/model run | Run + forecast-hour key; immutable after ingestion |
-| Observations | Product cadence with short TTL |
-| Provider health | 60 seconds, separate from user payload cache |
+| Product                          | Initial policy                                      |
+| -------------------------------- | --------------------------------------------------- |
+| Active warnings                  | 30 seconds; revalidate, retain issued/updated times |
+| Current/point forecast           | 5 minutes                                           |
+| Immutable radar/satellite frames | Content/frame timestamp key; long immutable cache   |
+| Forecast grid/model run          | Run + forecast-hour key; immutable after ingestion  |
+| Observations                     | Product cadence with short TTL                      |
+| Provider health                  | 60 seconds, separate from user payload cache        |
 
 The Phase 1 gateway uses bounded in-process caching suitable for test deployment. Distributed cache,
 object storage, queues and spatial/temporal database tables require production coordination.
 
 ## Map/rendering strategy
 
-- Warning polygons use viewport-bounded GeoJSON and MapLibre fill/line layers.
+- Active warning polygons for the inspected point use bounded GeoJSON and MapLibre fill/line layers.
+- Initial CONUS radar uses official NOAA/NWS MRMS quality-controlled composite base-reflectivity
+  WMS tiles and immutable source timestamps. It is labeled radar only because the source product is
+  radar-derived; future satellite/model precipitation must remain separate.
 - Raster and scientific grids use tiled products; the client never downloads a country-scale raw
   archive for a viewport.
 - Wind particles require a reviewed gridded vector source and WebGL worker implementation; Phase 1
@@ -117,4 +120,3 @@ indexes. These require RLS and administration/billing review before migration.
 Delivery is product-specific: warnings can use short polling/SSE, lightning may use a licensed
 stream, radar updates at scan cadence, and model data at run cadence. There is deliberately no
 global every-few-seconds poll.
-

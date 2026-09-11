@@ -4,8 +4,18 @@ This file is the durable handoff for future LandDraft Weather sessions.
 
 ## Current phase
 
-Phase 1 foundation is being built on `feature/test-module-development`. The module is optional,
-test-only, schema-free, and must not change billing, plans, production infrastructure or backups.
+Phase 1 foundation is implemented on `feature/test-module-development`. The module is optional,
+test-only, schema-free, and does not change billing, plans, production infrastructure or backups.
+
+Implemented entry point: `/weather`.
+
+Implemented code:
+
+- `src/lib/weather/`: contracts, registry, capability hooks, source normalization, formatting,
+  project-state defaults, server function, provider gateway and in-memory test usage telemetry.
+- `src/components/weather/`: responsive workspace, layer drawer, inspector, source health, radar
+  timeline and MapLibre weather overlay.
+- `src/routes/weather.tsx`: authenticated, lazy-loaded module route.
 
 Read first:
 
@@ -27,8 +37,9 @@ Read first:
 
 ## Next disciplined increments
 
-1. Complete and validate Phase 1 provider gateway, workspace, warnings and project persistence.
-2. Add tiled NOAA radar/satellite ingestion only after endpoint/product QA and rendering tests.
+1. Validate Phase 1 in the public test deployment across desktop, tablet and phone viewports.
+2. Add reviewed satellite imagery and a production global forecast provider; the initial official
+   NOAA/NWS MRMS composite radar adapter is complete for CONUS.
 3. Add severe event normalization/cards without algorithmically upgrading possible rotation to a
    confirmed tornado.
 4. Coordinate organization settings, RLS, provider secrets, cache/usage tables and entitlements
@@ -44,3 +55,16 @@ Read first:
 - Weather provider identity/contact strings and operational monitoring.
 - Optional notification providers, each disabled until explicitly configured.
 
+## Current provider/environment configuration
+
+- NWS point forecast, latest station observation and active alert polygons require no private key.
+- NOAA/NWS MRMS CONUS radar metadata and tiled imagery require no private key.
+- `WEATHER_ENABLE_OPEN_METEO_EVALUATION=true` enables the optional global evaluation adapter on the
+  server. Keep it disabled for production unless its usage/license has been reviewed. Output is
+  labeled `MODEL` and `EVALUATION_ONLY`.
+- Lightning, advanced satellite, numerical model grids and commercial global radar have no
+  credential configured and deliberately return `not-configured`/`Unavailable` states.
+
+Live adapter verification on 2026-09-11 at Midland, Texas returned a current NWS observation, 14
+forecast periods and 15 official MRMS frames. Provider failure still returns normalized health and
+warnings instead of fabricated values.

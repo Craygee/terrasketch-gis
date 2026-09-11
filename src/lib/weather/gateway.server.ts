@@ -17,8 +17,9 @@ import type {
   WeatherPointRequest,
   WeatherProviderHealth,
 } from "./types";
+import { recordWeatherUsage } from "./telemetry.server";
 
-type CacheEntry<T> = { value: T; expiresAt: number; lastSuccess: string };
+type CacheEntry<T> = { value: T; expiresAt: number };
 const cache = new Map<string, CacheEntry<unknown>>();
 
 const nwsHeaders = {
@@ -36,19 +37,24 @@ function roundCoordinate(value: number) {
   return Math.round(value * 1000) / 1000;
 }
 
-async function withCache<T>(key: string, ttlMs: number, loader: () => Promise<T>): Promise<T> {
+async function withCache<T>(
+  key: string,
+  ttlMs: number,
+  metric: { providerId: string; product: string },
+  loader: () => Promise<T>,
+): Promise<T> {
   const existing = cache.get(key) as CacheEntry<T> | undefined;
-  if (existing && existing.expiresAt > Date.now()) return existing.value;
+  if (existing && existing.expiresAt > Date.now()) {
+    recordWeatherUsage({ ...metric, success: true, cacheHit: true });
+    return existing.value;
+  }
   try {
     const value = await loader();
-    cache.set(key, {
-      value,
-      expiresAt: Date.now() + ttlMs,
-      lastSuccess: new Date().toISOString(),
-    });
+    cache.set(key, { value, expiresAt: Date.now() + ttlMs });
+    recordWeatherUsage({ ...metric, success: true, cacheHit: false });
     return value;
   } catch (error) {
-    if (existing) return existing.value;
+    recordWeatherUsage({ ...metric, success: false, cacheHit: false });
     throw error;
   }
 }
@@ -273,102 +279,117 @@ async function loadNwsPoint(
   placeName?: string;
 }> {
   const coordinate = `${roundCoordinate(request.latitude)},${roundCoordinate(request.longitude)}`;
-  return withCache(`nws-point:${coordinate}`, 5 * 60_000, async () => {
-    const pointUrl = `https://api.weather.gov/points/${coordinate}`;
-    let point: NwsPointResponse;
-    try {
-      point = await fetchJson<NwsPointResponse>(pointUrl, signal, nwsHeaders);
-    } catch (error) {
-      if (error instanceof Error && error.message.includes("HTTP 404"))
-        return { covered: false, current: null, forecast: [] };
-      throw error;
-    }
-    const place = point.properties?.relativeLocation?.properties;
-    const placeName = [place?.city, place?.state].filter(Boolean).join(", ") || undefined;
-    const forecastUrl = point.properties?.forecast;
-    const stationsUrl = point.properties?.observationStations;
-    const [forecastResult, stationsResult] = await Promise.allSettled([
-      forecastUrl
-        ? fetchJson<NwsForecastResponse>(forecastUrl, signal, nwsHeaders)
-        : Promise.resolve(null),
-      stationsUrl
-        ? fetchJson<NwsStationsResponse>(stationsUrl, signal, nwsHeaders)
-        : Promise.resolve(null),
-    ]);
-    const forecastPayload = forecastResult.status === "fulfilled" ? forecastResult.value : null;
-    const stations = stationsResult.status === "fulfilled" ? stationsResult.value : null;
-    const stationUrl = stations?.features?.find((station) => station.id)?.id;
-    let current: WeatherObservation | null = null;
-    if (stationUrl) {
+  return withCache(
+    `nws-point:${coordinate}`,
+    5 * 60_000,
+    { providerId: "nws", product: "point-weather" },
+    async () => {
+      const pointUrl = `https://api.weather.gov/points/${coordinate}`;
+      let point: NwsPointResponse;
       try {
-        const observation = await fetchJson<NwsObservationResponse>(
-          `${stationUrl}/observations/latest`,
-          signal,
-          nwsHeaders,
-        );
-        current = normalizeNwsObservation(observation, request, placeName);
-      } catch {
-        // A point forecast still remains useful; health reports degraded if current is unavailable.
+        point = await fetchJson<NwsPointResponse>(pointUrl, signal, nwsHeaders);
+      } catch (error) {
+        if (error instanceof Error && error.message.includes("HTTP 404"))
+          return { covered: false, current: null, forecast: [] };
+        throw error;
       }
-    }
-    return {
-      covered: true,
-      current,
-      forecast:
-        forecastPayload && forecastUrl ? normalizeNwsForecast(forecastPayload, forecastUrl) : [],
-      ...(placeName ? { placeName } : {}),
-    };
-  });
+      const place = point.properties?.relativeLocation?.properties;
+      const placeName = [place?.city, place?.state].filter(Boolean).join(", ") || undefined;
+      const forecastUrl = point.properties?.forecast;
+      const stationsUrl = point.properties?.observationStations;
+      const [forecastResult, stationsResult] = await Promise.allSettled([
+        forecastUrl
+          ? fetchJson<NwsForecastResponse>(forecastUrl, signal, nwsHeaders)
+          : Promise.resolve(null),
+        stationsUrl
+          ? fetchJson<NwsStationsResponse>(stationsUrl, signal, nwsHeaders)
+          : Promise.resolve(null),
+      ]);
+      const forecastPayload = forecastResult.status === "fulfilled" ? forecastResult.value : null;
+      const stations = stationsResult.status === "fulfilled" ? stationsResult.value : null;
+      const stationUrl = stations?.features?.find((station) => station.id)?.id;
+      let current: WeatherObservation | null = null;
+      if (stationUrl) {
+        try {
+          const observation = await fetchJson<NwsObservationResponse>(
+            `${stationUrl}/observations/latest`,
+            signal,
+            nwsHeaders,
+          );
+          current = normalizeNwsObservation(observation, request, placeName);
+        } catch {
+          // A point forecast still remains useful; health reports degraded if current is unavailable.
+        }
+      }
+      return {
+        covered: true,
+        current,
+        forecast:
+          forecastPayload && forecastUrl ? normalizeNwsForecast(forecastPayload, forecastUrl) : [],
+        ...(placeName ? { placeName } : {}),
+      };
+    },
+  );
 }
 
 async function loadNwsAlerts(request: WeatherPointRequest, signal: AbortSignal) {
   const coordinate = `${roundCoordinate(request.latitude)},${roundCoordinate(request.longitude)}`;
-  return withCache(`nws-alerts:${coordinate}`, 30_000, async () => {
-    const url = `https://api.weather.gov/alerts/active?point=${coordinate}`;
-    const payload = await fetchJson<NwsAlertsResponse>(url, signal, nwsHeaders);
-    return normalizeNwsAlerts(payload);
-  });
+  return withCache(
+    `nws-alerts:${coordinate}`,
+    30_000,
+    { providerId: "nws", product: "active-alerts" },
+    async () => {
+      const url = `https://api.weather.gov/alerts/active?point=${coordinate}`;
+      const payload = await fetchJson<NwsAlertsResponse>(url, signal, nwsHeaders);
+      return normalizeNwsAlerts(payload);
+    },
+  );
 }
 
 async function loadRadarFrames(signal: AbortSignal): Promise<RadarFrame[]> {
-  return withCache("noaa-radar:conus", 60_000, async () => {
-    const capabilitiesUrl =
-      "https://opengeo.ncep.noaa.gov/geoserver/conus/conus_bref_qcd/ows?request=GetCapabilities&service=wms&version=1.3.0";
-    const response = await fetch(capabilitiesUrl, { signal });
-    if (!response.ok) throw new Error(`Provider returned HTTP ${response.status}`);
-    const xml = await response.text();
-    const dimension = xml.match(
-      /<Dimension[^>]*name="time"[^>]*default="([^"]+)"[^>]*>([\s\S]*?)<\/Dimension>/i,
-    );
-    const defaultTime = validIso(dimension?.[1]);
-    const times = (dimension?.[2] ?? "")
-      .split(",")
-      .map((value) => validIso(value.trim()))
-      .filter((value): value is string => Boolean(value))
-      .slice(-15);
-    const uniqueTimes = Array.from(new Set(defaultTime ? [...times, defaultTime] : times));
-    const base =
-      "https://opengeo.ncep.noaa.gov/geoserver/conus/conus_bref_qcd/ows?SERVICE=WMS&REQUEST=GetMap&VERSION=1.1.1&LAYERS=conus_bref_qcd&STYLES=radar_reflectivity&FORMAT=image/png&TRANSPARENT=true&SRS=EPSG:3857&WIDTH=256&HEIGHT=256&BBOX={bbox-epsg-3857}";
-    return uniqueTimes.map((timestamp) => ({
-      id: `noaa-mrms-${timestamp}`,
-      timestamp,
-      tileUrlTemplate: `${base}&TIME=${encodeURIComponent(timestamp)}`,
-      legendUrl:
-        "https://opengeo.ncep.noaa.gov/geoserver/conus/conus_bref_qcd/ows?service=WMS&version=1.3.0&request=GetLegendGraphic&format=image/png&width=500&height=30&layer=conus_bref_qcd",
-      coverage: "conus",
-      source: sourceMetadata({
-        providerId: "noaa-nws-mrms",
-        providerName: "NOAA/NWS MRMS",
-        product: "quality-controlled composite base reflectivity",
-        temporalKind: "observed",
-        sourceTimestamp: timestamp,
-        validTime: timestamp,
-        resolution: "1 km composite grid",
-        rawSourceReference: capabilitiesUrl,
-        attribution: "NOAA / National Weather Service MRMS",
-      }),
-    }));
-  });
+  return withCache(
+    "noaa-radar:conus",
+    60_000,
+    { providerId: "noaa-nws-mrms", product: "radar-reflectivity-frames" },
+    async () => {
+      const capabilitiesUrl =
+        "https://opengeo.ncep.noaa.gov/geoserver/conus/conus_bref_qcd/ows?request=GetCapabilities&service=wms&version=1.3.0";
+      const response = await fetch(capabilitiesUrl, { signal });
+      if (!response.ok) throw new Error(`Provider returned HTTP ${response.status}`);
+      const xml = await response.text();
+      const dimension = xml.match(
+        /<Dimension[^>]*name="time"[^>]*default="([^"]+)"[^>]*>([\s\S]*?)<\/Dimension>/i,
+      );
+      const defaultTime = validIso(dimension?.[1]);
+      const times = (dimension?.[2] ?? "")
+        .split(",")
+        .map((value) => validIso(value.trim()))
+        .filter((value): value is string => Boolean(value))
+        .slice(-15);
+      const uniqueTimes = Array.from(new Set(defaultTime ? [...times, defaultTime] : times));
+      const base =
+        "https://opengeo.ncep.noaa.gov/geoserver/conus/conus_bref_qcd/ows?SERVICE=WMS&REQUEST=GetMap&VERSION=1.1.1&LAYERS=conus_bref_qcd&STYLES=radar_reflectivity&FORMAT=image/png&TRANSPARENT=true&SRS=EPSG:3857&WIDTH=256&HEIGHT=256&BBOX={bbox-epsg-3857}";
+      return uniqueTimes.map((timestamp) => ({
+        id: `noaa-mrms-${timestamp}`,
+        timestamp,
+        tileUrlTemplate: `${base}&TIME=${encodeURIComponent(timestamp)}`,
+        legendUrl:
+          "https://opengeo.ncep.noaa.gov/geoserver/conus/conus_bref_qcd/ows?service=WMS&version=1.3.0&request=GetLegendGraphic&format=image/png&width=500&height=30&layer=conus_bref_qcd",
+        coverage: "conus",
+        source: sourceMetadata({
+          providerId: "noaa-nws-mrms",
+          providerName: "NOAA/NWS MRMS",
+          product: "quality-controlled composite base reflectivity",
+          temporalKind: "observed",
+          sourceTimestamp: timestamp,
+          validTime: timestamp,
+          resolution: "1 km composite grid",
+          rawSourceReference: capabilitiesUrl,
+          attribution: "NOAA / National Weather Service MRMS",
+        }),
+      }));
+    },
+  );
 }
 
 function withinConus(request: WeatherPointRequest) {
@@ -510,7 +531,10 @@ export async function loadWeatherBundle(request: WeatherPointRequest): Promise<W
           products: ["surface observation", "point forecast", "alerts"],
           coverage: "United States and territories",
           latencyMs: Date.now() - startedAt,
-          lastSuccessfulRequest: generatedAt,
+          lastSuccessfulRequest:
+            nws.current?.source.receivedTimestamp ??
+            forecast[0]?.source.receivedTimestamp ??
+            generatedAt,
           lastUpdate: nws.current?.source.sourceTimestamp ?? forecast[0]?.source.sourceTimestamp,
           error: nws.covered ? undefined : "Point is outside NWS point-forecast coverage",
           costClass: "public",
@@ -544,7 +568,7 @@ export async function loadWeatherBundle(request: WeatherPointRequest): Promise<W
             products: ["global model conditions"],
             coverage: "Global model coverage",
             latencyMs: Date.now() - startedAt,
-            lastSuccessfulRequest: generatedAt,
+            lastSuccessfulRequest: current.source.receivedTimestamp,
             lastUpdate: current.source.sourceTimestamp,
             costClass: "evaluation",
           }),
@@ -588,7 +612,7 @@ export async function loadWeatherBundle(request: WeatherPointRequest): Promise<W
             products: ["radar-reflectivity"],
             coverage: "CONUS",
             latencyMs: Date.now() - startedAt,
-            lastSuccessfulRequest: generatedAt,
+            lastSuccessfulRequest: radarFrames.at(-1)?.source.receivedTimestamp ?? generatedAt,
             lastUpdate: radarFrames.at(-1)?.timestamp,
             costClass: "public",
           }),

@@ -121,6 +121,18 @@ export interface WeatherProviderHealth {
   costClass: "public" | "evaluation" | "commercial" | "self-hosted";
 }
 
+export interface WeatherProviderUsageMetric {
+  providerId: string;
+  product: string;
+  requests: number;
+  successes: number;
+  failures: number;
+  cacheHits: number;
+  dataVolumeBytes: number | null;
+  estimatedCostUsd: number | null;
+  updatedAt: string;
+}
+
 export interface WeatherLayerDefinition {
   id: string;
   name: string;

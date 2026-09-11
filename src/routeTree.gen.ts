@@ -15,6 +15,7 @@ import { Route as MobileRouteImport } from './routes/mobile'
 import { Route as PipelineRouteImport } from './routes/pipeline'
 import { Route as PrivacyRouteImport } from './routes/privacy'
 import { Route as TermsRouteImport } from './routes/terms'
+import { Route as WeatherRouteImport } from './routes/weather'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -46,6 +47,11 @@ const TermsRoute = TermsRouteImport.update({
   path: '/terms',
   getParentRoute: () => rootRouteImport,
 } as any)
+const WeatherRoute = WeatherRouteImport.update({
+  id: '/weather',
+  path: '/weather',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -54,6 +60,7 @@ export interface FileRoutesByFullPath {
   '/pipeline': typeof PipelineRoute
   '/privacy': typeof PrivacyRoute
   '/terms': typeof TermsRoute
+  '/weather': typeof WeatherRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -62,6 +69,7 @@ export interface FileRoutesByTo {
   '/pipeline': typeof PipelineRoute
   '/privacy': typeof PrivacyRoute
   '/terms': typeof TermsRoute
+  '/weather': typeof WeatherRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -71,12 +79,27 @@ export interface FileRoutesById {
   '/pipeline': typeof PipelineRoute
   '/privacy': typeof PrivacyRoute
   '/terms': typeof TermsRoute
+  '/weather': typeof WeatherRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/about' | '/mobile' | '/pipeline' | '/privacy' | '/terms'
+  fullPaths:
+    | '/'
+    | '/about'
+    | '/mobile'
+    | '/pipeline'
+    | '/privacy'
+    | '/terms'
+    | '/weather'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/about' | '/mobile' | '/pipeline' | '/privacy' | '/terms'
+  to:
+    | '/'
+    | '/about'
+    | '/mobile'
+    | '/pipeline'
+    | '/privacy'
+    | '/terms'
+    | '/weather'
   id:
     | '__root__'
     | '/'
@@ -85,6 +108,7 @@ export interface FileRouteTypes {
     | '/pipeline'
     | '/privacy'
     | '/terms'
+    | '/weather'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -94,6 +118,7 @@ export interface RootRouteChildren {
   PipelineRoute: typeof PipelineRoute
   PrivacyRoute: typeof PrivacyRoute
   TermsRoute: typeof TermsRoute
+  WeatherRoute: typeof WeatherRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -140,6 +165,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof TermsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/weather': {
+      id: '/weather'
+      path: '/weather'
+      fullPath: '/weather'
+      preLoaderRoute: typeof WeatherRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -150,6 +182,7 @@ const rootRouteChildren: RootRouteChildren = {
   PipelineRoute: PipelineRoute,
   PrivacyRoute: PrivacyRoute,
   TermsRoute: TermsRoute,
+  WeatherRoute: WeatherRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

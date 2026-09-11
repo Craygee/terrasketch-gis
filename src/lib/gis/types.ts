@@ -1,5 +1,6 @@
 import type { Feature, FeatureCollection, Geometry } from "geojson";
 import type { PipelineEngineeringState } from "@/lib/pipeline/types";
+import type { WeatherWorkspaceState } from "@/lib/weather/types";
 
 export type FillPattern =
   "solid" | "diagonal" | "horizontal" | "vertical" | "crosshatch" | "dotted";
@@ -326,6 +327,8 @@ export interface ProjectState {
   records?: ProjectRecords;
   /** Optional specialized pipeline workspace. Core GIS projects do not create this until opened. */
   pipelineEngineering?: PipelineEngineeringState;
+  /** Optional Weather workspace. Core GIS projects remain usable when this module is unopened. */
+  weatherWorkspace?: WeatherWorkspaceState;
   shareSource?: {
     shareId: string;
     sourceProjectId: string;

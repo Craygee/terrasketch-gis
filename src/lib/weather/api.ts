@@ -14,7 +14,7 @@ function validatePoint(input: unknown): WeatherPointRequest {
 }
 
 export const getWeatherAtPoint = createServerFn({ method: "GET" })
-  .inputValidator(validatePoint)
+  .validator(validatePoint)
   .handler(async ({ data }) => {
     const { loadWeatherBundle } = await import("./gateway.server");
     return loadWeatherBundle(data);

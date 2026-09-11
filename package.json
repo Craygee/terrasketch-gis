@@ -10,7 +10,7 @@
     "build:dev": "vite build --mode development",
     "preview": "vite preview",
     "lint": "eslint .",
-    "test:weather": "node --experimental-strip-types --test src/lib/weather/normalize.test.ts",
+    "test:weather": "node --experimental-strip-types --test src/lib/weather/*.test.ts",
     "format": "prettier --write ."
   },
   "overrides": {
