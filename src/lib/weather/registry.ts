@@ -1,4 +1,5 @@
 import type { WeatherLayerDefinition } from "./types";
+import { XWEATHER_ADDITIONAL_LAYERS } from "./xweatherCatalog.ts";
 
 export const WEATHER_LAYER_GROUPS = [
   "Current",
@@ -11,6 +12,7 @@ export const WEATHER_LAYER_GROUPS = [
   "Meteorology",
   "Aviation",
   "Tropical",
+  "Maritime",
   "Winter",
   "Fire & air quality",
   "Storm chaser",
@@ -36,11 +38,34 @@ export const weatherLayerRegistry: WeatherLayerDefinition[] = [
     mobileVisibility: "primary",
     audience: "basic",
   },
+  ...XWEATHER_ADDITIONAL_LAYERS.map((item): WeatherLayerDefinition => ({
+    id: item.id,
+    name: item.name,
+    group: item.group,
+    description: item.description,
+    capability: item.capability,
+    dataType: "raster",
+    providerProducts: [`xweather:${item.providerLayer}`],
+    ...(item.units ? { units: item.units } : {}),
+    defaultOpacity: 0.68,
+    minZoom: item.minZoom ?? 0,
+    maxZoom: item.maxZoom ?? 18,
+    animationSupport: item.animationSupport ?? true,
+    timeSupport: true,
+    inspectSupport: item.inspectSupport ?? false,
+    mobileVisibility: "professional",
+    audience: "professional",
+    attribution: "Weather data and imagery © Vaisala Xweather",
+    providerName: "Vaisala Xweather Raster Maps",
+    providerCostMultiplier: item.costMultiplier,
+    coverage: item.coverage,
+  })),
   {
     id: "weather.radar.simple",
     name: "Radar",
     group: "Radar",
-    description: "Quality-controlled composite base reflectivity where official coverage exists.",
+    description:
+      "Official U.S. composite reflectivity with configured global Xweather fallback outside coverage or during an outage.",
     capability: "weather.radar",
     dataType: "raster",
     providerProducts: ["radar-reflectivity"],
@@ -99,7 +124,7 @@ export const weatherLayerRegistry: WeatherLayerDefinition[] = [
     name: "Clouds",
     group: "Satellite & clouds",
     description:
-      "Live NOAA satellite cloud imagery, using GOES over its coverage and a global mosaic elsewhere.",
+      "Configured global Xweather color-infrared cloud imagery with NOAA satellite fallback when commercial access is unavailable.",
     capability: "weather.satellite",
     dataType: "raster",
     providerProducts: ["satellite-clouds"],
@@ -164,7 +189,7 @@ export const weatherLayerRegistry: WeatherLayerDefinition[] = [
     name: "Lightning activity",
     group: "Lightning",
     description:
-      "NOAA 15-minute lightning strike-density grid. This is regional activity density, not individual strike locations.",
+      "Configured Xweather global flash imagery with NOAA 15-minute regional strike-density fallback.",
     capability: "weather.lightning",
     dataType: "raster",
     providerProducts: ["lightning-density"],

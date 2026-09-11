@@ -22,6 +22,7 @@ import {
   PanelRight,
   RefreshCw,
   Save,
+  Search,
   ShieldAlert,
   Thermometer,
   Wind,
@@ -685,14 +686,25 @@ function WeatherLayerPanel({
   onWorkspace: (workspace: WeatherWorkspaceState) => void;
 }) {
   const [draggedLayer, setDraggedLayer] = useState<string | null>(null);
+  const [layerSearch, setLayerSearch] = useState("");
   const [dropTarget, setDropTarget] = useState<{
     id: string;
     edge: "before" | "after";
   } | null>(null);
-  const selectedLayers = weatherLayerRegistry.filter(
-    (layer) =>
-      layer.group === workspace.selectedCategory && (advanced || layer.audience === "basic"),
-  );
+  const normalizedSearch = layerSearch.trim().toLowerCase();
+  const selectedLayers = weatherLayerRegistry.filter((layer) => {
+    if (!advanced && !normalizedSearch && layer.audience !== "basic") return false;
+    if (!normalizedSearch) return layer.group === workspace.selectedCategory;
+    return [
+      layer.name,
+      layer.description,
+      layer.group,
+      layer.providerName,
+      ...layer.providerProducts,
+    ]
+      .filter(Boolean)
+      .some((value) => value!.toLowerCase().includes(normalizedSearch));
+  });
   const activeLayers = workspace.layerOrder.flatMap((id) => {
     const layer = weatherLayerRegistry.find((candidate) => candidate.id === id);
     return layer && workspace.layerSettings[id]?.visible ? [layer] : [];
@@ -715,7 +727,19 @@ function WeatherLayerPanel({
                   ? Boolean(bundle?.photography)
                   : hasRaster;
     if (available) return { ready: true, label: "AVAILABLE" };
-    if (!CONNECTED_LAYERS.has(id)) return { ready: false, label: "SETUP REQUIRED" };
+    const registered = weatherLayerRegistry.find((layer) => layer.id === id);
+    const hasConnectedProvider = registered?.providerProducts.some((product) =>
+      product.startsWith("xweather:"),
+    );
+    const xweatherNeedsSetup =
+      hasConnectedProvider &&
+      bundle?.providerHealth.some(
+        (provider) =>
+          provider.providerId === "xweather-raster" && provider.status === "not-configured",
+      );
+    if (xweatherNeedsSetup) return { ready: false, label: "SETUP REQUIRED" };
+    if (!CONNECTED_LAYERS.has(id) && !hasConnectedProvider)
+      return { ready: false, label: "SETUP REQUIRED" };
     return { ready: false, label: requested ? "NO DATA HERE" : "TURN ON TO LOAD" };
   };
   const savePreset = () => {
@@ -841,6 +865,26 @@ function WeatherLayerPanel({
         </div>
       </details>
 
+      <label className="flex items-center gap-2 rounded-xl border border-border bg-background px-3 py-2">
+        <Search className="size-3.5 shrink-0 text-muted-foreground" />
+        <input
+          value={layerSearch}
+          onChange={(event) => setLayerSearch(event.target.value)}
+          placeholder="Search weather layers"
+          className="min-w-0 flex-1 bg-transparent text-[10px] outline-none placeholder:text-muted-foreground"
+        />
+        {layerSearch && (
+          <button
+            type="button"
+            onClick={() => setLayerSearch("")}
+            className="rounded-md p-0.5 text-muted-foreground hover:bg-secondary"
+            aria-label="Clear weather layer search"
+          >
+            <X className="size-3" />
+          </button>
+        )}
+      </label>
+
       <div className="grid grid-cols-2 gap-1">
         {groups.map((group) => (
           <button
@@ -862,7 +906,9 @@ function WeatherLayerPanel({
       <div className="space-y-2">
         {!selectedLayers.length && (
           <div className="rounded-2xl bg-secondary p-3 text-[10px] text-muted-foreground">
-            Turn on professional layers to see this category.
+            {normalizedSearch
+              ? "No weather layers match this search."
+              : "Turn on professional layers to see this category."}
           </div>
         )}
         {selectedLayers.map((layer) => {
@@ -909,6 +955,23 @@ function WeatherLayerPanel({
                   >
                     {status.label}
                   </span>
+                  {layer.providerName && (
+                    <div className="mt-1 flex flex-wrap gap-1 text-[8px] text-muted-foreground">
+                      <span className="rounded-full bg-secondary px-1.5 py-0.5">
+                        {layer.providerName}
+                      </span>
+                      {layer.providerCostMultiplier && (
+                        <span className="rounded-full bg-secondary px-1.5 py-0.5">
+                          {layer.providerCostMultiplier}× provider access
+                        </span>
+                      )}
+                      {layer.coverage && (
+                        <span className="rounded-full bg-secondary px-1.5 py-0.5">
+                          {layer.coverage}
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
               {setting.visible && layer.dataType !== "point" && (

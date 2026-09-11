@@ -32,15 +32,15 @@ GetCapabilities becomes available, the normal verified frame timeline resumes au
 These entries have a stable LandDraft layer/capability id but do not yet have a reviewed production
 adapter. Setup is an engineering and licensing task, not an end-user URL field:
 
-| Capability                          | Recommended route                                              | Dependency / possible cost                                              |
-| ----------------------------------- | -------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| Individual global lightning strikes | Licensed Xweather/Tomorrow.io-class feed after contract review | API credentials, redistribution rights and usage fees                   |
-| Global/commercial radar             | Commercial tiled radar feed or regional official adapters      | Contract and tile/egress costs                                          |
-| Additional professional radar moments | NOAA Level II ingestion and radar-site processing            | Compute, object storage, tiling and monitoring                          |
-| Upper-air/convective/model grids    | ECMWF Open Data or other licensed model ingestion              | GRIB processing, object storage, CDN/egress; attribution                |
-| Soundings/hodographs                | Observed/model sounding adapter plus validated calculations    | Processing and numerical-validation work                                |
-| Storm objects/rotation              | Phase 2 normalization and carefully validated derived analysis | Engineering/QA; never upgrade algorithmic rotation to confirmed tornado |
-| Historical weather                  | NCEI/other archive ingestion                                   | Archive storage, indexing and possibly commercial historical feeds      |
+| Capability                            | Recommended route                                              | Dependency / possible cost                                              |
+| ------------------------------------- | -------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| Individual global lightning strikes   | Licensed Xweather/Tomorrow.io-class feed after contract review | API credentials, redistribution rights and usage fees                   |
+| Global/commercial radar               | Commercial tiled radar feed or regional official adapters      | Contract and tile/egress costs                                          |
+| Additional professional radar moments | NOAA Level II ingestion and radar-site processing              | Compute, object storage, tiling and monitoring                          |
+| Upper-air/convective/model grids      | ECMWF Open Data or other licensed model ingestion              | GRIB processing, object storage, CDN/egress; attribution                |
+| Soundings/hodographs                  | Observed/model sounding adapter plus validated calculations    | Processing and numerical-validation work                                |
+| Storm objects/rotation                | Phase 2 normalization and carefully validated derived analysis | Engineering/QA; never upgrade algorithmic rotation to confirmed tornado |
+| Historical weather                    | NCEI/other archive ingestion                                   | Archive storage, indexing and possibly commercial historical feeds      |
 
 ## Test versus production
 
@@ -52,6 +52,41 @@ adapter. Setup is an engineering and licensing task, not an end-user URL field:
   deployment during the coordinated release. Never copy a key into frontend code or Git.
 - Database/provider-status migrations, organization controls, billing and production infrastructure
   require administration/billing coordination before merge.
+
+## Xweather commercial adapter
+
+LandDraft now includes a server-only Xweather Raster Maps adapter for its weather-relevant catalog.
+The professional-layer drawer offers 76 verified product choices across radar, current conditions,
+wind, forecasts, severe weather, lightning, air quality, fire, maritime, tropical and CPC outlooks.
+Xweather base maps, masks and administrative overlays are deliberately excluded because LandDraft
+already supplies those as ordinary GIS layers. Browser clients receive only a same-origin LandDraft
+tile URL. The Xweather client ID and secret are added by the Worker and are never returned to the
+browser, committed to Git or embedded in a frontend bundle.
+
+Required deployment secrets in each environment:
+
+```text
+XWEATHER_CLIENT_ID
+XWEATHER_CLIENT_SECRET
+```
+
+Preview and production must use separate keys so either environment can be revoked independently.
+Restrict each key to its actual deployment domain after confirming server-proxy requests remain
+accepted. The preview key belongs only on the `landdraft-preview` Worker. Production credentials are
+added separately during the coordinated release; they do not transfer through Git.
+
+Cost controls in this increment:
+
+- NOAA remains the free primary U.S. radar source; Xweather is the global/outage fallback.
+- Provider tiles are requested only for active layers and the visible viewport.
+- Xweather imagery uses product-specific browser/CDN cache headers.
+- Satellite and radar histories are short; 5× and 10× products start with one current frame.
+- Every catalog card shows provider coverage and access multiplier; all new entries stay behind
+  Professional layers unless found through the search box.
+- Xweather usage remains separately visible in the provider portal and LandDraft provider health.
+- No payment method should be added until an explicit operating budget and alert threshold are
+  approved. At the current PAYG terms, the first 15,000 accesses per month are free; usage beyond
+  that amount may become billable if a payment method is later enabled.
 
 ## Adapter checklist
 

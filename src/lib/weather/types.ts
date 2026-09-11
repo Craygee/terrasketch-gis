@@ -104,7 +104,7 @@ export interface RadarFrame {
   timestamp: string;
   tileUrlTemplate: string;
   legendUrl?: string | undefined;
-  coverage: "conus" | "alaska" | "hawaii" | "caribbean" | "guam";
+  coverage: "conus" | "alaska" | "hawaii" | "caribbean" | "guam" | "global";
   source: WeatherSourceMetadata;
 }
 
@@ -206,6 +206,9 @@ export interface WeatherLayerDefinition {
   mobileVisibility: "primary" | "drawer" | "professional";
   audience: "basic" | "professional";
   attribution?: string | undefined;
+  providerName?: string | undefined;
+  providerCostMultiplier?: number | undefined;
+  coverage?: string | undefined;
 }
 
 export interface WeatherLayerSetting {

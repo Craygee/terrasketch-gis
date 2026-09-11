@@ -23,6 +23,12 @@ import { recordWeatherUsage } from "./telemetry.server";
 import { loadMetNorwayPoint } from "./metNorway.server";
 import { buildPhotographyAssessment } from "./photography.server";
 import { nearestWeatherRadarSite, type WeatherRadarSite } from "./radar";
+import {
+  xweatherConfigured,
+  xweatherProviderHealth,
+  xweatherRadarFrames,
+  xweatherRasterFramesFor,
+} from "./xweather.server";
 
 type CacheEntry<T> = { value: T; expiresAt: number };
 const cache = new Map<string, CacheEntry<unknown>>();
@@ -732,12 +738,13 @@ function satelliteSpec(
 function rasterSpecsFor(request: WeatherPointRequest) {
   const requested = new Set(request.requestedLayerIds ?? []);
   const specs: WmsRasterSpec[] = [];
+  const useXweather = xweatherConfigured();
   for (const layerId of requested) {
     const registered = WMS_LAYER_SPECS[layerId];
     if (registered && (registered.coverageKind === "global" || withinConus(request)))
       specs.push(registered);
   }
-  if (requested.has("weather.satellite.clouds"))
+  if (requested.has("weather.satellite.clouds") && !useXweather)
     specs.push(
       satelliteSpec(
         request,
@@ -748,7 +755,7 @@ function rasterSpecsFor(request: WeatherPointRequest) {
         "goes-lir",
       ),
     );
-  if (requested.has("weather.satellite.infrared"))
+  if (requested.has("weather.satellite.infrared") && !useXweather)
     specs.push(
       satelliteSpec(
         request,
@@ -759,7 +766,7 @@ function rasterSpecsFor(request: WeatherPointRequest) {
         "goes-lir",
       ),
     );
-  if (requested.has("weather.satellite.true-color"))
+  if (requested.has("weather.satellite.true-color") && !useXweather)
     specs.push(
       satelliteSpec(
         request,
@@ -770,7 +777,7 @@ function rasterSpecsFor(request: WeatherPointRequest) {
         "goes-vis",
       ),
     );
-  if (requested.has("weather.satellite.water-vapor"))
+  if (requested.has("weather.satellite.water-vapor") && !useXweather)
     specs.push(
       satelliteSpec(
         request,
@@ -786,7 +793,7 @@ function rasterSpecsFor(request: WeatherPointRequest) {
       ...WMS_LAYER_SPECS["weather.air-quality"]!,
       layerId: "weather.satellite.smoke",
     });
-  if (requested.has("weather.lightning.recent"))
+  if (requested.has("weather.lightning.recent") && !useXweather)
     specs.push({
       layerId: "weather.lightning.recent",
       providerId: "noaa-nowcoast-lightning",
@@ -867,12 +874,13 @@ const PRO_RADAR_PRODUCTS: Record<
 
 async function prepareRasterSpecs(request: WeatherPointRequest, signal: AbortSignal) {
   const specs = rasterSpecsFor(request);
+  const commercialFrames = xweatherRasterFramesFor(request);
   const warnings: string[] = [];
   const providerHealth: WeatherProviderHealth[] = [];
   const requested = Object.keys(PRO_RADAR_PRODUCTS).filter((id) =>
     request.requestedLayerIds?.includes(id),
   );
-  if (!requested.length) return { specs, warnings, providerHealth };
+  if (!requested.length) return { specs, commercialFrames, warnings, providerHealth };
   if (!withinConus(request)) {
     warnings.push("Professional single-site NOAA radar is not available at this map point.");
     providerHealth.push(
@@ -886,7 +894,7 @@ async function prepareRasterSpecs(request: WeatherPointRequest, signal: AbortSig
         costClass: "public",
       }),
     );
-    return { specs, warnings, providerHealth };
+    return { specs, commercialFrames, warnings, providerHealth };
   }
   try {
     const nearest = nearestWeatherRadarSite(await loadRadarSites(signal), request);
@@ -923,7 +931,7 @@ async function prepareRasterSpecs(request: WeatherPointRequest, signal: AbortSig
       }),
     );
   }
-  return { specs, warnings, providerHealth };
+  return { specs, commercialFrames, warnings, providerHealth };
 }
 
 type AwcMetarFeature = {
@@ -1324,7 +1332,14 @@ export async function loadWeatherBundle(request: WeatherPointRequest): Promise<W
               }),
             );
           } catch (fallbackError) {
-            warnings.push("Both official radar services are temporarily unavailable.");
+            if (xweatherConfigured()) {
+              radarFrames = xweatherRadarFrames();
+              warnings.push(
+                "Official U.S. radar services were unavailable; LandDraft switched to Xweather global radar.",
+              );
+            } else {
+              warnings.push("Both official radar services are temporarily unavailable.");
+            }
             providerHealth.push(
               health({
                 providerId: "noaa-nws-mrms",
@@ -1339,18 +1354,22 @@ export async function loadWeatherBundle(request: WeatherPointRequest): Promise<W
           }
         }
       } else {
-        providerHealth.push(
-          health({
-            providerId: "noaa-nws-mrms",
-            providerName: "NOAA/NWS radar",
-            status: "degraded",
-            products: ["radar-reflectivity"],
-            coverage: "United States and territories",
-            error:
-              "Radar is unavailable at this map point; satellite/model data are not mislabeled as radar",
-            costClass: "public",
-          }),
-        );
+        if (xweatherConfigured()) {
+          radarFrames = xweatherRadarFrames();
+        } else {
+          providerHealth.push(
+            health({
+              providerId: "noaa-nws-mrms",
+              providerName: "NOAA/NWS radar",
+              status: "degraded",
+              products: ["radar-reflectivity"],
+              coverage: "United States and territories",
+              error:
+                "Radar is unavailable at this map point; satellite/model data are not mislabeled as radar",
+              costClass: "public",
+            }),
+          );
+        }
       }
     }
 
@@ -1358,6 +1377,7 @@ export async function loadWeatherBundle(request: WeatherPointRequest): Promise<W
     const rasterSpecs = rasterPreparation.specs;
     warnings.push(...rasterPreparation.warnings);
     providerHealth.push(...rasterPreparation.providerHealth);
+    rasterFrames.push(...rasterPreparation.commercialFrames);
     rasterResults.forEach((result, index) => {
       if (result.status === "fulfilled") {
         rasterFrames.push(...result.value.frames);
@@ -1400,6 +1420,12 @@ export async function loadWeatherBundle(request: WeatherPointRequest): Promise<W
         );
       }
     });
+    if (
+      rasterPreparation.commercialFrames.length ||
+      radarFrames.some((frame) => frame.source.providerId === "xweather-raster") ||
+      [...requestedLayers].some((id) => id.startsWith("weather.xweather."))
+    )
+      providerHealth.push(xweatherProviderHealth());
 
     if (requestedLayers.has("weather.metar")) {
       try {

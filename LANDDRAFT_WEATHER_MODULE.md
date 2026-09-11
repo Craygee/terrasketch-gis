@@ -4,7 +4,7 @@ This file is the durable handoff for future LandDraft Weather sessions.
 
 ## Current phase
 
-Phase 1.1 provider foundation is implemented on `feature/test-module-development`. The module is optional,
+Phase 1.2 provider foundation is implemented on `feature/test-module-development`. The module is optional,
 test-only, schema-free, and does not change billing, plans, production infrastructure or backups.
 
 Implemented entry point: `/weather`.
@@ -39,9 +39,8 @@ Read first:
 ## Next disciplined increments
 
 1. Validate Phase 1 in the public test deployment across desktop, tablet and phone viewports.
-2. Add a licensed individual-strike lightning feed and global/commercial radar adapter only after
-   credentials, redistribution rights and costs are approved. Satellite and public global forecast
-   fallback are now connected.
+2. Validate the searchable 76-product Xweather raster catalog under preview credentials, measure
+   actual 1×/5×/10× tile usage and confirm redistribution/attribution terms before production release.
 3. Add severe event normalization/cards without algorithmically upgrading possible rotation to a
    confirmed tornado.
 4. Coordinate organization settings, RLS, provider secrets, cache/usage tables and entitlements
@@ -53,7 +52,7 @@ Read first:
 
 - Optional production-grade global forecast SLA or self-hosted open-data ingestion beyond the
   public MET Norway fallback.
-- Licensed low-latency individual-strike lightning feed and commercial global radar.
+- Licensed individual raw-strike lightning access beyond the connected raster flash product.
 - CDN/object-storage design if public upstream tile demand outgrows bounded direct use.
 - Weather provider identity/contact strings and operational monitoring.
 - Optional notification providers, each disabled until explicitly configured.
@@ -74,7 +73,12 @@ Read first:
 - NOAA nearest-site base reflectivity, base radial velocity and digital hydrometeor classification
   are connected through the public RIDGE II WFS/WMS. NASA MODIS cloud-top-temperature imagery is
   connected through EOSDIS GIBS; it is a daily orbital product and may contain pass gaps.
-- Individual lightning strikes, additional professional radar moments (including storm-relative
+- The Xweather Raster Maps adapter is implemented for global radar, GeoColor/infrared/water-vapor
+  satellite and a 76-product weather-relevant catalog spanning conditions, wind, forecasts, severe,
+  lightning, air quality, fire, maritime, tropical and outlooks. It requires separate preview and production
+  `XWEATHER_CLIENT_ID` / `XWEATHER_CLIENT_SECRET` Worker secrets. NOAA remains primary for U.S.
+  radar, and the commercial key is never embedded in a browser URL or frontend bundle.
+- Individual raw lightning strikes, additional professional radar moments (including storm-relative
   velocity, correlation coefficient and differential reflectivity), upper-air/convective grids,
   soundings, storm objects, historical archives and commercial global radar remain unconfigured.
 

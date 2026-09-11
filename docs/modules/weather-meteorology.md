@@ -7,21 +7,23 @@ Pricing: Undecided
 
 ## Capabilities
 
-Phase 1.1 provides the optional Weather workspace, normalized provider contracts, capability hooks,
+Phase 1.2 provides the optional Weather workspace, normalized provider contracts, capability hooks,
 layer catalog, universal multi-product timeline, responsive weather drawer/inspector,
 project-aware viewport, official U.S. warning ingestion, NWS current conditions/forecast,
 MET Norway global model fallback, NOAA/NWS MRMS radar with official NWS radar failover, nearest-site
 NOAA RIDGE II base reflectivity/base radial velocity/hydrometeor classification, NOAA nowCOAST
 satellite imagery and lightning-density, NASA MODIS cloud-top temperature, NDFD temperature/wind/precipitation, NHC
 tropical summary, WSSI, SPC fire outlook, NOAA smoke guidance, Aviation Weather Center METAR
-stations, source health/provenance, and a conservative photography-candidate analysis.
+stations, source health/provenance, a conservative photography-candidate analysis, and a server-only
+Xweather adapter for configured global radar/satellite/lightning coverage plus a searchable,
+progressively disclosed catalog of 76 weather-relevant Xweather raster products.
 
 Visible products appear in a persistent **Active layer stack**. The top item renders in front;
 desktop users can drag between insertion lines and touch/keyboard users can move layers forward or
 back with explicit controls. Layer order is stored in the project and in new Weather presets. Older
 projects receive registry order automatically.
 
-It does not claim raw Level II radar decoding, global radar, individual global lightning strikes,
+It does not claim raw Level II radar decoding, individual raw lightning strikes,
 storm-relative velocity, correlation coefficient, differential reflectivity, storm-cell detection,
 safe chase routing, soundings or certified operational risk.
 
@@ -35,14 +37,22 @@ safe chase routing, soundings or certified operational risk.
 - Server-side test telemetry counts logical provider requests, successes, failures and cache hits;
   it deliberately leaves unknown data volume and provider cost as `null` rather than inventing a
   price.
+- Xweather requires separate `XWEATHER_CLIENT_ID` and `XWEATHER_CLIENT_SECRET` Worker secrets in
+  preview and production. Its tiles are proxied through same-origin LandDraft routes so credentials
+  never enter the browser bundle or public tile URL.
 - Future providers may require Cloudflare cache/object storage/queues, PostGIS, licensed feeds and
-  server-side environment variables.
+  additional server-side environment variables.
 
 ## Potential operating costs
 
 - Public data still creates server compute, bandwidth, caching and monitoring costs.
-- Low-latency global radar, exact lightning strikes and commercial forecast redistribution may
-  require contracts. MET Norway requires attribution and appropriate request identification/rates.
+- Xweather global radar/satellite/lightning uses access-based PAYG metering. The current account
+  includes 15,000 free accesses per month, but interactive tiles and animation can consume multiple
+  accesses per view. Air-quality products may count at 5× and detailed lightning products at 10×;
+  the layer card discloses that multiplier. No payment method or LandDraft pricing decision is part
+  of this increment.
+- Exact lightning strike APIs and commercial forecast redistribution may require additional
+  contracts. MET Norway requires attribution and appropriate request identification/rates.
 - Radar/satellite/model processing drives compute, object storage and egress.
 - Push, email, SMS, offline packs, historical archives and AI explanations are usage-based cost
   candidates. Product pricing remains undecided.
@@ -59,7 +69,8 @@ safe chase routing, soundings or certified operational risk.
 
 ## Security and privacy
 
-- Provider keys stay server-side; only normalized bounded responses reach clients.
+- Provider keys stay server-side. Commercial tile requests use a validated same-origin proxy and
+  only normalized metadata plus LandDraft URLs reach clients.
 - Phase 1 creates Weather display preferences in the existing project snapshot only after the
   workspace is opened and stores no continuous GPS trail.
 - Provider errors, inputs, cache keys and source references are sanitized and bounded.
@@ -82,4 +93,6 @@ safe chase routing, soundings or certified operational risk.
 - Weather appears as an optional Data/module entry and opens `/weather`.
 - The module can be disabled by removing/hiding its entry; optional project state remains inert.
 - Provider setup/connection status is visible and missing feeds say `Unavailable`, never fake data.
+- Xweather products are searchable across categories; only enabled products load, and active products
+  use the existing draggable layer stack for ordering.
 - Rollback: `landdraft-stable-2026-09-10`.
