@@ -32,6 +32,11 @@ const nwsHeaders = {
   "User-Agent": "LandDraftWeather/0.1 (https://landdraft.net)",
 };
 
+const wmsHeaders = {
+  Accept: "application/xml, text/xml;q=0.9, */*;q=0.1",
+  "User-Agent": "LandDraftWeather/0.1 (https://landdraft.net)",
+};
+
 const env = (
   globalThis as typeof globalThis & {
     process?: { env?: Record<string, string | undefined> };
@@ -100,6 +105,11 @@ type WmsRasterSpec = {
   temporalKind: "observed" | "forecast" | "model";
   attribution: string;
   maxFrames?: number | undefined;
+  /**
+   * Use only for a reviewed public WMS whose tile endpoint is browser-accessible
+   * but whose GetCapabilities request can reject Cloudflare's edge network.
+   */
+  allowLatestWithoutCapabilities?: boolean | undefined;
 };
 
 const NOAA_SATELLITE_CAPABILITIES =
@@ -243,18 +253,27 @@ async function loadWmsRasterFrames(spec: WmsRasterSpec, signal: AbortSignal) {
       // Several visible products can share the same NOAA WMS service. Coalesce
       // the capabilities request so enabling Clouds + Visible does not perform
       // identical network work at the edge.
-      const xml = await withCache(
-        `wms-capabilities:${spec.capabilitiesUrl}`,
-        spec.temporalKind === "observed" ? 60_000 : 5 * 60_000,
-        { providerId: spec.providerId, product: `${spec.product} capabilities` },
-        () => fetchText(spec.capabilitiesUrl, signal),
-      );
-      const advertised = spec.layerNames.filter((name) =>
-        new RegExp(`<Name>\\s*${escapeRegex(name)}\\s*</Name>`, "i").test(xml),
-      );
+      let capabilities: string | null = null;
+      let latestOnly = false;
+      try {
+        capabilities = await withCache(
+          `wms-capabilities:${spec.capabilitiesUrl}`,
+          spec.temporalKind === "observed" ? 60_000 : 5 * 60_000,
+          { providerId: spec.providerId, product: `${spec.product} capabilities` },
+          () => fetchText(spec.capabilitiesUrl, signal, wmsHeaders),
+        );
+      } catch (error) {
+        if (!spec.allowLatestWithoutCapabilities) throw error;
+        latestOnly = true;
+      }
+      const advertised = capabilities
+        ? spec.layerNames.filter((name) =>
+            new RegExp(`<Name>\\s*${escapeRegex(name)}\\s*</Name>`, "i").test(capabilities),
+          )
+        : spec.layerNames;
       if (!advertised.length) throw new Error("Expected WMS layer is no longer advertised");
       const firstLayer = advertised[0]!;
-      const times = wmsTimes(xml, firstLayer);
+      const times = capabilities ? wmsTimes(capabilities, firstLayer) : [];
       const frameTimes = (times.length ? times : [new Date().toISOString()]).slice(
         -(spec.maxFrames ?? 1),
       );
@@ -280,7 +299,11 @@ async function loadWmsRasterFrames(spec: WmsRasterSpec, signal: AbortSignal) {
           validTime: times.length ? timestamp : undefined,
           resolution: spec.resolution,
           quality: times.length ? "high" : "moderate",
-          qualityFlags: times.length ? [] : ["PROVIDER_TIME_NOT_ADVERTISED"],
+          qualityFlags: latestOnly
+            ? ["EDGE_CAPABILITIES_BLOCKED", "LATEST_FRAME_TIME_UNVERIFIED"]
+            : times.length
+              ? []
+              : ["PROVIDER_TIME_NOT_ADVERTISED"],
           rawSourceReference: spec.capabilitiesUrl,
           attribution: spec.attribution,
         }),
@@ -673,6 +696,7 @@ function satelliteSpec(
     temporalKind: "observed",
     attribution: "NOAA / NESDIS nowCOAST",
     maxFrames: regional ? 18 : 5,
+    allowLatestWithoutCapabilities: true,
   };
 }
 
@@ -746,6 +770,7 @@ function rasterSpecsFor(request: WeatherPointRequest) {
       temporalKind: "observed",
       attribution: "NOAA/NWS/NCEP Ocean Prediction Center via nowCOAST",
       maxFrames: 17,
+      allowLatestWithoutCapabilities: true,
     });
   return specs;
 }
@@ -1177,15 +1202,25 @@ export async function loadWeatherBundle(request: WeatherPointRequest): Promise<W
     rasterResults.forEach((result, index) => {
       if (result.status === "fulfilled") {
         rasterFrames.push(...result.value.frames);
+        const latestOnly = result.value.frames.some((frame) =>
+          frame.source.qualityFlags.includes("EDGE_CAPABILITIES_BLOCKED"),
+        );
+        if (latestOnly)
+          warnings.push(
+            `${result.value.spec.product} is loading the latest image without provider timeline metadata.`,
+          );
         providerHealth.push(
           health({
             providerId: result.value.spec.providerId,
             providerName: result.value.spec.providerName,
-            status: result.value.frames.length ? "up" : "degraded",
+            status: result.value.frames.length && !latestOnly ? "up" : "degraded",
             products: [result.value.spec.product],
             coverage: result.value.spec.coverage,
             lastSuccessfulRequest: generatedAt,
-            lastUpdate: result.value.frames.at(-1)?.timestamp,
+            lastUpdate: result.value.frames.at(-1)?.source.sourceTimestamp,
+            error: latestOnly
+              ? "Provider timeline metadata is blocked at the edge; requesting its latest official image directly"
+              : undefined,
             costClass: "public",
           }),
         );

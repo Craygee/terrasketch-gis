@@ -19,6 +19,13 @@ conditions/radar, have an independent timeout, and coalesce shared GetCapabiliti
 Clouds, Visible Satellite and Lightning from being starved by a slower unrelated provider while still
 returning source-specific health and warning information when an overlay genuinely fails.
 
+NOAA nowCOAST currently rejects its GetCapabilities request from Cloudflare's edge with HTTP 403 even
+though its browser-facing WMS image tiles remain public and return `Access-Control-Allow-Origin: *`.
+For the reviewed nowCOAST satellite and lightning-density layer names only, LandDraft therefore falls
+back to the service's latest image without a `TIME` parameter. The image remains NOAA data, but the UI
+marks provider health degraded and does not invent an observation timestamp or animated history. If
+GetCapabilities becomes available, the normal verified frame timeline resumes automatically.
+
 ## What “Setup required” means
 
 These entries have a stable LandDraft layer/capability id but do not yet have a reviewed production
