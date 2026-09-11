@@ -36,6 +36,7 @@ const commitHash =
   environmentRevision?.slice(0, 8) ?? readGitValue(["rev-parse", "--short=8", "HEAD"]);
 const branchName =
   process.env["VITE_LANDDRAFT_BRANCH"] ??
+  process.env["WORKERS_CI_BRANCH"] ??
   process.env["CF_PAGES_BRANCH"] ??
   process.env["VERCEL_GIT_COMMIT_REF"] ??
   process.env["GITHUB_REF_NAME"] ??

@@ -13,6 +13,20 @@ September 10, 2026 stable checkpoint.
   on it.
 - Test and review module changes before merging. Do not deploy feature branches to production.
 
+## Public test deployment
+
+- Hosting target: the isolated Cloudflare Worker named `landdraft-preview`.
+- Source repository: `Craygee/terrasketch-gis`.
+- Allowed deployment branch: `feature/test-module-development` only.
+- Build command: `bun install --frozen-lockfile && bun run build && node scripts/prepare-preview-worker.mjs`.
+- Deploy command: `npx wrangler deploy --config .output/server/wrangler.json`.
+- `scripts/prepare-preview-worker.mjs` refuses other branches, assigns the isolated worker name,
+  enables Cloudflare preview URLs, and adds a no-index response header to the generated preview
+  assets.
+- The test deployment may use the existing Supabase project for authenticated integration testing
+  only after its public browser URL and publishable key are added as Cloudflare build variables and
+  the preview callback URL is allowed in Supabase. Never add a service-role key to the browser build.
+
 ## Product and scope guardrails
 
 - Core mapping remains free. New modules must not place the existing map, drawing, layer,
