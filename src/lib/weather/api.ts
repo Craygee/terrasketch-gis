@@ -10,7 +10,19 @@ function validatePoint(input: unknown): WeatherPointRequest {
     throw new Error("Latitude must be between -90 and 90");
   if (!Number.isFinite(longitude) || longitude < -180 || longitude > 180)
     throw new Error("Longitude must be between -180 and 180");
-  return { latitude, longitude };
+  const requestedLayerIds = Array.isArray(value["requestedLayerIds"])
+    ? value["requestedLayerIds"]
+        .filter(
+          (id): id is string =>
+            typeof id === "string" && /^weather\.[a-z0-9.-]+$/i.test(id) && id.length <= 100,
+        )
+        .slice(0, 30)
+    : undefined;
+  return {
+    latitude,
+    longitude,
+    ...(requestedLayerIds?.length ? { requestedLayerIds } : {}),
+  };
 }
 
 export const getWeatherAtPoint = createServerFn({ method: "GET" })

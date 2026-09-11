@@ -3,6 +3,10 @@
 Status: Phase 1 implementation on `feature/test-module-development`  
 Prepared from repository audit: 2026-09-11
 
+Phase 1.1 provider increment connects vetted public official raster/API sources, bounded server-side
+failover, global point-model fallback, METAR stations and conservative photography candidates. It
+does not add schema, billing, entitlements, admin permissions or production infrastructure.
+
 ## Existing architecture findings
 
 - LandDraft is a TanStack Start/React application with file routes, an authenticated root shell,
@@ -48,4 +52,3 @@ Prepared from repository audit: 2026-09-11
   remains blocked on administration/billing coordination.
 - Rollback remains the `landdraft-stable-2026-09-10` tag. Weather can be disabled by hiding its route
   entry; stored weather state is optional and inert to the core GIS.
-

@@ -16,8 +16,12 @@ import type {
   WeatherObservation,
   WeatherPointRequest,
   WeatherProviderHealth,
+  WeatherRasterFrame,
+  WeatherStationObservation,
 } from "./types";
 import { recordWeatherUsage } from "./telemetry.server";
+import { loadMetNorwayPoint } from "./metNorway.server";
+import { buildPhotographyAssessment } from "./photography.server";
 
 type CacheEntry<T> = { value: T; expiresAt: number };
 const cache = new Map<string, CacheEntry<unknown>>();
@@ -63,6 +67,206 @@ async function fetchJson<T>(url: string, signal: AbortSignal, headers: HeadersIn
   const response = await fetch(url, { signal, headers });
   if (!response.ok) throw new Error(`Provider returned HTTP ${response.status}`);
   return (await response.json()) as T;
+}
+
+async function fetchText(url: string, signal: AbortSignal, headers: HeadersInit = {}) {
+  const response = await fetch(url, { signal, headers });
+  if (!response.ok) throw new Error(`Provider returned HTTP ${response.status}`);
+  return response.text();
+}
+
+type WmsRasterSpec = {
+  layerId: string;
+  providerId: string;
+  providerName: string;
+  product: string;
+  capabilitiesUrl: string;
+  layerNames: string[];
+  styles?: string | undefined;
+  coverage: string;
+  resolution?: string | undefined;
+  temporalKind: "observed" | "forecast" | "model";
+  attribution: string;
+  maxFrames?: number | undefined;
+};
+
+const NOAA_SATELLITE_CAPABILITIES =
+  "https://nowcoast.noaa.gov/geoserver/observations/satellite/ows?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetCapabilities";
+const NOAA_LIGHTNING_CAPABILITIES =
+  "https://nowcoast.noaa.gov/geoserver/observations/lightning_detection/ows?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetCapabilities";
+
+const WMS_LAYER_SPECS: Record<string, WmsRasterSpec> = {
+  "weather.forecast.precipitation": {
+    layerId: "weather.forecast.precipitation",
+    providerId: "nws-ndfd-qpf",
+    providerName: "National Weather Service NDFD",
+    product: "forecast precipitation amount",
+    capabilitiesUrl:
+      "https://mapservices.weather.noaa.gov/geoserver/ndfd/qpf/ows?service=wms&version=1.3.0&request=GetCapabilities",
+    layerNames: ["qpf"],
+    coverage: "United States and territories",
+    temporalKind: "forecast",
+    attribution: "NOAA / National Weather Service NDFD",
+    maxFrames: 16,
+  },
+  "weather.wind.surface": {
+    layerId: "weather.wind.surface",
+    providerId: "nws-ndfd-wind",
+    providerName: "National Weather Service NDFD",
+    product: "forecast 10 m wind speed",
+    capabilitiesUrl:
+      "https://mapservices.weather.noaa.gov/geoserver/ndfd/wspd/ows?service=wms&version=1.3.0&request=GetCapabilities",
+    layerNames: ["wspd"],
+    coverage: "United States and territories",
+    temporalKind: "forecast",
+    attribution: "NOAA / National Weather Service NDFD",
+    maxFrames: 16,
+  },
+  "weather.surface": {
+    layerId: "weather.surface",
+    providerId: "nws-ndfd-temperature",
+    providerName: "National Weather Service NDFD",
+    product: "forecast surface temperature",
+    capabilitiesUrl:
+      "https://mapservices.weather.noaa.gov/geoserver/ndfd/temp/ows?service=wms&version=1.3.0&request=GetCapabilities",
+    layerNames: ["temp"],
+    coverage: "United States and territories",
+    temporalKind: "forecast",
+    attribution: "NOAA / National Weather Service NDFD",
+    maxFrames: 16,
+  },
+  "weather.fire": {
+    layerId: "weather.fire",
+    providerId: "nws-spc-fire",
+    providerName: "NOAA Storm Prediction Center",
+    product: "Day 1 fire weather outlook",
+    capabilitiesUrl:
+      "https://mapservices.weather.noaa.gov/vector/services/fire_weather/SPC_firewx/MapServer/WMSServer?request=GetCapabilities&service=WMS",
+    layerNames: ["23"],
+    coverage: "CONUS",
+    temporalKind: "forecast",
+    attribution: "NOAA / Storm Prediction Center",
+  },
+  "weather.air-quality": {
+    layerId: "weather.air-quality",
+    providerId: "nws-air-quality-smoke",
+    providerName: "NOAA/NWS Air Quality Guidance",
+    product: "surface smoke guidance",
+    capabilitiesUrl:
+      "https://mapservices.weather.noaa.gov/raster/services/air_quality/ndgd_smoke_sfc_1hr_avg_time/ImageServer/WMSServer?request=GetCapabilities&service=WMS",
+    layerNames: ["ndgd_smoke_sfc_1hr_avg_time"],
+    coverage: "CONUS guidance domain",
+    temporalKind: "model",
+    attribution: "NOAA / National Weather Service Air Quality Guidance",
+  },
+  "weather.winter": {
+    layerId: "weather.winter",
+    providerId: "nws-wpc-wssi",
+    providerName: "NOAA Weather Prediction Center",
+    product: "Winter Storm Severity Index days 1–3",
+    capabilitiesUrl:
+      "https://mapservices.weather.noaa.gov/vector/services/outlooks/wpc_wssi/MapServer/WMSServer?request=GetCapabilities&service=WMS",
+    layerNames: ["21"],
+    coverage: "CONUS",
+    temporalKind: "forecast",
+    attribution: "NOAA / Weather Prediction Center",
+  },
+  "weather.tropical": {
+    layerId: "weather.tropical",
+    providerId: "nws-nhc-tropical",
+    providerName: "National Hurricane Center",
+    product: "official tropical cyclone summary",
+    capabilitiesUrl:
+      "https://mapservices.weather.noaa.gov/tropical/services/tropical/NHC_tropical_weather_summary/MapServer/WMSServer?request=GetCapabilities&service=WMS",
+    layerNames: [
+      "17",
+      "18",
+      "20",
+      "21",
+      "22",
+      "23",
+      "25",
+      "26",
+      "27",
+      "28",
+      "31",
+      "32",
+      "33",
+      "34",
+    ],
+    coverage: "Atlantic and eastern/central Pacific products issued by NHC",
+    temporalKind: "forecast",
+    attribution: "NOAA / National Hurricane Center",
+  },
+};
+
+function escapeRegex(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function wmsTimes(xml: string, layerName: string) {
+  const nameMatch = new RegExp(`<Name>\\s*${escapeRegex(layerName)}\\s*</Name>`, "i").exec(xml);
+  const scoped = nameMatch
+    ? xml.slice(nameMatch.index, xml.indexOf("</Layer>", nameMatch.index))
+    : xml;
+  const dimension = /<Dimension[^>]*name=["']time["'][^>]*>([\s\S]*?)<\/Dimension>/i.exec(scoped);
+  if (!dimension) return [];
+  const raw = dimension[1]?.trim() ?? "";
+  if (raw.includes("/")) {
+    const end = validIso(raw.split("/")[1]);
+    return end ? [end] : [];
+  }
+  return raw
+    .split(",")
+    .map((value) => validIso(value.trim()))
+    .filter((value): value is string => Boolean(value));
+}
+
+async function loadWmsRasterFrames(spec: WmsRasterSpec, signal: AbortSignal) {
+  return withCache(
+    `wms:${spec.layerId}:${spec.layerNames.join(",")}`,
+    spec.temporalKind === "observed" ? 60_000 : 5 * 60_000,
+    { providerId: spec.providerId, product: spec.product },
+    async (): Promise<WeatherRasterFrame[]> => {
+      const xml = await fetchText(spec.capabilitiesUrl, signal);
+      const advertised = spec.layerNames.filter((name) =>
+        new RegExp(`<Name>\\s*${escapeRegex(name)}\\s*</Name>`, "i").test(xml),
+      );
+      if (!advertised.length) throw new Error("Expected WMS layer is no longer advertised");
+      const firstLayer = advertised[0]!;
+      const times = wmsTimes(xml, firstLayer);
+      const frameTimes = (times.length ? times : [new Date().toISOString()]).slice(
+        -(spec.maxFrames ?? 1),
+      );
+      const endpoint = spec.capabilitiesUrl.split("?")[0]!;
+      const base =
+        `${endpoint}?SERVICE=WMS&REQUEST=GetMap&VERSION=1.1.1` +
+        `&LAYERS=${encodeURIComponent(advertised.join(","))}` +
+        `&STYLES=${encodeURIComponent(spec.styles ?? "")}` +
+        "&FORMAT=image/png&TRANSPARENT=true&SRS=EPSG:3857&WIDTH=256&HEIGHT=256&BBOX={bbox-epsg-3857}";
+      return frameTimes.map((timestamp) => ({
+        id: `${spec.providerId}-${spec.layerId}-${timestamp}`,
+        layerId: spec.layerId,
+        timestamp,
+        tileUrlTemplate: times.length ? `${base}&TIME=${encodeURIComponent(timestamp)}` : base,
+        coverage: spec.coverage,
+        legendUrl: `${endpoint}?service=WMS&version=1.3.0&request=GetLegendGraphic&format=image/png&layer=${encodeURIComponent(firstLayer)}`,
+        source: sourceMetadata({
+          providerId: spec.providerId,
+          providerName: spec.providerName,
+          product: spec.product,
+          temporalKind: spec.temporalKind,
+          sourceTimestamp: times.length ? timestamp : undefined,
+          validTime: times.length ? timestamp : undefined,
+          resolution: spec.resolution,
+          quality: times.length ? "high" : "moderate",
+          qualityFlags: times.length ? [] : ["PROVIDER_TIME_NOT_ADVERTISED"],
+          rawSourceReference: spec.capabilitiesUrl,
+          attribution: spec.attribution,
+        }),
+      }));
+    },
+  );
 }
 
 function measurementValue(input: unknown): number | undefined {
@@ -392,6 +596,228 @@ async function loadRadarFrames(signal: AbortSignal): Promise<RadarFrame[]> {
   );
 }
 
+async function loadRadarFallback(signal: AbortSignal): Promise<RadarFrame[]> {
+  const frames = await loadWmsRasterFrames(
+    {
+      layerId: "weather.radar.simple",
+      providerId: "nws-radar-fallback",
+      providerName: "National Weather Service radar service",
+      product: "base reflectivity fallback",
+      capabilitiesUrl:
+        "https://mapservices.weather.noaa.gov/eventdriven/services/radar/radar_base_reflectivity_time/ImageServer/WMSServer?request=GetCapabilities&service=WMS",
+      layerNames: ["radar_base_reflectivity_time"],
+      coverage: "United States, Alaska, Hawaii, Caribbean, and Guam",
+      temporalKind: "observed",
+      attribution: "NOAA / National Weather Service",
+    },
+    signal,
+  );
+  return frames.map((frame) => ({
+    id: frame.id,
+    timestamp: frame.timestamp,
+    tileUrlTemplate: frame.tileUrlTemplate,
+    legendUrl: frame.legendUrl,
+    coverage: "conus",
+    source: frame.source,
+  }));
+}
+
+function withinGoesCoverage(request: WeatherPointRequest) {
+  return (
+    request.longitude >= -179.5 &&
+    request.longitude <= -50.7 &&
+    request.latitude >= 11 &&
+    request.latitude <= 50.5
+  );
+}
+
+function satelliteSpec(
+  request: WeatherPointRequest,
+  layerId: string,
+  regionalLayer: string,
+  globalLayer: string,
+  product: string,
+  regionalStyle: string,
+): WmsRasterSpec {
+  const regional = withinGoesCoverage(request);
+  return {
+    layerId,
+    providerId: regional ? "noaa-nowcoast-goes" : "noaa-nowcoast-global-satellite",
+    providerName: regional ? "NOAA nowCOAST GOES East/West" : "NOAA nowCOAST global mosaic",
+    product,
+    capabilitiesUrl: NOAA_SATELLITE_CAPABILITIES,
+    layerNames: [regional ? regionalLayer : globalLayer],
+    styles: regional ? regionalStyle : "reflectance",
+    coverage: regional ? "GOES East/West coverage" : "Global geostationary mosaic",
+    resolution: regional ? "0.5–2 km; product dependent" : "approximately 3 km",
+    temporalKind: "observed",
+    attribution: "NOAA / NESDIS nowCOAST",
+    maxFrames: regional ? 18 : 5,
+  };
+}
+
+function rasterSpecsFor(request: WeatherPointRequest) {
+  const requested = new Set(request.requestedLayerIds ?? []);
+  const specs: WmsRasterSpec[] = [];
+  for (const layerId of requested) {
+    const registered = WMS_LAYER_SPECS[layerId];
+    if (registered && withinConus(request)) specs.push(registered);
+  }
+  if (requested.has("weather.satellite.clouds"))
+    specs.push(
+      satelliteSpec(
+        request,
+        "weather.satellite.clouds",
+        "goes_longwave_imagery",
+        "global_longwave_imagery_mosaic",
+        "cloud imagery (longwave infrared)",
+        "goes-lir",
+      ),
+    );
+  if (requested.has("weather.satellite.infrared"))
+    specs.push(
+      satelliteSpec(
+        request,
+        "weather.satellite.infrared",
+        "goes_longwave_imagery",
+        "global_longwave_imagery_mosaic",
+        "longwave infrared satellite imagery",
+        "goes-lir",
+      ),
+    );
+  if (requested.has("weather.satellite.true-color"))
+    specs.push(
+      satelliteSpec(
+        request,
+        "weather.satellite.true-color",
+        "goes_visible_imagery",
+        "global_visible_imagery_mosaic",
+        "visible satellite imagery",
+        "goes-vis",
+      ),
+    );
+  if (requested.has("weather.satellite.water-vapor"))
+    specs.push(
+      satelliteSpec(
+        request,
+        "weather.satellite.water-vapor",
+        "goes_water_vapor_imagery",
+        "global_water_vapor_imagery_mosaic",
+        "upper-level water vapor satellite imagery",
+        "goes-wv",
+      ),
+    );
+  if (requested.has("weather.satellite.smoke"))
+    specs.push({
+      ...WMS_LAYER_SPECS["weather.air-quality"]!,
+      layerId: "weather.satellite.smoke",
+    });
+  if (requested.has("weather.lightning.recent"))
+    specs.push({
+      layerId: "weather.lightning.recent",
+      providerId: "noaa-nowcoast-lightning",
+      providerName: "NOAA/NWS nowCOAST lightning",
+      product: "15-minute lightning strike density",
+      capabilitiesUrl: NOAA_LIGHTNING_CAPABILITIES,
+      layerNames: ["ldn_lightning_strike_density"],
+      styles: "lightning_density",
+      coverage: "25°S–80°N; 110°E eastward to 0°",
+      resolution: "8 km grid / 15-minute period",
+      temporalKind: "observed",
+      attribution: "NOAA/NWS/NCEP Ocean Prediction Center via nowCOAST",
+      maxFrames: 17,
+    });
+  return specs;
+}
+
+type AwcMetarFeature = {
+  type?: string;
+  geometry?: { type?: string; coordinates?: number[] };
+  properties?: Record<string, unknown>;
+};
+type AwcMetarResponse = { features?: AwcMetarFeature[] };
+
+async function loadAviationStations(
+  request: WeatherPointRequest,
+  signal: AbortSignal,
+): Promise<WeatherStationObservation[]> {
+  const latRadius = 1.5;
+  const lonRadius = Math.min(3, 1.5 / Math.max(0.35, Math.cos((request.latitude * Math.PI) / 180)));
+  const bbox = [
+    Math.max(-90, request.latitude - latRadius),
+    Math.max(-180, request.longitude - lonRadius),
+    Math.min(90, request.latitude + latRadius),
+    Math.min(180, request.longitude + lonRadius),
+  ]
+    .map((value) => value.toFixed(3))
+    .join(",");
+  return withCache(
+    `awc-metar:${bbox}`,
+    5 * 60_000,
+    { providerId: "nws-awc", product: "METAR observations" },
+    async () => {
+      const url = `https://aviationweather.gov/api/data/metar?bbox=${bbox}&format=geojson&hours=2`;
+      const payload = await fetchJson<AwcMetarResponse>(url, signal, nwsHeaders);
+      return (payload.features ?? []).slice(0, 150).flatMap((feature, index) => {
+        if (feature.geometry?.type !== "Point" || !feature.geometry.coordinates) return [];
+        const properties = feature.properties ?? {};
+        const timestamp = validIso(properties["obsTime"]);
+        const stationId = boundedText(properties["id"], 12);
+        if (!timestamp || !stationId) return [];
+        const numeric = (key: string) => {
+          const value = properties[key];
+          if (value === null || value === undefined || value === "") return undefined;
+          const parsed = Number(value);
+          return Number.isFinite(parsed) ? parsed : undefined;
+        };
+        const temperature = numeric("temp");
+        const dewpoint = numeric("dewp");
+        const windSpeedKnots = numeric("wspd");
+        const windGustKnots = numeric("wgst");
+        const windDirection = numeric("wdir");
+        const pressureHpa = numeric("altim");
+        const visibilityMiles = numeric("visib");
+        const observation: WeatherStationObservation = {
+          id: `awc-metar-${stationId}-${timestamp}-${index}`,
+          stationId,
+          stationName: boundedText(properties["site"], 160) || undefined,
+          location: {
+            type: "Feature",
+            properties: {},
+            geometry: {
+              type: "Point",
+              coordinates: [
+                Number(feature.geometry.coordinates[0]),
+                Number(feature.geometry.coordinates[1]),
+              ],
+            },
+          },
+          ...(temperature !== undefined ? { temperatureK: celsiusToKelvin(temperature) } : {}),
+          ...(dewpoint !== undefined ? { dewpointK: celsiusToKelvin(dewpoint) } : {}),
+          ...(windSpeedKnots !== undefined ? { windSpeedMS: windSpeedKnots * 0.514444 } : {}),
+          ...(windGustKnots !== undefined ? { windGustMS: windGustKnots * 0.514444 } : {}),
+          ...(windDirection !== undefined ? { windDirectionDeg: windDirection } : {}),
+          ...(pressureHpa !== undefined ? { pressurePa: pressureHpa * 100 } : {}),
+          ...(visibilityMiles !== undefined ? { visibilityM: visibilityMiles * 1609.344 } : {}),
+          flightCategory: boundedText(properties["fltcat"], 12) || undefined,
+          rawObservation: boundedText(properties["rawOb"], 500) || undefined,
+          source: sourceMetadata({
+            providerId: "nws-awc",
+            providerName: "Aviation Weather Center",
+            product: "METAR observation",
+            temporalKind: "observed",
+            sourceTimestamp: timestamp,
+            validTime: timestamp,
+            rawSourceReference: url,
+            attribution: "NOAA / National Weather Service Aviation Weather Center",
+          }),
+        };
+        return [observation];
+      });
+    },
+  );
+}
+
 function withinConus(request: WeatherPointRequest) {
   return (
     request.longitude >= -130 &&
@@ -485,14 +911,22 @@ function health(
 export async function loadWeatherBundle(request: WeatherPointRequest): Promise<WeatherBundle> {
   const startedAt = Date.now();
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10_000);
+  const timeout = setTimeout(() => controller.abort(), 15_000);
   const generatedAt = new Date().toISOString();
   const warnings: string[] = [];
   const providerHealth: WeatherProviderHealth[] = [];
+  const requestedLayers = new Set(
+    request.requestedLayerIds?.length
+      ? request.requestedLayerIds
+      : ["weather.current", "weather.radar.simple", "weather.severe.alerts"],
+  );
   let current: WeatherObservation | null = null;
   let forecast: WeatherForecastPeriod[] = [];
   let alerts: WeatherAlert[] = [];
   let radarFrames: RadarFrame[] = [];
+  const rasterFrames: WeatherRasterFrame[] = [];
+  let stationObservations: WeatherStationObservation[] = [];
+  let photography: WeatherBundle["photography"] = null;
   let nwsCovered = false;
 
   try {
@@ -556,6 +990,49 @@ export async function loadWeatherBundle(request: WeatherPointRequest): Promise<W
       );
     }
 
+    if (!current || !forecast.length) {
+      try {
+        const global = await withCache(
+          `met-norway:${roundCoordinate(request.latitude)},${roundCoordinate(request.longitude)}`,
+          15 * 60_000,
+          { providerId: "met-norway", product: "global location forecast" },
+          () => loadMetNorwayPoint(request, controller.signal),
+        );
+        if (!current) current = global.current;
+        if (!forecast.length) forecast = global.forecast;
+        providerHealth.push(
+          health({
+            providerId: "met-norway",
+            providerName: "MET Norway",
+            status: global.current || global.forecast.length ? "up" : "degraded",
+            products: ["global point forecast", "model conditions"],
+            coverage: "Global; highest priority and resolution in Nordic/Arctic regions",
+            latencyMs: Date.now() - startedAt,
+            lastSuccessfulRequest:
+              global.current?.source.receivedTimestamp ??
+              global.forecast[0]?.source.receivedTimestamp ??
+              generatedAt,
+            lastUpdate:
+              global.current?.source.sourceTimestamp ?? global.forecast[0]?.source.sourceTimestamp,
+            costClass: "public",
+          }),
+        );
+      } catch (error) {
+        warnings.push("The global MET Norway fallback did not respond.");
+        providerHealth.push(
+          health({
+            providerId: "met-norway",
+            providerName: "MET Norway",
+            status: "down",
+            products: ["global point forecast", "model conditions"],
+            coverage: "Global",
+            error: error instanceof Error ? error.message : "Provider request failed",
+            costClass: "public",
+          }),
+        );
+      }
+    }
+
     const openMeteoEnabled = env?.["WEATHER_ENABLE_OPEN_METEO_EVALUATION"] === "true";
     if (!current && openMeteoEnabled) {
       try {
@@ -574,88 +1051,185 @@ export async function loadWeatherBundle(request: WeatherPointRequest): Promise<W
           }),
         );
       } catch (error) {
-        warnings.push("The optional global evaluation forecast did not respond.");
+        warnings.push("The optional global evaluation fallback did not respond.");
         providerHealth.push(
           health({
             providerId: "open-meteo-evaluation",
             providerName: "Open-Meteo evaluation",
             status: "down",
             products: ["global model conditions"],
-            coverage: "Global model coverage",
+            coverage: "Global",
             error: error instanceof Error ? error.message : "Provider request failed",
             costClass: "evaluation",
           }),
         );
       }
-    } else if (!openMeteoEnabled) {
-      providerHealth.push(
-        health({
-          providerId: "global-forecast",
-          providerName: "Global forecast provider",
-          status: "not-configured",
-          products: ["global current", "forecast grids", "model fields"],
-          coverage: "Global",
-          error: "Choose a production provider or explicitly enable evaluation mode",
-          costClass: "commercial",
-        }),
-      );
     }
 
-    if (withinConus(request)) {
-      try {
-        radarFrames = await loadRadarFrames(controller.signal);
+    if (requestedLayers.has("weather.radar.simple")) {
+      if (withinConus(request)) {
+        try {
+          radarFrames = await loadRadarFrames(controller.signal);
+          providerHealth.push(
+            health({
+              providerId: "noaa-nws-mrms",
+              providerName: "NOAA/NWS MRMS",
+              status: radarFrames.length ? "up" : "degraded",
+              products: ["radar-reflectivity"],
+              coverage: "CONUS",
+              latencyMs: Date.now() - startedAt,
+              lastSuccessfulRequest: radarFrames.at(-1)?.source.receivedTimestamp ?? generatedAt,
+              lastUpdate: radarFrames.at(-1)?.timestamp,
+              costClass: "public",
+            }),
+          );
+        } catch (primaryError) {
+          try {
+            radarFrames = await loadRadarFallback(controller.signal);
+            warnings.push("Primary MRMS radar was unavailable; LandDraft switched to NWS radar.");
+            providerHealth.push(
+              health({
+                providerId: "noaa-nws-mrms",
+                providerName: "NOAA/NWS MRMS",
+                status: "down",
+                products: ["radar-reflectivity"],
+                coverage: "CONUS",
+                error:
+                  primaryError instanceof Error ? primaryError.message : "Primary radar failed",
+                costClass: "public",
+              }),
+              health({
+                providerId: "nws-radar-fallback",
+                providerName: "National Weather Service radar service",
+                status: radarFrames.length ? "up" : "degraded",
+                products: ["base reflectivity fallback"],
+                coverage: "United States and territories",
+                lastSuccessfulRequest: generatedAt,
+                lastUpdate: radarFrames.at(-1)?.timestamp,
+                costClass: "public",
+              }),
+            );
+          } catch (fallbackError) {
+            warnings.push("Both official radar services are temporarily unavailable.");
+            providerHealth.push(
+              health({
+                providerId: "noaa-nws-mrms",
+                providerName: "NOAA/NWS radar",
+                status: "down",
+                products: ["radar-reflectivity"],
+                coverage: "United States and territories",
+                error: `Primary: ${primaryError instanceof Error ? primaryError.message : "failed"}; fallback: ${fallbackError instanceof Error ? fallbackError.message : "failed"}`,
+                costClass: "public",
+              }),
+            );
+          }
+        }
+      } else {
         providerHealth.push(
           health({
             providerId: "noaa-nws-mrms",
-            providerName: "NOAA/NWS MRMS",
-            status: radarFrames.length ? "up" : "degraded",
+            providerName: "NOAA/NWS radar",
+            status: "degraded",
             products: ["radar-reflectivity"],
-            coverage: "CONUS",
-            latencyMs: Date.now() - startedAt,
-            lastSuccessfulRequest: radarFrames.at(-1)?.source.receivedTimestamp ?? generatedAt,
-            lastUpdate: radarFrames.at(-1)?.timestamp,
-            costClass: "public",
-          }),
-        );
-      } catch (error) {
-        warnings.push("Official composite radar is temporarily unavailable.");
-        providerHealth.push(
-          health({
-            providerId: "noaa-nws-mrms",
-            providerName: "NOAA/NWS MRMS",
-            status: "down",
-            products: ["radar-reflectivity"],
-            coverage: "CONUS",
-            error: error instanceof Error ? error.message : "Radar metadata request failed",
+            coverage: "United States and territories",
+            error:
+              "Radar is unavailable at this map point; satellite/model data are not mislabeled as radar",
             costClass: "public",
           }),
         );
       }
-    } else {
-      providerHealth.push(
-        health({
-          providerId: "noaa-nws-mrms",
-          providerName: "NOAA/NWS MRMS",
-          status: "degraded",
-          products: ["radar-reflectivity"],
-          coverage: "CONUS",
-          error: "Current map point is outside this radar mosaic",
-          costClass: "public",
-        }),
-      );
     }
 
-    providerHealth.push(
-      health({
-        providerId: "lightning-provider",
-        providerName: "Lightning provider",
-        status: "not-configured",
-        products: ["lightning-strikes", "lightning-density"],
-        coverage: "Provider dependent",
-        error: "A licensed real-time lightning feed is required",
-        costClass: "commercial",
-      }),
+    const rasterSpecs = rasterSpecsFor({ ...request, requestedLayerIds: [...requestedLayers] });
+    const rasterResults = await Promise.allSettled(
+      rasterSpecs.map(async (spec) => ({
+        spec,
+        frames: await loadWmsRasterFrames(spec, controller.signal),
+      })),
     );
+    rasterResults.forEach((result, index) => {
+      if (result.status === "fulfilled") {
+        rasterFrames.push(...result.value.frames);
+        providerHealth.push(
+          health({
+            providerId: result.value.spec.providerId,
+            providerName: result.value.spec.providerName,
+            status: result.value.frames.length ? "up" : "degraded",
+            products: [result.value.spec.product],
+            coverage: result.value.spec.coverage,
+            lastSuccessfulRequest: generatedAt,
+            lastUpdate: result.value.frames.at(-1)?.timestamp,
+            costClass: "public",
+          }),
+        );
+      } else {
+        const spec = rasterSpecs[index]!;
+        warnings.push(`${spec.product} is temporarily unavailable.`);
+        providerHealth.push(
+          health({
+            providerId: spec.providerId,
+            providerName: spec.providerName,
+            status: "down",
+            products: [spec.product],
+            coverage: spec.coverage,
+            error:
+              result.reason instanceof Error ? result.reason.message : "Provider request failed",
+            costClass: "public",
+          }),
+        );
+      }
+    });
+
+    if (requestedLayers.has("weather.metar")) {
+      try {
+        stationObservations = await loadAviationStations(request, controller.signal);
+        providerHealth.push(
+          health({
+            providerId: "nws-awc",
+            providerName: "Aviation Weather Center",
+            status: "up",
+            products: ["METAR observations"],
+            coverage: "Worldwide reporting stations",
+            lastSuccessfulRequest: generatedAt,
+            lastUpdate: stationObservations[0]?.source.sourceTimestamp,
+            costClass: "public",
+          }),
+        );
+      } catch (error) {
+        warnings.push("Aviation observations are temporarily unavailable.");
+        providerHealth.push(
+          health({
+            providerId: "nws-awc",
+            providerName: "Aviation Weather Center",
+            status: "down",
+            products: ["METAR observations"],
+            coverage: "Worldwide reporting stations",
+            error: error instanceof Error ? error.message : "METAR request failed",
+            costClass: "public",
+          }),
+        );
+      }
+    }
+
+    if (requestedLayers.has("weather.photo")) {
+      photography = await buildPhotographyAssessment(
+        request,
+        alerts,
+        controller.signal,
+        async (candidate, signal) => {
+          const [candidateAlerts, model] = await Promise.all([
+            loadNwsAlerts(candidate, signal).catch(() => []),
+            withCache(
+              `met-norway:${roundCoordinate(candidate.latitude)},${roundCoordinate(candidate.longitude)}`,
+              15 * 60_000,
+              { providerId: "met-norway", product: "photography candidate" },
+              () => loadMetNorwayPoint(candidate, signal),
+            ),
+          ]);
+          return { alerts: candidateAlerts, current: model.current };
+        },
+      );
+    }
 
     if (!current)
       warnings.push(
@@ -674,14 +1248,20 @@ export async function loadWeatherBundle(request: WeatherPointRequest): Promise<W
     forecast,
     alerts,
     radarFrames,
+    rasterFrames,
+    stationObservations,
+    photography,
     providerHealth,
     warnings,
     coverage: {
       nws: nwsCovered,
       radar: radarFrames.length > 0,
       globalForecast: providerHealth.some(
-        (item) => item.providerId === "open-meteo-evaluation" && item.status === "up",
+        (item) =>
+          ["met-norway", "open-meteo-evaluation"].includes(item.providerId) && item.status === "up",
       ),
+      satellite: rasterFrames.some((frame) => frame.layerId.startsWith("weather.satellite.")),
+      lightningDensity: rasterFrames.some((frame) => frame.layerId === "weather.lightning.recent"),
     },
   };
 }

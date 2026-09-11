@@ -73,11 +73,32 @@ const workspaceChoices: Array<{ id: WorkspaceView; name: string; help: string }>
   { id: "photography", name: "Photography", help: "Viewing and light-planning foundation" },
 ];
 
-function closestRadarFrameIndex(bundle: WeatherBundle, selectedTime: string) {
+const CONNECTED_LAYERS = new Set([
+  "weather.current",
+  "weather.radar.simple",
+  "weather.satellite.clouds",
+  "weather.satellite.true-color",
+  "weather.satellite.infrared",
+  "weather.satellite.water-vapor",
+  "weather.satellite.smoke",
+  "weather.wind.surface",
+  "weather.lightning.recent",
+  "weather.severe.alerts",
+  "weather.forecast.precipitation",
+  "weather.surface",
+  "weather.metar",
+  "weather.tropical",
+  "weather.winter",
+  "weather.fire",
+  "weather.air-quality",
+  "weather.photo",
+]);
+
+function closestFrameIndex(frames: Array<{ timestamp: string }>, selectedTime: string) {
   const target = new Date(selectedTime).getTime();
   let selected = 0;
   let distance = Number.POSITIVE_INFINITY;
-  bundle.radarFrames.forEach((frame, index) => {
+  frames.forEach((frame, index) => {
     const next = Math.abs(new Date(frame.timestamp).getTime() - target);
     if (next < distance) {
       selected = index;
@@ -93,6 +114,19 @@ export function WeatherWorkspace() {
   const workspace = useMemo(
     () => normalizeWeatherWorkspace(wb.weatherWorkspace),
     [wb.weatherWorkspace],
+  );
+  const requestedLayerIds = useMemo(
+    () =>
+      Array.from(
+        new Set([
+          "weather.current",
+          "weather.severe.alerts",
+          ...Object.entries(workspace.layerSettings).flatMap(([id, setting]) =>
+            setting.visible ? [id] : [],
+          ),
+        ]),
+      ),
+    [workspace.layerSettings],
   );
   const [bundle, setBundle] = useState<WeatherBundle | null>(null);
   const [loading, setLoading] = useState(false);
@@ -121,24 +155,28 @@ export function WeatherWorkspace() {
     [updateWorkspace, workspace.timeline],
   );
 
-  const loadPoint = useCallback(async (point: [number, number], quietly = false) => {
-    if (!quietly) setLoading(true);
-    setError(null);
-    try {
-      const next = await getWeatherAtPoint({
-        data: { longitude: point[0], latitude: point[1] },
-      });
-      setBundle(next);
-      return next;
-    } catch (nextError) {
-      const message = nextError instanceof Error ? nextError.message : "Weather data did not load";
-      setError(message);
-      if (!quietly) toast.error("Weather did not load", { description: message });
-      return null;
-    } finally {
-      if (!quietly) setLoading(false);
-    }
-  }, []);
+  const loadPoint = useCallback(
+    async (point: [number, number], quietly = false, layers: string[] = requestedLayerIds) => {
+      if (!quietly) setLoading(true);
+      setError(null);
+      try {
+        const next = await getWeatherAtPoint({
+          data: { longitude: point[0], latitude: point[1], requestedLayerIds: layers },
+        });
+        setBundle(next);
+        return next;
+      } catch (nextError) {
+        const message =
+          nextError instanceof Error ? nextError.message : "Weather data did not load";
+        setError(message);
+        if (!quietly) toast.error("Weather did not load", { description: message });
+        return null;
+      } finally {
+        if (!quietly) setLoading(false);
+      }
+    },
+    [requestedLayerIds],
+  );
 
   useEffect(() => {
     if (!wb.projectReady || loadedProject.current === wb.projectId) return;
@@ -163,23 +201,37 @@ export function WeatherWorkspace() {
     };
   }, [loadPoint, map, updateWorkspace, workspace.inspectorEnabled]);
 
+  const timelineFrames = useMemo(() => {
+    const candidates = [
+      ...(workspace.layerSettings["weather.radar.simple"]?.visible
+        ? (bundle?.radarFrames ?? [])
+        : []),
+      ...(bundle?.rasterFrames ?? []).filter(
+        (frame) => workspace.layerSettings[frame.layerId]?.visible,
+      ),
+    ];
+    return [...new Map(candidates.map((frame) => [frame.timestamp, frame])).values()].sort(
+      (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+    );
+  }, [bundle?.radarFrames, bundle?.rasterFrames, workspace.layerSettings]);
+
   useEffect(() => {
-    if (!workspace.timeline.playing || !bundle || bundle.radarFrames.length < 2) return;
+    if (!workspace.timeline.playing || timelineFrames.length < 2) return;
     const timer = window.setInterval(() => {
-      const currentIndex = closestRadarFrameIndex(bundle, workspace.timeline.selectedTime);
+      const currentIndex = closestFrameIndex(timelineFrames, workspace.timeline.selectedTime);
       const nextIndex = currentIndex + 1;
-      if (nextIndex >= bundle.radarFrames.length) {
+      if (nextIndex >= timelineFrames.length) {
         if (!workspace.timeline.loop) {
           updateTimeline({ playing: false });
           return;
         }
-        updateTimeline({ selectedTime: bundle.radarFrames[0]!.timestamp });
+        updateTimeline({ selectedTime: timelineFrames[0]!.timestamp });
         return;
       }
-      updateTimeline({ selectedTime: bundle.radarFrames[nextIndex]!.timestamp });
+      updateTimeline({ selectedTime: timelineFrames[nextIndex]!.timestamp });
     }, 1_100 / workspace.timeline.speed);
     return () => window.clearInterval(timer);
-  }, [bundle, updateTimeline, workspace.timeline]);
+  }, [timelineFrames, updateTimeline, workspace.timeline]);
 
   const setLayer = useCallback(
     (id: string, change: Partial<WeatherLayerSetting>) => {
@@ -191,8 +243,19 @@ export function WeatherWorkspace() {
           [id]: { ...current, ...change },
         },
       });
+      if (change.visible && !current.visible) {
+        const point = workspace.lastInspectionPoint ?? wb.mapView.center;
+        void loadPoint(point, true, Array.from(new Set([...requestedLayerIds, id])));
+      }
     },
-    [updateWorkspace, workspace.layerSettings],
+    [
+      loadPoint,
+      requestedLayerIds,
+      updateWorkspace,
+      wb.mapView.center,
+      workspace.lastInspectionPoint,
+      workspace.layerSettings,
+    ],
   );
 
   const chooseStarter = (choice: (typeof starterChoices)[number]) => {
@@ -207,12 +270,25 @@ export function WeatherWorkspace() {
           }
         : workspace.layerSettings,
     });
+    void loadPoint(
+      workspace.lastInspectionPoint ?? wb.mapView.center,
+      true,
+      Array.from(new Set([...requestedLayerIds, choice.layer])),
+    );
   };
 
   const openWorkspace = (view: WorkspaceView) => {
     setWorkspaceView(view);
     if (view === "weather") return;
     setAdvancedLayers(true);
+    const photographySetting = workspace.layerSettings["weather.photo"];
+    const layerSettings =
+      view === "photography" && photographySetting
+        ? {
+            ...workspace.layerSettings,
+            "weather.photo": { ...photographySetting, visible: true },
+          }
+        : workspace.layerSettings;
     updateWorkspace({
       selectedCategory:
         view === "meteorology"
@@ -220,7 +296,14 @@ export function WeatherWorkspace() {
           : view === "storm-chaser"
             ? "Storm chaser"
             : "Photography",
+      layerSettings,
     });
+    if (view === "photography")
+      void loadPoint(
+        workspace.lastInspectionPoint ?? wb.mapView.center,
+        false,
+        Array.from(new Set([...requestedLayerIds, "weather.photo"])),
+      );
   };
 
   const activeLayerCount = Object.values(workspace.layerSettings).filter(
@@ -377,12 +460,12 @@ export function WeatherWorkspace() {
 
           <div className="pointer-events-none absolute left-3 top-16 z-30 flex max-w-[calc(100%-6rem)] flex-col gap-2">
             <WeatherStatusPill bundle={bundle} loading={loading} error={error} />
-            {workspaceView !== "weather" && (
+            {workspaceView !== "weather" && workspaceView !== "photography" && (
               <div className="pointer-events-auto max-w-sm rounded-2xl border border-border bg-card/95 p-3 text-[10px] shadow-float backdrop-blur">
                 <strong>{workspaceChoices.find((item) => item.id === workspaceView)?.name}</strong>
                 <p className="mt-1 text-muted-foreground">
-                  The specialized workspace shell and layer registry are ready. Products remain
-                  unavailable until a validated provider or analysis increment supplies them.
+                  Connected professional products are available in the layer drawer. Additional
+                  products remain disabled until their data and licensing are validated.
                 </p>
               </div>
             )}
@@ -391,7 +474,7 @@ export function WeatherWorkspace() {
           <div className="absolute inset-x-3 bottom-4 z-30 hidden lg:block">
             <WeatherTimeline
               timeline={workspace.timeline}
-              radarFrames={bundle?.radarFrames ?? []}
+              frames={timelineFrames}
               onChange={updateTimeline}
             />
           </div>
@@ -468,7 +551,7 @@ export function WeatherWorkspace() {
                 <div className="border-t border-border p-2">
                   <WeatherTimeline
                     timeline={workspace.timeline}
-                    radarFrames={bundle?.radarFrames ?? []}
+                    frames={timelineFrames}
                     onChange={updateTimeline}
                     compact
                   />
@@ -578,12 +661,26 @@ function WeatherLayerPanel({
     (layer) =>
       layer.group === workspace.selectedCategory && (advanced || layer.audience === "basic"),
   );
-  const available = (id: string) => {
-    if (id === "weather.current") return Boolean(bundle?.current || bundle?.forecast.length);
-    if (id === "weather.radar.simple") return Boolean(bundle?.radarFrames.length);
-    if (id === "weather.severe.alerts") return Boolean(bundle);
-    if (id === "weather.wind.surface") return bundle?.current?.windSpeedMS !== undefined;
-    return false;
+  const layerStatus = (id: string) => {
+    const requested = bundle?.request.requestedLayerIds?.includes(id) ?? false;
+    const hasRaster = bundle?.rasterFrames.some((frame) => frame.layerId === id) ?? false;
+    const available =
+      id === "weather.current"
+        ? Boolean(bundle?.current || bundle?.forecast.length)
+        : id === "weather.radar.simple"
+          ? Boolean(bundle?.radarFrames.length)
+          : id === "weather.severe.alerts"
+            ? Boolean(bundle && requested)
+            : id === "weather.wind.surface"
+              ? hasRaster || bundle?.current?.windSpeedMS !== undefined
+              : id === "weather.metar"
+                ? Boolean(bundle?.stationObservations.length)
+                : id === "weather.photo"
+                  ? Boolean(bundle?.photography)
+                  : hasRaster;
+    if (available) return { ready: true, label: "AVAILABLE" };
+    if (!CONNECTED_LAYERS.has(id)) return { ready: false, label: "SETUP REQUIRED" };
+    return { ready: false, label: requested ? "NO DATA HERE" : "TURN ON TO LOAD" };
   };
   const savePreset = () => {
     const preset = createWeatherPreset(presetName, workspace);
@@ -635,7 +732,7 @@ function WeatherLayerPanel({
         {selectedLayers.map((layer) => {
           const setting = workspace.layerSettings[layer.id];
           if (!setting || !hasWeatherCapability(layer.capability)) return null;
-          const ready = available(layer.id);
+          const status = layerStatus(layer.id);
           return (
             <div key={layer.id} className="rounded-2xl border border-border bg-background p-3">
               <div className="flex items-start gap-2">
@@ -669,10 +766,12 @@ function WeatherLayerPanel({
                   <span
                     className={cn(
                       "mt-1 inline-flex rounded-full px-1.5 py-0.5 text-[8px] font-semibold",
-                      ready ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800",
+                      status.ready
+                        ? "bg-emerald-100 text-emerald-800"
+                        : "bg-amber-100 text-amber-800",
                     )}
                   >
-                    {ready ? "AVAILABLE" : "PROVIDER REQUIRED"}
+                    {status.label}
                   </span>
                 </div>
               </div>
@@ -790,7 +889,7 @@ function InspectorPanel({
             <div className="min-w-0">
               <strong className="block truncate text-sm">{current.placeName ?? "Map point"}</strong>
               <span className="text-[9px] font-semibold text-primary">
-                {weatherAgeLabel(current.source)} · OBSERVED
+                {weatherAgeLabel(current.source)} · {current.source.temporalKind.toUpperCase()}
               </span>
             </div>
           </div>
@@ -862,6 +961,8 @@ function InspectorPanel({
         )}
       </div>
 
+      {bundle?.photography && <PhotographyPanel assessment={bundle.photography} />}
+
       <div>
         <strong className="text-xs">Forecast</strong>
         <div className="mt-2 flex snap-x gap-2 overflow-x-auto pb-1">
@@ -882,6 +983,78 @@ function InspectorPanel({
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function PhotographyPanel({
+  assessment,
+}: {
+  assessment: NonNullable<WeatherBundle["photography"]>;
+}) {
+  return (
+    <div>
+      <div className="flex items-center gap-2 text-xs font-semibold">
+        <CloudSun className="size-4 text-primary" /> Photography candidate analysis
+      </div>
+      <p className="mt-1 text-[9px] leading-relaxed text-muted-foreground">
+        {assessment.targetDescription}
+      </p>
+      {assessment.status === "no-severe-target" ? (
+        <p className="mt-2 rounded-2xl bg-secondary p-3 text-[10px] text-muted-foreground">
+          No candidate zones were generated. LandDraft requires an official warning/watch polygon
+          before it treats a storm as an analysis target.
+        </p>
+      ) : (
+        <div className="mt-2 space-y-2">
+          {assessment.zones.map((zone) => (
+            <div key={zone.id} className="rounded-2xl border border-border bg-secondary p-3">
+              <div className="flex items-center gap-2">
+                <strong className="text-[11px]">{zone.name}</strong>
+                <span
+                  className={cn(
+                    "ml-auto rounded-full px-2 py-0.5 text-[8px] font-semibold uppercase",
+                    zone.riskLevel === "lower"
+                      ? "bg-emerald-100 text-emerald-800"
+                      : zone.riskLevel === "high"
+                        ? "bg-rose-100 text-rose-800"
+                        : "bg-amber-100 text-amber-800",
+                  )}
+                >
+                  {zone.riskLevel} exposure
+                </span>
+              </div>
+              <p className="mt-1 text-[10px] font-semibold">
+                {zone.score === null
+                  ? "Photography score suppressed"
+                  : `Photography ${zone.score}/100`}
+              </p>
+              <p className="mt-1 text-[9px] text-muted-foreground">
+                {zone.distanceFromTargetMiles.toFixed(1)} mi from alert center · target bearing{" "}
+                {Math.round(zone.targetBearingDeg)}°
+              </p>
+              <ul className="mt-2 space-y-0.5 text-[9px] text-muted-foreground">
+                {zone.reasons.slice(0, 3).map((reason) => (
+                  <li key={reason}>• {reason}</li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+      )}
+      <p className="mt-2 rounded-xl bg-amber-50 p-3 text-[9px] leading-relaxed text-amber-950">
+        Candidate zones are decision support, not declarations of safety or routing instructions.
+        Official warnings and on-scene conditions always take priority.
+      </p>
+      <details className="mt-2 text-[9px] text-muted-foreground">
+        <summary className="cursor-pointer font-semibold">Method and limitations</summary>
+        <p className="mt-1">{assessment.methodology}</p>
+        <ul className="mt-1 space-y-1">
+          {assessment.limitations.map((limitation) => (
+            <li key={limitation}>• {limitation}</li>
+          ))}
+        </ul>
+      </details>
     </div>
   );
 }
@@ -931,8 +1104,9 @@ function SourcePanel({ bundle }: { bundle: WeatherBundle | null }) {
         )}
       </div>
       <p className="mt-3 rounded-xl bg-secondary p-3 text-[9px] leading-relaxed text-muted-foreground">
-        Lightning, advanced satellite, global radar, and model grids require reviewed providers.
-        LandDraft does not substitute invented values.
+        NOAA/NWS satellite, regional lightning-density, radar, forecast layers and METAR stations
+        are connected. Individual global lightning strikes, global radar and advanced model grids
+        still require reviewed licensed sources. LandDraft never substitutes invented values.
       </p>
     </div>
   );

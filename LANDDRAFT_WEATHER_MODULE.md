@@ -4,7 +4,7 @@ This file is the durable handoff for future LandDraft Weather sessions.
 
 ## Current phase
 
-Phase 1 foundation is implemented on `feature/test-module-development`. The module is optional,
+Phase 1.1 provider foundation is implemented on `feature/test-module-development`. The module is optional,
 test-only, schema-free, and does not change billing, plans, production infrastructure or backups.
 
 Implemented entry point: `/weather`.
@@ -38,8 +38,9 @@ Read first:
 ## Next disciplined increments
 
 1. Validate Phase 1 in the public test deployment across desktop, tablet and phone viewports.
-2. Add reviewed satellite imagery and a production global forecast provider; the initial official
-   NOAA/NWS MRMS composite radar adapter is complete for CONUS.
+2. Add a licensed individual-strike lightning feed and global/commercial radar adapter only after
+   credentials, redistribution rights and costs are approved. Satellite and public global forecast
+   fallback are now connected.
 3. Add severe event normalization/cards without algorithmically upgrading possible rotation to a
    confirmed tornado.
 4. Coordinate organization settings, RLS, provider secrets, cache/usage tables and entitlements
@@ -49,9 +50,10 @@ Read first:
 
 ## Provider setup still required
 
-- Production-grade global forecast agreement or self-hosted open-data ingestion.
-- Licensed low-latency lightning feed.
-- Reviewed radar/satellite tile generation and CDN/object-storage design.
+- Optional production-grade global forecast SLA or self-hosted open-data ingestion beyond the
+  public MET Norway fallback.
+- Licensed low-latency individual-strike lightning feed and commercial global radar.
+- CDN/object-storage design if public upstream tile demand outgrows bounded direct use.
 - Weather provider identity/contact strings and operational monitoring.
 - Optional notification providers, each disabled until explicitly configured.
 
@@ -59,11 +61,24 @@ Read first:
 
 - NWS point forecast, latest station observation and active alert polygons require no private key.
 - NOAA/NWS MRMS CONUS radar metadata and tiled imagery require no private key.
+- Official NWS WMS radar provides an automatic equivalent fallback if MRMS fails.
+- NOAA nowCOAST satellite and regional lightning-density WMS products require no private key.
+- NDFD wind/temperature/precipitation, NHC tropical, WSSI, SPC fire and NOAA smoke products require
+  no private key and load only when selected.
+- MET Norway provides the global model point fallback and requires identifying User-Agent and
+  attribution. Aviation Weather Center provides bounded global METAR station queries.
 - `WEATHER_ENABLE_OPEN_METEO_EVALUATION=true` enables the optional global evaluation adapter on the
   server. Keep it disabled for production unless its usage/license has been reviewed. Output is
   labeled `MODEL` and `EVALUATION_ONLY`.
-- Lightning, advanced satellite, numerical model grids and commercial global radar have no
-  credential configured and deliberately return `not-configured`/`Unavailable` states.
+- Individual lightning strikes, professional radar moments, upper-air/convective grids, soundings,
+  storm objects, historical archives and commercial global radar remain unconfigured.
+
+## Photography analysis state
+
+Photography mode now creates ranked **lower-exposure candidate zones**, never “safe locations.” It
+requires an official alert polygon, screens candidates against official point alerts and uses
+labeled model cloud/wind/precipitation context. Significant alert exposure suppresses scoring.
+Roads, terrain, flood conditions and exact lightning are not yet inputs and are plainly disclosed.
 
 Live adapter verification on 2026-09-11 at Midland, Texas returned a current NWS observation, 14
 forecast periods and 15 official MRMS frames. Provider failure still returns normalized health and

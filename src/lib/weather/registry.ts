@@ -91,7 +91,8 @@ export const weatherLayerRegistry: WeatherLayerDefinition[] = [
     id: "weather.satellite.clouds",
     name: "Clouds",
     group: "Satellite & clouds",
-    description: "Easy cloud imagery; product identity is shown when a provider is configured.",
+    description:
+      "Live NOAA satellite cloud imagery, using GOES over its coverage and a global mosaic elsewhere.",
     capability: "weather.satellite",
     dataType: "raster",
     providerProducts: ["satellite-clouds"],
@@ -105,7 +106,7 @@ export const weatherLayerRegistry: WeatherLayerDefinition[] = [
     audience: "basic",
   },
   ...[
-    ["true-color", "True color"],
+    ["true-color", "Visible satellite"],
     ["infrared", "Infrared"],
     ["water-vapor", "Water vapor"],
     ["cloud-top", "Cloud-top temperature"],
@@ -114,7 +115,12 @@ export const weatherLayerRegistry: WeatherLayerDefinition[] = [
     id: `weather.satellite.${id}`,
     name: name!,
     group: "Satellite & clouds",
-    description: "Satellite product; coverage and cadence depend on the selected provider.",
+    description:
+      id === "cloud-top"
+        ? "Cloud-top temperature is registered but still needs a validated sampling provider."
+        : id === "smoke"
+          ? "Official NOAA near-surface smoke guidance; model guidance is not a direct observation."
+          : `Live NOAA ${name!.toLowerCase()} imagery with product time and source retained.`,
     capability: "weather.satellite",
     dataType: "raster",
     providerProducts: [`satellite-${id}`],
@@ -132,9 +138,9 @@ export const weatherLayerRegistry: WeatherLayerDefinition[] = [
     name: "Surface wind",
     group: "Wind",
     description:
-      "Animated wind field when a gridded provider is configured; point wind remains inspectable.",
+      "Official NOAA shaded forecast wind speed in U.S. coverage; point wind remains inspectable globally.",
     capability: "weather.basic",
-    dataType: "vector-field",
+    dataType: "raster",
     providerProducts: ["wind-field-surface"],
     units: "m/s",
     defaultOpacity: 0.8,
@@ -148,12 +154,13 @@ export const weatherLayerRegistry: WeatherLayerDefinition[] = [
   },
   {
     id: "weather.lightning.recent",
-    name: "Recent lightning",
+    name: "Lightning activity",
     group: "Lightning",
-    description: "Near-real-time strike data requires a reviewed licensed provider.",
+    description:
+      "NOAA 15-minute lightning strike-density grid. This is regional activity density, not individual strike locations.",
     capability: "weather.lightning",
-    dataType: "point",
-    providerProducts: ["lightning-strikes"],
+    dataType: "raster",
+    providerProducts: ["lightning-density"],
     defaultOpacity: 0.95,
     minZoom: 1,
     maxZoom: 22,
@@ -193,7 +200,7 @@ export const weatherLayerRegistry: WeatherLayerDefinition[] = [
     group: "Forecast",
     description: "Provider-labeled forecast precipitation, never presented as radar.",
     capability: "weather.forecasting",
-    dataType: "grid",
+    dataType: "raster",
     providerProducts: ["forecast-precipitation"],
     units: "mm",
     defaultOpacity: 0.55,
@@ -221,9 +228,29 @@ export const weatherLayerRegistry: WeatherLayerDefinition[] = [
     id: `weather.${id}`,
     name: name!,
     group: group!,
-    description: "Registered for a later validated provider/analysis increment.",
+    description:
+      id === "surface"
+        ? "Live surface temperature, wind, forecast precipitation and observations are available through their connected layers."
+        : id === "metar"
+          ? "Live global airport and reporting-station observations from the NOAA Aviation Weather Center."
+          : id === "tropical"
+            ? "Official National Hurricane Center tropical summaries, tracks, cones and wind extents where active."
+            : id === "winter"
+              ? "Official U.S. Winter Storm Severity Index impact guidance."
+              : id === "fire"
+                ? "Official U.S. Storm Prediction Center fire-weather outlook."
+                : id === "air-quality"
+                  ? "Official NOAA near-surface smoke guidance; broader AQI feeds remain a future integration."
+                  : id === "photo"
+                    ? "Conservative lower-exposure candidate zones derived from official alert polygons and model conditions."
+                    : "Registered for a later validated provider or analysis increment.",
     capability: capability as WeatherLayerDefinition["capability"],
-    dataType: id === "metar" || id === "storm-objects" ? "point" : "grid",
+    dataType:
+      id === "metar" || id === "storm-objects" || id === "photo"
+        ? "point"
+        : ["surface", "tropical", "winter", "fire", "air-quality"].includes(id!)
+          ? "raster"
+          : "grid",
     providerProducts: [id!],
     defaultOpacity: 0.65,
     minZoom: 0,

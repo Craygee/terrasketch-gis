@@ -52,9 +52,10 @@ expiration timestamps, quality, observed/model/forecast/development status, reso
 and a raw source reference. UI unit preferences format values without changing stored values.
 
 Current core types are `WeatherObservation`, `WeatherForecastPeriod`, `WeatherAlert`, `RadarFrame`,
+`WeatherRasterFrame`, `WeatherStationObservation`, `WeatherPhotographyAssessment`,
 `WeatherProviderHealth`, `WeatherLayerDefinition`, `WeatherTimelineState`, `WeatherPreset`, and
-`WeatherWorkspaceState`. Future lightning strikes, weather events, wind fields, radar sweeps, model
-runs, soundings, tracks and cross sections extend the same metadata contract.
+`WeatherWorkspaceState`. Future individual lightning strikes, weather events, wind fields, radar
+sweeps, model runs, soundings, tracks and cross sections extend the same metadata contract.
 
 ## Provider selection and failure behavior
 
@@ -84,9 +85,14 @@ object storage, queues and spatial/temporal database tables require production c
 ## Map/rendering strategy
 
 - Active warning polygons for the inspected point use bounded GeoJSON and MapLibre fill/line layers.
-- Initial CONUS radar uses official NOAA/NWS MRMS quality-controlled composite base-reflectivity
-  WMS tiles and immutable source timestamps. It is labeled radar only because the source product is
-  radar-derived; future satellite/model precipitation must remain separate.
+- CONUS radar uses official NOAA/NWS MRMS quality-controlled composite base-reflectivity WMS tiles
+  with an automatic official NWS base-reflectivity WMS fallback. It is labeled radar only because
+  both products are radar-derived; satellite/model precipitation remains separate.
+- NOAA nowCOAST satellite imagery is selected between GOES and global mosaic products by coverage.
+- U.S. NDFD temperature, wind and precipitation; fire, winter, tropical and smoke products use
+  product-specific official WMS adapters and never load until their layer is enabled.
+- Aviation Weather Center METAR observations render as bounded station points.
+- NOAA lightning activity renders as a 15-minute 8 km density raster, not exact strike points.
 - Raster and scientific grids use tiled products; the client never downloads a country-scale raw
   archive for a viewport.
 - Wind particles require a reviewed gridded vector source and WebGL worker implementation; Phase 1
@@ -94,6 +100,16 @@ object storage, queues and spatial/temporal database tables require production c
 - Layer definitions live in a registry with group, entitlement, type, time/animation/inspection
   support, opacity, zoom range, legend and attribution.
 - The universal timeline distinguishes past observation frames, `NOW`, and future/model frames.
+
+## Photography decision support
+
+LandDraft does not label viewing locations “safe.” The current analysis requires an official alert
+polygon at the inspected point, projects several candidate zones outward from that polygon, checks
+official alerts at each candidate, and adds MET Norway model cloud/wind/precipitation context.
+Significant official hazards suppress the photography score. Every candidate retains method,
+confidence, sources, valid time and limitations. Road access/closures, terrain line of sight,
+flooding and individual lightning strikes are explicitly not yet included, so the output is not a
+route instruction or safety determination.
 
 ## Mobile architecture
 

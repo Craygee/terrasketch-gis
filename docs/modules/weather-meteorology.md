@@ -7,20 +7,22 @@ Pricing: Undecided
 
 ## Capabilities
 
-Phase 1 provides the optional Weather workspace, normalized provider contracts, capability hooks,
-layer catalog, universal timeline, responsive weather drawer/inspector, project-aware viewport,
-official U.S. warning ingestion, point conditions/forecast gateway, official NOAA/NWS MRMS CONUS
-composite radar frames, source age/quality labels, presets, compact legends and explicit
-unavailable/configuration states for satellite grids, wind fields and lightning awaiting reviewed
-feeds.
+Phase 1.1 provides the optional Weather workspace, normalized provider contracts, capability hooks,
+layer catalog, universal multi-product timeline, responsive weather drawer/inspector,
+project-aware viewport, official U.S. warning ingestion, NWS current conditions/forecast,
+MET Norway global model fallback, NOAA/NWS MRMS radar with official NWS radar failover, NOAA
+nowCOAST satellite imagery and lightning-density, NDFD temperature/wind/precipitation, NHC
+tropical summary, WSSI, SPC fire outlook, NOAA smoke guidance, Aviation Weather Center METAR
+stations, source health/provenance, and a conservative photography-candidate analysis.
 
-It does not claim professional Level II radar decoding, global radar, live lightning, storm-cell
-detection, safe chase routing, soundings, numerical model rendering or certified operational risk.
+It does not claim professional Level II radar decoding, global radar, individual global lightning
+strikes, storm-cell detection, safe chase routing, soundings or certified operational risk.
 
 ## Dependencies
 
 - Shared React, TanStack Start, MapLibre, project store, authenticated shell and responsive styles.
-- Server-side Weather gateway, official NWS API adapter and official NOAA/NWS MRMS WMS adapter.
+- Server-side Weather gateway; official NWS API/GIS, MRMS, nowCOAST and Aviation Weather Center
+  adapters; public MET Norway Locationforecast adapter; and Turf geometry already used by LandDraft.
 - No new runtime package and no database migration in Phase 1.
 - Server-side test telemetry counts logical provider requests, successes, failures and cache hits;
   it deliberately leaves unknown data volume and provider cost as `null` rather than inventing a
@@ -31,7 +33,8 @@ detection, safe chase routing, soundings, numerical model rendering or certified
 ## Potential operating costs
 
 - Public data still creates server compute, bandwidth, caching and monitoring costs.
-- Low-latency global radar/lightning and commercial forecast redistribution may require contracts.
+- Low-latency global radar, exact lightning strikes and commercial forecast redistribution may
+  require contracts. MET Norway requires attribution and appropriate request identification/rates.
 - Radar/satellite/model processing drives compute, object storage and egress.
 - Push, email, SMS, offline packs, historical archives and AI explanations are usage-based cost
   candidates. Product pricing remains undecided.
@@ -56,13 +59,12 @@ detection, safe chase routing, soundings, numerical model rendering or certified
 
 ## Test plan
 
-- Passed: TypeScript typecheck, full ESLint (existing fast-refresh warnings only), six focused Node
-  tests and Cloudflare production build.
-- Passed live provider check at a Midland, Texas point: current NWS observation, 14 forecast periods
-  and 15 timestamped NOAA/NWS MRMS frames.
+- Verification for this increment covers TypeScript, ESLint, focused Weather tests, production build
+  and live capabilities checks for each official WMS/API endpoint.
 - Automated tests cover unit conversions, timestamps/staleness, alert severity, registry uniqueness,
   entitlement decisions, usage telemetry aggregation and unknown-cost handling.
-- Provider failures produce explicit health/warning states; unconfigured feeds remain unavailable.
+- Provider failures produce explicit health/warning states; MRMS can switch to official NWS radar,
+  and missing NWS point data can switch to a clearly labeled MET Norway model result.
 - Signed-in visual QA remains required in the public preview at desktop, tablet, iPhone and narrow
   mobile widths. The repository currently has no general Vitest package/runner, so the dedicated
   Weather tests use Node's built-in test runner without adding a dependency.

@@ -1,8 +1,10 @@
 import { Pause, Play, RotateCcw, SkipBack, SkipForward } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { RadarFrame, WeatherTimelineState } from "@/lib/weather/types";
+import type { WeatherTimelineState } from "@/lib/weather/types";
 
-function frameIndex(frames: RadarFrame[], selectedTime: string) {
+type WeatherTimelineFrame = { id: string; timestamp: string };
+
+function frameIndex(frames: WeatherTimelineFrame[], selectedTime: string) {
   if (!frames.length) return 0;
   const target = new Date(selectedTime).getTime();
   let best = 0;
@@ -19,21 +21,21 @@ function frameIndex(frames: RadarFrame[], selectedTime: string) {
 
 export function WeatherTimeline({
   timeline,
-  radarFrames,
+  frames,
   onChange,
   compact = false,
 }: {
   timeline: WeatherTimelineState;
-  radarFrames: RadarFrame[];
+  frames: WeatherTimelineFrame[];
   onChange: (change: Partial<WeatherTimelineState>) => void;
   compact?: boolean;
 }) {
-  const index = frameIndex(radarFrames, timeline.selectedTime);
-  const frame = radarFrames[index];
+  const index = frameIndex(frames, timeline.selectedTime);
+  const frame = frames[index];
   const move = (direction: -1 | 1) => {
-    if (!radarFrames.length) return;
-    const next = Math.max(0, Math.min(radarFrames.length - 1, index + direction));
-    onChange({ selectedTime: radarFrames[next]!.timestamp, playing: false });
+    if (!frames.length) return;
+    const next = Math.max(0, Math.min(frames.length - 1, index + direction));
+    onChange({ selectedTime: frames[next]!.timestamp, playing: false });
   };
 
   return (
@@ -50,14 +52,14 @@ export function WeatherTimeline({
           onClick={() => onChange({ playing: !timeline.playing })}
           aria-label={timeline.playing ? "Pause weather animation" : "Play weather animation"}
           title={timeline.playing ? "Pause" : "Play"}
-          disabled={radarFrames.length < 2}
+          disabled={frames.length < 2}
         >
           {timeline.playing ? <Pause className="size-4" /> : <Play className="size-4" />}
         </button>
         <button
           className="flex size-8 shrink-0 items-center justify-center rounded-lg hover:bg-accent disabled:opacity-40"
           onClick={() => move(-1)}
-          disabled={!radarFrames.length || index === 0}
+          disabled={!frames.length || index === 0}
           aria-label="Previous frame"
           title="Previous frame"
         >
@@ -66,18 +68,18 @@ export function WeatherTimeline({
         <div className="min-w-0 flex-1">
           <div className="mb-1 flex items-center text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
             <span>Past</span>
-            <span className="mx-auto text-primary">Observed radar</span>
+            <span className="mx-auto text-primary">Weather time</span>
             <span>Now</span>
           </div>
           <input
             type="range"
             min={0}
-            max={Math.max(0, radarFrames.length - 1)}
+            max={Math.max(0, frames.length - 1)}
             step={1}
             value={index}
-            disabled={!radarFrames.length}
+            disabled={!frames.length}
             onChange={(event) => {
-              const next = radarFrames[Number(event.target.value)];
+              const next = frames[Number(event.target.value)];
               if (next) onChange({ selectedTime: next.timestamp, playing: false });
             }}
             className="h-2 w-full cursor-pointer accent-primary disabled:opacity-40"
@@ -87,7 +89,7 @@ export function WeatherTimeline({
         <button
           className="flex size-8 shrink-0 items-center justify-center rounded-lg hover:bg-accent disabled:opacity-40"
           onClick={() => move(1)}
-          disabled={!radarFrames.length || index === radarFrames.length - 1}
+          disabled={!frames.length || index === frames.length - 1}
           aria-label="Next frame"
           title="Next frame"
         >
@@ -96,7 +98,7 @@ export function WeatherTimeline({
         <button
           className="flex size-8 shrink-0 items-center justify-center rounded-lg hover:bg-accent disabled:opacity-40"
           onClick={() => {
-            const latest = radarFrames.at(-1);
+            const latest = frames.at(-1);
             onChange({
               selectedTime: latest?.timestamp ?? new Date().toISOString(),
               playing: false,
@@ -129,7 +131,7 @@ export function WeatherTimeline({
               hour: "numeric",
               minute: "2-digit",
             })
-          : "Radar frames unavailable for this location"}
+          : "No time-enabled layer is loaded here"}
       </div>
     </div>
   );

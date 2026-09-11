@@ -108,6 +108,60 @@ export interface RadarFrame {
   source: WeatherSourceMetadata;
 }
 
+export interface WeatherRasterFrame {
+  id: string;
+  layerId: string;
+  timestamp: string;
+  tileUrlTemplate: string;
+  legendUrl?: string | undefined;
+  coverage: string;
+  source: WeatherSourceMetadata;
+}
+
+export interface WeatherStationObservation {
+  id: string;
+  stationId: string;
+  location: Feature<Point>;
+  stationName?: string | undefined;
+  temperatureK?: number | undefined;
+  dewpointK?: number | undefined;
+  windSpeedMS?: number | undefined;
+  windGustMS?: number | undefined;
+  windDirectionDeg?: number | undefined;
+  pressurePa?: number | undefined;
+  visibilityM?: number | undefined;
+  flightCategory?: string | undefined;
+  rawObservation?: string | undefined;
+  source: WeatherSourceMetadata;
+}
+
+export type WeatherRiskLevel = "lower" | "elevated" | "high" | "unknown";
+
+export interface WeatherViewingZone {
+  id: string;
+  name: string;
+  location: Feature<Point>;
+  radiusMiles: number;
+  score: number | null;
+  confidence: WeatherQuality;
+  riskLevel: WeatherRiskLevel;
+  distanceFromTargetMiles: number;
+  targetBearingDeg: number;
+  reasons: string[];
+  cautions: string[];
+  activeAlertCount: number;
+  source: WeatherSourceMetadata;
+}
+
+export interface WeatherPhotographyAssessment {
+  status: "ready" | "no-severe-target" | "insufficient-data";
+  validTime: string;
+  targetDescription: string;
+  zones: WeatherViewingZone[];
+  methodology: string;
+  limitations: string[];
+}
+
 export interface WeatherProviderHealth {
   providerId: string;
   providerName: string;
@@ -196,6 +250,7 @@ export interface WeatherWorkspaceState {
 export interface WeatherPointRequest {
   latitude: number;
   longitude: number;
+  requestedLayerIds?: string[] | undefined;
 }
 
 export interface WeatherBundle {
@@ -205,12 +260,17 @@ export interface WeatherBundle {
   forecast: WeatherForecastPeriod[];
   alerts: WeatherAlert[];
   radarFrames: RadarFrame[];
+  rasterFrames: WeatherRasterFrame[];
+  stationObservations: WeatherStationObservation[];
+  photography: WeatherPhotographyAssessment | null;
   providerHealth: WeatherProviderHealth[];
   warnings: string[];
   coverage: {
     nws: boolean;
     radar: boolean;
     globalForecast: boolean;
+    satellite: boolean;
+    lightningDensity: boolean;
   };
 }
 
