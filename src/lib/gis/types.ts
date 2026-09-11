@@ -1,4 +1,5 @@
 import type { Feature, FeatureCollection, Geometry } from "geojson";
+import type { PipelineEngineeringState } from "@/lib/pipeline/types";
 
 export type FillPattern =
   "solid" | "diagonal" | "horizontal" | "vertical" | "crosshatch" | "dotted";
@@ -323,6 +324,8 @@ export interface ProjectState {
   assistant?: AssistantConversation;
   connectionHints?: Record<string, ConnectionRecoveryHint>;
   records?: ProjectRecords;
+  /** Optional specialized pipeline workspace. Core GIS projects do not create this until opened. */
+  pipelineEngineering?: PipelineEngineeringState;
   shareSource?: {
     shareId: string;
     sourceProjectId: string;

@@ -10,8 +10,10 @@ Pricing: Undecided
 The target module connects route GIS, terrain, hydraulic scenarios, pipe and equipment selection,
 land-aware constraints, constructability, takeoff, procurement evidence, estimates and bid drafts.
 The first test increment provides the optional workspace foundation, versioned data contracts,
-route selection/stationing, a preliminary incompressible liquid screening solver, results/profile
-UI, warnings, and traceable quantity/cost foundations.
+route selection/stationing, a preliminary incompressible liquid screening solver, result-colored
+map segments, map/profile pressure scrubbing, warnings, traceable quantity takeoff, and a
+budget-allowance cost foundation. Pipeline state is saved with the owning LandDraft project and
+automatically invalidates/recalculates when a linked route changes.
 
 Deliberately outside the initial validated capability are transient liquid/gas, multiphase,
 flow-assurance, dense-phase CO2, hydrogen/ammonia specialty design, final MAOP/code compliance,
@@ -89,11 +91,37 @@ compliance or fabricate a quote.
 - Verify provider offline/rate-limit states retain sourced prior data without fabricating updates.
 - Run TypeScript, ESLint, production build and module tests before coordinated review.
 
+Current foundation verification (2026-09-11):
+
+- TypeScript: pass.
+- ESLint: pass with zero errors; the nine repository-wide Fast Refresh warnings predate this
+  module.
+- Production client/SSR/Cloudflare build: pass.
+- Numerical smoke case: approximately 1,000 m two-point route; finite pressure loss at positive
+  flow; zero loss at zero flow with no elevation change; gas input correctly refused with
+  `ADVANCED_ANALYSIS_REQUIRED`.
+- Auth gate and `/pipeline` route title: browser smoke check passed. Full signed-in visual and
+  touch QA remains required in the test deployment.
+
 ## Release notes
 
 - User-visible: optional Pipeline Engineering & Estimating workspace begins on the test branch.
+  It is accessible from desktop Data controls and the mobile Data sheet. The specialized workspace
+  has its own uncluttered model/map/properties/profile layout and responsive bottom sheets.
 - Setup still required: provider credentials/proxies, validated EPANET packaging, compute service,
   private storage/RLS and organization engineering review workflow.
 - Disablement: remove/hide the workspace entry; versioned pipeline project data remains inert and
   normal LandDraft mapping continues.
 - Rollback: the September 10 checkpoint remains reachable as `landdraft-stable-2026-09-10`.
+
+## Foundation limitations before the next increment
+
+- System pipe entries are dimensional screening templates and are not pressure-rating or
+  compatibility approvals.
+- DEM/survey sampling, crossings, component drag/drop, pump/compressor equations, branch networks,
+  route/pipe/equipment optimization, live vendor acquisition, full cost build-up and bid packet
+  generation are architecture-backed but not enabled yet.
+- The native solver currently supports only steady incompressible liquid routes. Gas and advanced
+  fluids are deliberately blocked.
+- An independent licensed engineering validation suite is required before changing the solver from
+  `preliminary-unvalidated`.

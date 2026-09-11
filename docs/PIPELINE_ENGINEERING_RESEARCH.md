@@ -39,17 +39,17 @@ from a misleading single accuracy claim.[3]
 The table records capability classes worth learning from, not code or interface elements to copy.
 Product names are used only to identify researched sources.
 
-| Product and current public evidence | Relevant capability classes | LandDraft interpretation |
-| --- | --- | --- |
-| DNV Synergi Pipeline Simulator 11.2 Update 4 (July 2026)[4][5] | Steady/transient single-phase liquid and gas simulation, scenario work, operational connections, compositional and batch workflows | Keep model topology, profiles, scenarios, and warnings synchronized; do not claim transient parity in the initial solver |
-| DNV Synergi Gas[6] | Steady and transient gas networks, thermal behavior, gas composition/EOS choices, compressor/valve/storage models, GIS and operational-data integration | Create a gas-specific adapter contract with explicit property/EOS provider and equipment maps; keep it unavailable until validated |
-| Emerson PipelineStudio v5.4 public release notice and January 2025 product sheet[7][8] | Steady/transient liquid and gas models, line inventory, survival time, leak and operational studies | Preserve network state over scenarios and time; reserve transient/operations studies for later validated solvers |
-| Datacor Fathom 14 (November 2025 maintenance release)[9][10] | Steady liquid networks, Darcy-Weisbach/Hazen-Williams, heat transfer, pump curves, NPSH, minor losses, scenario comparison, cost and visual gradients | Adopt focused property panels, alternatives, pump-curve data, traceable warnings, and result colorization in an original LandDraft workflow |
-| Datacor Arrow 11 (November 2025 maintenance release)[9][11] | Steady compressible gas/steam networks, mass/momentum/energy equations, choking, real-gas and heat-transfer options, compressor maps and regulators | Never route gas through the liquid solver; model convergence, sonic/choking, compressor envelope, and property-method warnings explicitly |
-| Bentley OpenFlows Water 2026[12][13] | Water-network steady/extended-period/transient analyses, scenarios, calibration, optimization, pump scheduling, GIS/CAD/SCADA integration and model sharing | Use alternatives instead of destructive scenario edits; support GIS-to-network traceability and later EPANET/network adapters |
-| US EPA EPANET 2.2[1][2] | Extended-period pressurized water networks with pipes, junctions, reservoirs, tanks, pumps, valves, energy and water-quality analysis | Prefer a tested adapter to reimplementing a mature distribution-network engine; preserve EPANET attribution and license notices |
-| SLB Pipesim 2026.2[14][15] | Steady-state multiphase production-system simulation, fluid/PVT models, profiles, sensitivity, GIS model creation and network calculation | Treat as evidence that multiphase is a specialist discipline; support import/export/integration points but do not reproduce proprietary correlations |
-| SLB Olga 2026.2[16][17] | Dynamic multiphase flow, time-varying composition/temperature/solids and operational transients | Explicitly outside the native initial scope; expose a future solver/plugin boundary and an **Advanced multiphase analysis required** result |
+| Product and current public evidence                                                    | Relevant capability classes                                                                                                                                 | LandDraft interpretation                                                                                                                             |
+| -------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| DNV Synergi Pipeline Simulator 11.2 Update 4 (July 2026)[4][5]                         | Steady/transient single-phase liquid and gas simulation, scenario work, operational connections, compositional and batch workflows                          | Keep model topology, profiles, scenarios, and warnings synchronized; do not claim transient parity in the initial solver                             |
+| DNV Synergi Gas[6]                                                                     | Steady and transient gas networks, thermal behavior, gas composition/EOS choices, compressor/valve/storage models, GIS and operational-data integration     | Create a gas-specific adapter contract with explicit property/EOS provider and equipment maps; keep it unavailable until validated                   |
+| Emerson PipelineStudio v5.4 public release notice and January 2025 product sheet[7][8] | Steady/transient liquid and gas models, line inventory, survival time, leak and operational studies                                                         | Preserve network state over scenarios and time; reserve transient/operations studies for later validated solvers                                     |
+| Datacor Fathom 14 (November 2025 maintenance release)[9][10]                           | Steady liquid networks, Darcy-Weisbach/Hazen-Williams, heat transfer, pump curves, NPSH, minor losses, scenario comparison, cost and visual gradients       | Adopt focused property panels, alternatives, pump-curve data, traceable warnings, and result colorization in an original LandDraft workflow          |
+| Datacor Arrow 11 (November 2025 maintenance release)[9][11]                            | Steady compressible gas/steam networks, mass/momentum/energy equations, choking, real-gas and heat-transfer options, compressor maps and regulators         | Never route gas through the liquid solver; model convergence, sonic/choking, compressor envelope, and property-method warnings explicitly            |
+| Bentley OpenFlows Water 2026[12][13]                                                   | Water-network steady/extended-period/transient analyses, scenarios, calibration, optimization, pump scheduling, GIS/CAD/SCADA integration and model sharing | Use alternatives instead of destructive scenario edits; support GIS-to-network traceability and later EPANET/network adapters                        |
+| US EPA EPANET 2.2[1][2]                                                                | Extended-period pressurized water networks with pipes, junctions, reservoirs, tanks, pumps, valves, energy and water-quality analysis                       | Prefer a tested adapter to reimplementing a mature distribution-network engine; preserve EPANET attribution and license notices                      |
+| SLB Pipesim 2026.2[14][15]                                                             | Steady-state multiphase production-system simulation, fluid/PVT models, profiles, sensitivity, GIS model creation and network calculation                   | Treat as evidence that multiphase is a specialist discipline; support import/export/integration points but do not reproduce proprietary correlations |
+| SLB Olga 2026.2[16][17]                                                                | Dynamic multiphase flow, time-varying composition/temperature/solids and operational transients                                                             | Explicitly outside the native initial scope; expose a future solver/plugin boundary and an **Advanced multiphase analysis required** result          |
 
 ### Product patterns that are appropriate to implement
 
@@ -145,15 +145,15 @@ promise.[21]
 
 ## GIS screening sources
 
-| Need | Candidate authoritative source | Required qualification |
-| --- | --- | --- |
-| Hydrography/drainage | USGS 3D Hydrography Program services and downloads[23][24] | Geometry and service vintage; legacy NHD is reference data as 3DHP replaces it |
-| Soils | USDA NRCS SSURGO/Soil Data Access services[25][26] | Soil survey interpretation, not geotechnical confirmation |
-| Wetlands | US Fish & Wildlife Service National Wetlands Inventory[27][28] | Screening layer; jurisdiction and current field condition require review |
-| Flood hazard | FEMA Flood Map Service Center/NFHL[29] | Effective-map date, zone, and source; not a substitute for project floodplain determination |
-| Roads, rail, airports and crossings | USDOT Bureau of Transportation Statistics National Transportation Atlas Database[30] | Dataset-specific metadata and update frequency |
-| Existing regulated pipeline context | PHMSA National Pipeline Mapping System public viewer[31][32] | Do not scrape restricted data; public view is generalized and must never replace One Call/811 or field locating |
-| State/local constraints | LandDraft public-data catalog and owner-provided services | Preserve provider terms, spatial accuracy, dates, and connection health |
+| Need                                | Candidate authoritative source                                                       | Required qualification                                                                                          |
+| ----------------------------------- | ------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
+| Hydrography/drainage                | USGS 3D Hydrography Program services and downloads[23][24]                           | Geometry and service vintage; legacy NHD is reference data as 3DHP replaces it                                  |
+| Soils                               | USDA NRCS SSURGO/Soil Data Access services[25][26]                                   | Soil survey interpretation, not geotechnical confirmation                                                       |
+| Wetlands                            | US Fish & Wildlife Service National Wetlands Inventory[27][28]                       | Screening layer; jurisdiction and current field condition require review                                        |
+| Flood hazard                        | FEMA Flood Map Service Center/NFHL[29]                                               | Effective-map date, zone, and source; not a substitute for project floodplain determination                     |
+| Roads, rail, airports and crossings | USDOT Bureau of Transportation Statistics National Transportation Atlas Database[30] | Dataset-specific metadata and update frequency                                                                  |
+| Existing regulated pipeline context | PHMSA National Pipeline Mapping System public viewer[31][32]                         | Do not scrape restricted data; public view is generalized and must never replace One Call/811 or field locating |
+| State/local constraints             | LandDraft public-data catalog and owner-provided services                            | Preserve provider terms, spatial accuracy, dates, and connection health                                         |
 
 Crossing detection is a spatial-screening workflow. Every generated candidate needs type,
 geometry, station, source feature ID, confidence, proposed method, cost allowance and human review
@@ -212,15 +212,15 @@ vendor, freight, escalation and exchange-rate snapshots.
 
 ## Open-source numerical and geospatial candidates
 
-| Library | License | Candidate role | Adoption condition |
-| --- | --- | --- | --- |
-| US EPA EPANET 2.2 | MIT[1] | Water-distribution network adapter/reference | Pin version, preserve notices, benchmark through toolkit boundary |
-| CoolProp | MIT[18] | Thermophysical properties/EOS plugin | Validate fluid/range, deployment footprint and benchmark cases |
-| SciPy | BSD-style[45] | Server-side roots, nonlinear systems, interpolation and optimization | Use only in an isolated compute service with pinned environment and validation suite |
-| Google OR-Tools | Apache-2.0[46] | Routing, assignment and mixed optimization orchestration | Objective/constraint audit trail; do not imply global optimum without solver evidence |
-| HiGHS | MIT core[47] | LP/MIP/convex QP engine | Audit bundled third-party binaries and license notices before deployment |
-| Turf.js | MIT[48] | Browser geospatial measurement/segmentation | Already present; retain unit tests for stationing and geometry edge cases |
-| MapLibre GL JS | BSD-3-Clause[49] | Existing interactive map rendering | Already present; derived result layers remain separate from basemaps |
+| Library           | License          | Candidate role                                                       | Adoption condition                                                                    |
+| ----------------- | ---------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| US EPA EPANET 2.2 | MIT[1]           | Water-distribution network adapter/reference                         | Pin version, preserve notices, benchmark through toolkit boundary                     |
+| CoolProp          | MIT[18]          | Thermophysical properties/EOS plugin                                 | Validate fluid/range, deployment footprint and benchmark cases                        |
+| SciPy             | BSD-style[45]    | Server-side roots, nonlinear systems, interpolation and optimization | Use only in an isolated compute service with pinned environment and validation suite  |
+| Google OR-Tools   | Apache-2.0[46]   | Routing, assignment and mixed optimization orchestration             | Objective/constraint audit trail; do not imply global optimum without solver evidence |
+| HiGHS             | MIT core[47]     | LP/MIP/convex QP engine                                              | Audit bundled third-party binaries and license notices before deployment              |
+| Turf.js           | MIT[48]          | Browser geospatial measurement/segmentation                          | Already present; retain unit tests for stationing and geometry edge cases             |
+| MapLibre GL JS    | BSD-3-Clause[49] | Existing interactive map rendering                                   | Already present; derived result layers remain separate from basemaps                  |
 
 No library's license is a validation certificate. Engineering verification and software license
 review are separate release gates.

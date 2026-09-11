@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AboutRouteImport } from './routes/about'
 import { Route as MobileRouteImport } from './routes/mobile'
+import { Route as PipelineRouteImport } from './routes/pipeline'
 import { Route as PrivacyRouteImport } from './routes/privacy'
 import { Route as TermsRouteImport } from './routes/terms'
 
@@ -30,6 +31,11 @@ const MobileRoute = MobileRouteImport.update({
   path: '/mobile',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PipelineRoute = PipelineRouteImport.update({
+  id: '/pipeline',
+  path: '/pipeline',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const PrivacyRoute = PrivacyRouteImport.update({
   id: '/privacy',
   path: '/privacy',
@@ -45,6 +51,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
   '/mobile': typeof MobileRoute
+  '/pipeline': typeof PipelineRoute
   '/privacy': typeof PrivacyRoute
   '/terms': typeof TermsRoute
 }
@@ -52,6 +59,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
   '/mobile': typeof MobileRoute
+  '/pipeline': typeof PipelineRoute
   '/privacy': typeof PrivacyRoute
   '/terms': typeof TermsRoute
 }
@@ -60,21 +68,30 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
   '/mobile': typeof MobileRoute
+  '/pipeline': typeof PipelineRoute
   '/privacy': typeof PrivacyRoute
   '/terms': typeof TermsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/about' | '/mobile' | '/privacy' | '/terms'
+  fullPaths: '/' | '/about' | '/mobile' | '/pipeline' | '/privacy' | '/terms'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/about' | '/mobile' | '/privacy' | '/terms'
-  id: '__root__' | '/' | '/about' | '/mobile' | '/privacy' | '/terms'
+  to: '/' | '/about' | '/mobile' | '/pipeline' | '/privacy' | '/terms'
+  id:
+    | '__root__'
+    | '/'
+    | '/about'
+    | '/mobile'
+    | '/pipeline'
+    | '/privacy'
+    | '/terms'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AboutRoute: typeof AboutRoute
   MobileRoute: typeof MobileRoute
+  PipelineRoute: typeof PipelineRoute
   PrivacyRoute: typeof PrivacyRoute
   TermsRoute: typeof TermsRoute
 }
@@ -102,6 +119,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof MobileRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/pipeline': {
+      id: '/pipeline'
+      path: '/pipeline'
+      fullPath: '/pipeline'
+      preLoaderRoute: typeof PipelineRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/privacy': {
       id: '/privacy'
       path: '/privacy'
@@ -123,6 +147,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AboutRoute: AboutRoute,
   MobileRoute: MobileRoute,
+  PipelineRoute: PipelineRoute,
   PrivacyRoute: PrivacyRoute,
   TermsRoute: TermsRoute,
 }

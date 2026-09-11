@@ -16,6 +16,7 @@ import {
   Map,
   Monitor,
   Navigation,
+  Waypoints,
 } from "lucide-react";
 import { Toaster } from "@/components/ui/sonner";
 import { LANDDRAFT_APP_CHANNEL, LANDDRAFT_APP_VERSION } from "@/lib/appVersion";
@@ -259,6 +260,18 @@ function MobileShell() {
                   <strong className="block text-sm">Public data</strong>
                   <span className="text-[10px] text-muted-foreground">
                     Search official datasets and add visible-area layers.
+                  </span>
+                </span>
+              </button>
+              <button
+                onClick={() => window.location.assign("/pipeline")}
+                className="flex items-center gap-3 rounded-2xl bg-secondary p-4 text-left"
+              >
+                <Waypoints className="size-5 text-primary" />
+                <span>
+                  <strong className="block text-sm">Pipeline engineering</strong>
+                  <span className="text-[10px] text-muted-foreground">
+                    Optional route, hydraulic profile, quantities, and estimating workspace.
                   </span>
                 </span>
               </button>

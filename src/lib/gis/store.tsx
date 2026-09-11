@@ -26,6 +26,7 @@ import {
   type ProjectEventType,
   emptyProjectRecords,
 } from "./types";
+import type { PipelineEngineeringState } from "@/lib/pipeline/types";
 import {
   workspaceProjectStore,
   type ProjectSummary,
@@ -87,6 +88,7 @@ interface WorkbenchState {
   assistant: AssistantConversation;
   connectionHints: Record<string, ConnectionRecoveryHint>;
   records: ProjectRecords;
+  pipelineEngineering: PipelineEngineeringState | undefined;
 }
 
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -130,6 +132,7 @@ const initialState = (): WorkbenchState => ({
   assistant: { messages: [], actions: [] },
   connectionHints: {},
   records: emptyProjectRecords(),
+  pipelineEngineering: undefined,
 });
 
 const blankProjectState = (name: string): ProjectState => ({
@@ -293,6 +296,7 @@ const normalizedProject = (
       documents: stored.records?.documents ?? [],
       events: stored.records?.events ?? [],
     },
+    pipelineEngineering: stored.pipelineEngineering,
   };
 };
 
@@ -314,6 +318,7 @@ const stateToProject = (state: WorkbenchState): ProjectState => ({
   assistant: state.assistant,
   connectionHints: state.connectionHints,
   records: state.records,
+  ...(state.pipelineEngineering ? { pipelineEngineering: state.pipelineEngineering } : {}),
   ...(state.shareSource ? { shareSource: state.shareSource } : {}),
 });
 
@@ -378,6 +383,7 @@ export interface WorkbenchApi extends WorkbenchState {
   setAssistantConversation: (conversation: AssistantConversation) => void;
   setConnectionHint: (id: string, hint: ConnectionRecoveryHint) => void;
   setProjectRecords: (records: ProjectRecords) => void;
+  setPipelineEngineering: (state: PipelineEngineeringState | undefined) => void;
   addProjectEvent: (input: {
     type: ProjectEventType;
     title: string;
@@ -1231,6 +1237,10 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
     (records) => patch({ records }),
     [patch],
   );
+  const setPipelineEngineering = useCallback<WorkbenchApi["setPipelineEngineering"]>(
+    (pipelineEngineering) => patch({ pipelineEngineering }),
+    [patch],
+  );
 
   const addProjectEvent = useCallback<WorkbenchApi["addProjectEvent"]>(
     (input) =>
@@ -1782,6 +1792,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
     state.assistant,
     state.connectionHints,
     state.records,
+    state.pipelineEngineering,
     state.units,
     state.accessRole,
   ]);
@@ -1875,6 +1886,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       setAssistantConversation,
       setConnectionHint,
       setProjectRecords,
+      setPipelineEngineering,
       addProjectEvent,
       saveProject,
       createProject,
@@ -1934,6 +1946,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       setAssistantConversation,
       setConnectionHint,
       setProjectRecords,
+      setPipelineEngineering,
       addProjectEvent,
       saveProject,
       createProject,

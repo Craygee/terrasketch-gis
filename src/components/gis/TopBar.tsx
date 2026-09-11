@@ -17,6 +17,7 @@ import {
   Navigation,
   NotebookTabs,
   ChevronDown,
+  Waypoints,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -157,6 +158,14 @@ export function TopBar({
             help="Find and add official public datasets"
             onClick={() => setDrawerOpen(true)}
             tourId="top-public-data"
+          />
+        )}
+        {wb.canEditProject && (
+          <BarBtn
+            icon={<Waypoints className="size-4" />}
+            label="Pipeline"
+            help="Open the optional Pipeline Engineering & Estimating workspace"
+            onClick={() => window.location.assign("/pipeline")}
           />
         )}
         {wb.canEditProject && (
@@ -349,6 +358,14 @@ export function TopBar({
                 closeCompactMenus();
                 setDrawerOpen(true);
               }}
+            />
+          )}
+          {wb.canEditProject && (
+            <MenuAction
+              icon={<Waypoints className="size-4" />}
+              label="Pipeline engineering"
+              help="Open routing, hydraulic screening, quantities, and estimating"
+              onClick={() => window.location.assign("/pipeline")}
             />
           )}
           {wb.canEditProject && (
