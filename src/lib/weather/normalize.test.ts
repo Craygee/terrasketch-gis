@@ -8,6 +8,7 @@ import {
 } from "./normalize.ts";
 import { hasWeatherCapability } from "./entitlements.ts";
 import { weatherLayerRegistry } from "./registry.ts";
+import { defaultWeatherWorkspace, normalizeWeatherWorkspace } from "./model.ts";
 
 test("normalizes temperatures", () => {
   assert.equal(celsiusToKelvin(0), 273.15);
@@ -42,5 +43,15 @@ test("weather layer registry ids are unique and all layers declare providers", (
   assert.equal(
     weatherLayerRegistry.every((layer) => layer.providerProducts.length > 0),
     true,
+  );
+});
+
+test("older weather workspaces receive a complete persistent layer order", () => {
+  const previous = defaultWeatherWorkspace();
+  delete (previous as Partial<typeof previous>).layerOrder;
+  const normalized = normalizeWeatherWorkspace(previous);
+  assert.deepEqual(
+    normalized.layerOrder,
+    weatherLayerRegistry.map((layer) => layer.id),
   );
 });

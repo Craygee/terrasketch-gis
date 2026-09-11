@@ -310,6 +310,15 @@ function ensureRasterProducts(
   });
 }
 
+function renderedLayerIds(weatherLayerId: string) {
+  if (weatherLayerId === "weather.radar.simple") return [RADAR_LAYER];
+  if (weatherLayerId === "weather.severe.alerts") return [ALERT_FILL, ALERT_LINE];
+  if (weatherLayerId === "weather.metar") return [STATION_CIRCLE, STATION_LABEL];
+  if (weatherLayerId === "weather.photo") return [PHOTO_CIRCLE, PHOTO_LABEL];
+  if (weatherLayerId.startsWith("weather.")) return [rasterKey(weatherLayerId)];
+  return [];
+}
+
 export function WeatherMapOverlay({
   bundle,
   workspace,
@@ -378,17 +387,11 @@ export function WeatherMapOverlay({
           "fill-opacity",
           workspace.layerSettings["weather.severe.alerts"]?.opacity ?? 0.28,
         );
-      moveToTop(map, [
-        RADAR_LAYER,
-        ...rasterProducts.map(({ frame: product }) => rasterKey(product.layerId)),
-        ALERT_FILL,
-        ALERT_LINE,
-        STATION_CIRCLE,
-        STATION_LABEL,
-        PHOTO_CIRCLE,
-        PHOTO_LABEL,
-        INSPECT_LAYER,
-      ]);
+      const orderedLayers = [...workspace.layerOrder]
+        .reverse()
+        .filter((id) => workspace.layerSettings[id]?.visible)
+        .flatMap(renderedLayerIds);
+      moveToTop(map, [...orderedLayers, INSPECT_LAYER]);
     };
     update();
     map.on("style.load", update);
@@ -404,6 +407,7 @@ export function WeatherMapOverlay({
     rasterProducts,
     stationsVisible,
     workspace.lastInspectionPoint,
+    workspace.layerOrder,
     workspace.layerSettings,
   ]);
 

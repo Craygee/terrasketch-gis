@@ -229,6 +229,7 @@ export interface WeatherPreset {
   name: string;
   builtIn?: boolean | undefined;
   layerSettings: Record<string, WeatherLayerSetting>;
+  layerOrder?: string[] | undefined;
   timelineMode: WeatherTimelineState["mode"];
   createdAt: string;
 }
@@ -241,6 +242,7 @@ export interface WeatherWorkspaceState {
   selectedCategory: string;
   inspectorEnabled: boolean;
   layerSettings: Record<string, WeatherLayerSetting>;
+  layerOrder: string[];
   timeline: WeatherTimelineState;
   presets: WeatherPreset[];
   activePresetId?: string | undefined;

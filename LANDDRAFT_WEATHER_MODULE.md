@@ -22,8 +22,9 @@ Read first:
 1. `docs/WEATHER_IMPLEMENTATION_PLAN.md`
 2. `docs/WEATHER_ARCHITECTURE.md`
 3. `docs/WEATHER_PROVIDER_MATRIX.md`
-4. `docs/modules/weather-meteorology.md`
-5. `docs/MODULE_DEVELOPMENT.md`
+4. `docs/WEATHER_PROVIDER_SETUP.md`
+5. `docs/modules/weather-meteorology.md`
+6. `docs/MODULE_DEVELOPMENT.md`
 
 ## Non-negotiable product rules
 

@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MapMouseEvent } from "maplibre-gl";
 import {
   AlertTriangle,
+  ArrowDown,
   ArrowLeft,
+  ArrowUp,
   ChevronDown,
   ChevronRight,
   Cloud,
@@ -12,6 +14,7 @@ import {
   Crosshair,
   Database,
   Eye,
+  GripVertical,
   Heart,
   Layers3,
   LoaderCircle,
@@ -139,6 +142,7 @@ export function WeatherWorkspace() {
   const [workspaceView, setWorkspaceView] = useState<WorkspaceView>("weather");
   const [presetName, setPresetName] = useState("");
   const loadedProject = useRef<string | null>(null);
+  const latestWeatherRequest = useRef(0);
 
   useEffect(() => {
     if (wb.projectReady && !wb.weatherWorkspace) wb.setWeatherWorkspace(workspace);
@@ -157,22 +161,25 @@ export function WeatherWorkspace() {
 
   const loadPoint = useCallback(
     async (point: [number, number], quietly = false, layers: string[] = requestedLayerIds) => {
+      const requestId = ++latestWeatherRequest.current;
       if (!quietly) setLoading(true);
       setError(null);
       try {
         const next = await getWeatherAtPoint({
           data: { longitude: point[0], latitude: point[1], requestedLayerIds: layers },
         });
-        setBundle(next);
+        if (requestId === latestWeatherRequest.current) setBundle(next);
         return next;
       } catch (nextError) {
         const message =
           nextError instanceof Error ? nextError.message : "Weather data did not load";
-        setError(message);
-        if (!quietly) toast.error("Weather did not load", { description: message });
+        if (requestId === latestWeatherRequest.current) {
+          setError(message);
+          if (!quietly) toast.error("Weather did not load", { description: message });
+        }
         return null;
       } finally {
-        if (!quietly) setLoading(false);
+        if (requestId === latestWeatherRequest.current) setLoading(false);
       }
     },
     [requestedLayerIds],
@@ -256,6 +263,18 @@ export function WeatherWorkspace() {
       workspace.lastInspectionPoint,
       workspace.layerSettings,
     ],
+  );
+
+  const reorderWeatherLayer = useCallback(
+    (sourceId: string, targetId: string, edge: "before" | "after") => {
+      if (sourceId === targetId) return;
+      const next = workspace.layerOrder.filter((id) => id !== sourceId);
+      const targetIndex = next.indexOf(targetId);
+      if (targetIndex < 0) return;
+      next.splice(targetIndex + (edge === "after" ? 1 : 0), 0, sourceId);
+      updateWorkspace({ layerOrder: next });
+    },
+    [updateWorkspace, workspace.layerOrder],
   );
 
   const chooseStarter = (choice: (typeof starterChoices)[number]) => {
@@ -420,6 +439,7 @@ export function WeatherWorkspace() {
               onAdvanced={setAdvancedLayers}
               onCategory={(selectedCategory) => updateWorkspace({ selectedCategory })}
               onLayer={setLayer}
+              onLayerOrder={reorderWeatherLayer}
               onWorkspace={(next) => wb.setWeatherWorkspace(next)}
             />
           </aside>
@@ -538,6 +558,7 @@ export function WeatherWorkspace() {
                     onAdvanced={setAdvancedLayers}
                     onCategory={(selectedCategory) => updateWorkspace({ selectedCategory })}
                     onLayer={setLayer}
+                    onLayerOrder={reorderWeatherLayer}
                     onWorkspace={(next) => wb.setWeatherWorkspace(next)}
                     compact
                   />
@@ -643,6 +664,7 @@ function WeatherLayerPanel({
   onAdvanced,
   onCategory,
   onLayer,
+  onLayerOrder,
   onWorkspace,
 }: {
   workspace: WeatherWorkspaceState;
@@ -655,12 +677,22 @@ function WeatherLayerPanel({
   onAdvanced: (advanced: boolean) => void;
   onCategory: (category: string) => void;
   onLayer: (id: string, change: Partial<WeatherLayerSetting>) => void;
+  onLayerOrder: (sourceId: string, targetId: string, edge: "before" | "after") => void;
   onWorkspace: (workspace: WeatherWorkspaceState) => void;
 }) {
+  const [draggedLayer, setDraggedLayer] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<{
+    id: string;
+    edge: "before" | "after";
+  } | null>(null);
   const selectedLayers = weatherLayerRegistry.filter(
     (layer) =>
       layer.group === workspace.selectedCategory && (advanced || layer.audience === "basic"),
   );
+  const activeLayers = workspace.layerOrder.flatMap((id) => {
+    const layer = weatherLayerRegistry.find((candidate) => candidate.id === id);
+    return layer && workspace.layerSettings[id]?.visible ? [layer] : [];
+  });
   const layerStatus = (id: string) => {
     const requested = bundle?.request.requestedLayerIds?.includes(id) ?? false;
     const hasRaster = bundle?.rasterFrames.some((frame) => frame.layerId === id) ?? false;
@@ -704,6 +736,106 @@ function WeatherLayerPanel({
           unavailable.
         </p>
       </div>
+
+      <details className="rounded-2xl border border-border bg-background" open>
+        <summary className="cursor-pointer px-3 py-2 text-xs font-semibold">
+          Active layer stack · {activeLayers.length}
+        </summary>
+        <div className="border-t border-border p-2">
+          <p className="mb-2 text-[9px] leading-relaxed text-muted-foreground">
+            Top item draws in front. Drag a row between layers, or use the arrows.
+          </p>
+          <div className="space-y-1">
+            {activeLayers.map((layer, index) => (
+              <div
+                key={layer.id}
+                draggable
+                onDragStart={(event) => {
+                  event.dataTransfer.effectAllowed = "move";
+                  event.dataTransfer.setData("text/plain", layer.id);
+                  setDraggedLayer(layer.id);
+                }}
+                onDragEnd={() => {
+                  setDraggedLayer(null);
+                  setDropTarget(null);
+                }}
+                onDragOver={(event) => {
+                  event.preventDefault();
+                  const bounds = event.currentTarget.getBoundingClientRect();
+                  setDropTarget({
+                    id: layer.id,
+                    edge: event.clientY < bounds.top + bounds.height / 2 ? "before" : "after",
+                  });
+                }}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  const sourceId = event.dataTransfer.getData("text/plain") || draggedLayer;
+                  if (sourceId && dropTarget) onLayerOrder(sourceId, layer.id, dropTarget.edge);
+                  setDraggedLayer(null);
+                  setDropTarget(null);
+                }}
+                className={cn(
+                  "relative flex min-w-0 items-center gap-1 rounded-xl bg-secondary px-1.5 py-1.5",
+                  draggedLayer === layer.id && "opacity-45",
+                )}
+              >
+                {dropTarget?.id === layer.id && (
+                  <span
+                    className={cn(
+                      "pointer-events-none absolute inset-x-1 h-0.5 rounded-full bg-primary",
+                      dropTarget.edge === "before" ? "-top-0.5" : "-bottom-0.5",
+                    )}
+                  />
+                )}
+                <GripVertical className="size-3.5 shrink-0 cursor-grab text-muted-foreground" />
+                <span
+                  className="min-w-0 flex-1 truncate text-[10px] font-semibold"
+                  title={layer.name}
+                >
+                  {layer.name}
+                </span>
+                <button
+                  onClick={() => {
+                    const target = activeLayers[index - 1];
+                    if (target) onLayerOrder(layer.id, target.id, "before");
+                  }}
+                  disabled={index === 0}
+                  className="flex size-7 items-center justify-center rounded-lg hover:bg-accent disabled:opacity-25"
+                  title="Move toward front"
+                  aria-label={`Move ${layer.name} toward front`}
+                >
+                  <ArrowUp className="size-3.5" />
+                </button>
+                <button
+                  onClick={() => {
+                    const target = activeLayers[index + 1];
+                    if (target) onLayerOrder(layer.id, target.id, "after");
+                  }}
+                  disabled={index === activeLayers.length - 1}
+                  className="flex size-7 items-center justify-center rounded-lg hover:bg-accent disabled:opacity-25"
+                  title="Move toward back"
+                  aria-label={`Move ${layer.name} toward back`}
+                >
+                  <ArrowDown className="size-3.5" />
+                </button>
+                <button
+                  onClick={() => onLayer(layer.id, { visible: false })}
+                  className="flex size-7 items-center justify-center rounded-lg text-primary hover:bg-accent"
+                  title="Hide layer"
+                  aria-label={`Hide ${layer.name}`}
+                >
+                  <Eye className="size-3.5" />
+                </button>
+              </div>
+            ))}
+            {!activeLayers.length && (
+              <p className="rounded-xl bg-secondary p-3 text-[10px] text-muted-foreground">
+                Turn on a Weather layer to add it to this stack.
+              </p>
+            )}
+          </div>
+        </div>
+      </details>
 
       <div className="grid grid-cols-2 gap-1">
         {groups.map((group) => (
@@ -828,6 +960,7 @@ function WeatherLayerPanel({
                 onWorkspace({
                   ...workspace,
                   layerSettings: preset.layerSettings,
+                  layerOrder: preset.layerOrder ?? workspace.layerOrder,
                   timeline: { ...workspace.timeline, mode: preset.timelineMode },
                   activePresetId: preset.id,
                 })

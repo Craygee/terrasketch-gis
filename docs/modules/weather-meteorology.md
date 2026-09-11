@@ -15,6 +15,11 @@ nowCOAST satellite imagery and lightning-density, NDFD temperature/wind/precipit
 tropical summary, WSSI, SPC fire outlook, NOAA smoke guidance, Aviation Weather Center METAR
 stations, source health/provenance, and a conservative photography-candidate analysis.
 
+Visible products appear in a persistent **Active layer stack**. The top item renders in front;
+desktop users can drag between insertion lines and touch/keyboard users can move layers forward or
+back with explicit controls. Layer order is stored in the project and in new Weather presets. Older
+projects receive registry order automatically.
+
 It does not claim professional Level II radar decoding, global radar, individual global lightning
 strikes, storm-cell detection, safe chase routing, soundings or certified operational risk.
 

@@ -1,10 +1,10 @@
-import { weatherLayerRegistry } from "./registry";
+import { weatherLayerRegistry } from "./registry.ts";
 import type {
   WeatherLayerSetting,
   WeatherPreset,
   WeatherTimelineState,
   WeatherWorkspaceState,
-} from "./types";
+} from "./types.ts";
 
 const isoOffset = (minutes: number) => new Date(Date.now() + minutes * 60_000).toISOString();
 
@@ -49,6 +49,7 @@ export function defaultWeatherWorkspace(): WeatherWorkspaceState {
     selectedCategory: "Current",
     inspectorEnabled: true,
     layerSettings: defaultWeatherLayerSettings(),
+    layerOrder: weatherLayerRegistry.map((layer) => layer.id),
     timeline: defaultWeatherTimeline(),
     presets: [],
   };
@@ -69,11 +70,17 @@ export function normalizeWeatherWorkspace(
       opacity: Math.max(0, Math.min(1, Number(saved.opacity) || 0)),
     };
   }
+  const savedOrder = Array.from(new Set(Array.isArray(stored.layerOrder) ? stored.layerOrder : []));
+  const layerOrder = [
+    ...savedOrder.filter((id) => typeof id === "string" && id in layerSettings),
+    ...weatherLayerRegistry.map((layer) => layer.id).filter((id) => !savedOrder.includes(id)),
+  ];
   return {
     ...defaults,
     ...stored,
     version: 1,
     layerSettings,
+    layerOrder,
     timeline: { ...defaults.timeline, ...stored.timeline, playing: false },
     presets: Array.isArray(stored.presets) ? stored.presets.slice(0, 25) : [],
   };
@@ -84,6 +91,7 @@ export function createWeatherPreset(name: string, state: WeatherWorkspaceState):
     id: `weather-preset-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     name: name.trim() || "Weather view",
     layerSettings: structuredClone(state.layerSettings),
+    layerOrder: [...state.layerOrder],
     timelineMode: state.timeline.mode,
     createdAt: new Date().toISOString(),
   };
