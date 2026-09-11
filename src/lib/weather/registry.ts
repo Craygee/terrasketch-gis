@@ -73,7 +73,14 @@ export const weatherLayerRegistry: WeatherLayerDefinition[] = [
     id: `weather.radar.pro.${id}`,
     name: name!,
     group: "Radar",
-    description: "Professional radar product; availability depends on radar site/provider.",
+    description:
+      id === "reflectivity"
+        ? "Official NOAA single-site super-resolution base reflectivity from the nearest available NEXRAD site."
+        : id === "velocity"
+          ? "Official NOAA single-site base radial velocity from the nearest available NEXRAD site."
+          : id === "hydrometeor"
+            ? "Official NOAA single-site digital hydrometeor classification from the nearest available NEXRAD site."
+            : "Professional radar product; availability depends on a reviewed radar-site provider.",
     capability: "weather.meteorology",
     dataType: "raster",
     providerProducts: [`radar-${id}`],
@@ -117,7 +124,7 @@ export const weatherLayerRegistry: WeatherLayerDefinition[] = [
     group: "Satellite & clouds",
     description:
       id === "cloud-top"
-        ? "Cloud-top temperature is registered but still needs a validated sampling provider."
+        ? "NASA MODIS daily cloud-top-temperature imagery; orbital gaps are expected and values are not yet point-sampled."
         : id === "smoke"
           ? "Official NOAA near-surface smoke guidance; model guidance is not a direct observation."
           : `Live NOAA ${name!.toLowerCase()} imagery with product time and source retained.`,

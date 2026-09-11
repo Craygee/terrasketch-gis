@@ -10,8 +10,9 @@ Pricing: Undecided
 Phase 1.1 provides the optional Weather workspace, normalized provider contracts, capability hooks,
 layer catalog, universal multi-product timeline, responsive weather drawer/inspector,
 project-aware viewport, official U.S. warning ingestion, NWS current conditions/forecast,
-MET Norway global model fallback, NOAA/NWS MRMS radar with official NWS radar failover, NOAA
-nowCOAST satellite imagery and lightning-density, NDFD temperature/wind/precipitation, NHC
+MET Norway global model fallback, NOAA/NWS MRMS radar with official NWS radar failover, nearest-site
+NOAA RIDGE II base reflectivity/base radial velocity/hydrometeor classification, NOAA nowCOAST
+satellite imagery and lightning-density, NASA MODIS cloud-top temperature, NDFD temperature/wind/precipitation, NHC
 tropical summary, WSSI, SPC fire outlook, NOAA smoke guidance, Aviation Weather Center METAR
 stations, source health/provenance, and a conservative photography-candidate analysis.
 
@@ -20,14 +21,16 @@ desktop users can drag between insertion lines and touch/keyboard users can move
 back with explicit controls. Layer order is stored in the project and in new Weather presets. Older
 projects receive registry order automatically.
 
-It does not claim professional Level II radar decoding, global radar, individual global lightning
-strikes, storm-cell detection, safe chase routing, soundings or certified operational risk.
+It does not claim raw Level II radar decoding, global radar, individual global lightning strikes,
+storm-relative velocity, correlation coefficient, differential reflectivity, storm-cell detection,
+safe chase routing, soundings or certified operational risk.
 
 ## Dependencies
 
 - Shared React, TanStack Start, MapLibre, project store, authenticated shell and responsive styles.
-- Server-side Weather gateway; official NWS API/GIS, MRMS, nowCOAST and Aviation Weather Center
-  adapters; public MET Norway Locationforecast adapter; and Turf geometry already used by LandDraft.
+- Server-side Weather gateway; official NWS API/GIS, MRMS, RIDGE II, nowCOAST, NASA EOSDIS GIBS and
+  Aviation Weather Center adapters; public MET Norway Locationforecast adapter; and Turf geometry
+  already used by LandDraft.
 - No new runtime package and no database migration in Phase 1.
 - Server-side test telemetry counts logical provider requests, successes, failures and cache hits;
   it deliberately leaves unknown data volume and provider cost as `null` rather than inventing a

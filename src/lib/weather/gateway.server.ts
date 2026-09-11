@@ -22,6 +22,7 @@ import type {
 import { recordWeatherUsage } from "./telemetry.server";
 import { loadMetNorwayPoint } from "./metNorway.server";
 import { buildPhotographyAssessment } from "./photography.server";
+import { nearestWeatherRadarSite, type WeatherRadarSite } from "./radar";
 
 type CacheEntry<T> = { value: T; expiresAt: number };
 const cache = new Map<string, CacheEntry<unknown>>();
@@ -105,6 +106,7 @@ type WmsRasterSpec = {
   temporalKind: "observed" | "forecast" | "model";
   attribution: string;
   maxFrames?: number | undefined;
+  coverageKind?: "conus" | "global" | undefined;
   /**
    * Use only for a reviewed public WMS whose tile endpoint is browser-accessible
    * but whose GetCapabilities request can reject Cloudflare's edge network.
@@ -118,6 +120,26 @@ const NOAA_LIGHTNING_CAPABILITIES =
   "https://nowcoast.noaa.gov/geoserver/observations/lightning_detection/ows?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetCapabilities";
 
 const WMS_LAYER_SPECS: Record<string, WmsRasterSpec> = {
+  "weather.satellite.cloud-top": {
+    layerId: "weather.satellite.cloud-top",
+    providerId: "nasa-gibs-modis",
+    providerName: "NASA Earthdata GIBS",
+    product: "MODIS daily cloud-top temperature",
+    capabilitiesUrl:
+      "https://gibs.earthdata.nasa.gov/wms/epsg3857/best/wms.cgi?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetCapabilities",
+    layerNames: [
+      "MODIS_Terra_Cloud_Top_Temp_Day",
+      "MODIS_Terra_Cloud_Top_Temp_Night",
+      "MODIS_Aqua_Cloud_Top_Temp_Day",
+      "MODIS_Aqua_Cloud_Top_Temp_Night",
+    ],
+    coverage: "Global orbital coverage; gaps can occur between satellite passes",
+    resolution: "5 km cloud-property retrieval; daily orbital coverage",
+    temporalKind: "observed",
+    attribution: "NASA EOSDIS GIBS / MODIS Atmosphere",
+    maxFrames: 5,
+    coverageKind: "global",
+  },
   "weather.forecast.precipitation": {
     layerId: "weather.forecast.precipitation",
     providerId: "nws-ndfd-qpf",
@@ -235,8 +257,15 @@ function wmsTimes(xml: string, layerName: string) {
   if (!dimension) return [];
   const raw = dimension[1]?.trim() ?? "";
   if (raw.includes("/")) {
-    const end = validIso(raw.split("/")[1]);
-    return end ? [end] : [];
+    // Some NASA layers advertise multiple disjoint availability intervals.
+    // Selecting the end of the first interval can make current imagery appear
+    // decades stale, so retain the newest valid interval end instead.
+    const ends = raw
+      .split(",")
+      .map((interval) => validIso(interval.trim().split("/")[1]))
+      .filter((value): value is string => Boolean(value))
+      .sort((left, right) => new Date(left).getTime() - new Date(right).getTime());
+    return ends.slice(-1);
   }
   return raw
     .split(",")
@@ -705,7 +734,8 @@ function rasterSpecsFor(request: WeatherPointRequest) {
   const specs: WmsRasterSpec[] = [];
   for (const layerId of requested) {
     const registered = WMS_LAYER_SPECS[layerId];
-    if (registered && withinConus(request)) specs.push(registered);
+    if (registered && (registered.coverageKind === "global" || withinConus(request)))
+      specs.push(registered);
   }
   if (requested.has("weather.satellite.clouds"))
     specs.push(
@@ -773,6 +803,127 @@ function rasterSpecsFor(request: WeatherPointRequest) {
       allowLatestWithoutCapabilities: true,
     });
   return specs;
+}
+
+type RadarSitesResponse = {
+  features?: Array<{
+    geometry?: { type?: string; coordinates?: number[] };
+    properties?: { rda_id?: unknown; name?: unknown; lat?: unknown; lon?: unknown };
+  }>;
+};
+
+const radarSitesUrl =
+  "https://opengeo.ncep.noaa.gov/geoserver/nws/ows?request=GetFeature&service=WFS&typeName=nws:radar_sites&version=1.0.0&outputFormat=application/json";
+
+async function loadRadarSites(signal: AbortSignal): Promise<WeatherRadarSite[]> {
+  return withCache(
+    "noaa-radar-sites",
+    12 * 60 * 60_000,
+    { providerId: "noaa-nws-ridge", product: "radar site catalog" },
+    async () => {
+      const payload = await fetchJson<RadarSitesResponse>(radarSitesUrl, signal, nwsHeaders);
+      return (payload.features ?? []).flatMap((feature) => {
+        const id = boundedText(feature.properties?.rda_id, 8).toUpperCase();
+        const name = boundedText(feature.properties?.name, 100);
+        const coordinates = feature.geometry?.coordinates ?? [];
+        const longitude = Number(feature.properties?.lon ?? coordinates[0]);
+        const latitude = Number(feature.properties?.lat ?? coordinates[1]);
+        if (
+          feature.geometry?.type !== "Point" ||
+          !/^[A-Z0-9]{4}$/.test(id) ||
+          !Number.isFinite(longitude) ||
+          !Number.isFinite(latitude)
+        )
+          return [];
+        return [{ id, name: name || id, latitude, longitude }];
+      });
+    },
+  );
+}
+
+const PRO_RADAR_PRODUCTS: Record<
+  string,
+  { suffix: string; style: string; product: string; units: string }
+> = {
+  "weather.radar.pro.reflectivity": {
+    suffix: "sr_bref",
+    style: "radar_reflectivity",
+    product: "single-site super-resolution base reflectivity",
+    units: "dBZ",
+  },
+  "weather.radar.pro.velocity": {
+    suffix: "sr_bvel",
+    style: "radar_velocity",
+    product: "single-site super-resolution base radial velocity",
+    units: "knots",
+  },
+  "weather.radar.pro.hydrometeor": {
+    suffix: "bdhc",
+    style: "radar_bdhc",
+    product: "single-site digital hydrometeor classification",
+    units: "classification",
+  },
+};
+
+async function prepareRasterSpecs(request: WeatherPointRequest, signal: AbortSignal) {
+  const specs = rasterSpecsFor(request);
+  const warnings: string[] = [];
+  const providerHealth: WeatherProviderHealth[] = [];
+  const requested = Object.keys(PRO_RADAR_PRODUCTS).filter((id) =>
+    request.requestedLayerIds?.includes(id),
+  );
+  if (!requested.length) return { specs, warnings, providerHealth };
+  if (!withinConus(request)) {
+    warnings.push("Professional single-site NOAA radar is not available at this map point.");
+    providerHealth.push(
+      health({
+        providerId: "noaa-nws-ridge",
+        providerName: "NOAA/NWS RIDGE radar",
+        status: "degraded",
+        products: requested.map((id) => PRO_RADAR_PRODUCTS[id]!.product),
+        coverage: "United States and territories with an available NEXRAD site",
+        error: "The inspected point is outside the connected U.S. radar domain",
+        costClass: "public",
+      }),
+    );
+    return { specs, warnings, providerHealth };
+  }
+  try {
+    const nearest = nearestWeatherRadarSite(await loadRadarSites(signal), request);
+    if (!nearest) throw new Error("NOAA returned an empty radar-site catalog");
+    const site = nearest.site.id.toLowerCase();
+    for (const layerId of requested) {
+      const product = PRO_RADAR_PRODUCTS[layerId]!;
+      specs.push({
+        layerId,
+        providerId: `noaa-nws-ridge-${site}`,
+        providerName: `NOAA/NWS ${nearest.site.id} radar`,
+        product: product.product,
+        capabilitiesUrl: `https://opengeo.ncep.noaa.gov/geoserver/${site}/ows?request=GetCapabilities&service=wms&version=1.3.0`,
+        layerNames: [`${site}_${product.suffix}`],
+        styles: product.style,
+        coverage: `${nearest.site.name} (${nearest.site.id}); selected ${Math.round(nearest.distanceKm)} km from the inspected point`,
+        resolution: "NEXRAD single-site Level III display product",
+        temporalKind: "observed",
+        attribution: "NOAA / National Weather Service RIDGE II",
+        maxFrames: 15,
+      });
+    }
+  } catch (error) {
+    warnings.push("The official NOAA radar-site catalog is temporarily unavailable.");
+    providerHealth.push(
+      health({
+        providerId: "noaa-nws-ridge",
+        providerName: "NOAA/NWS RIDGE radar",
+        status: "down",
+        products: requested.map((id) => PRO_RADAR_PRODUCTS[id]!.product),
+        coverage: "United States and territories with an available NEXRAD site",
+        error: error instanceof Error ? error.message : "Radar-site lookup failed",
+        costClass: "public",
+      }),
+    );
+  }
+  return { specs, warnings, providerHealth };
 }
 
 type AwcMetarFeature = {
@@ -979,13 +1130,18 @@ export async function loadWeatherBundle(request: WeatherPointRequest): Promise<W
   // Start requested map imagery immediately. Previously these requests waited
   // behind current conditions, alerts and radar while sharing their timeout,
   // which could leave valid NOAA layers with no time to load in an edge worker.
-  const rasterSpecs = rasterSpecsFor({ ...request, requestedLayerIds: [...requestedLayers] });
-  const rasterTask = Promise.allSettled(
-    rasterSpecs.map(async (spec) => ({
-      spec,
-      frames: await loadWmsRasterFrames(spec, rasterController.signal),
-    })),
-  );
+  const rasterTask = prepareRasterSpecs(
+    { ...request, requestedLayerIds: [...requestedLayers] },
+    rasterController.signal,
+  ).then(async (prepared) => ({
+    prepared,
+    results: await Promise.allSettled(
+      prepared.specs.map(async (spec) => ({
+        spec,
+        frames: await loadWmsRasterFrames(spec, rasterController.signal),
+      })),
+    ),
+  }));
 
   try {
     try {
@@ -1198,7 +1354,10 @@ export async function loadWeatherBundle(request: WeatherPointRequest): Promise<W
       }
     }
 
-    const rasterResults = await rasterTask;
+    const { prepared: rasterPreparation, results: rasterResults } = await rasterTask;
+    const rasterSpecs = rasterPreparation.specs;
+    warnings.push(...rasterPreparation.warnings);
+    providerHealth.push(...rasterPreparation.providerHealth);
     rasterResults.forEach((result, index) => {
       if (result.status === "fulfilled") {
         rasterFrames.push(...result.value.frames);

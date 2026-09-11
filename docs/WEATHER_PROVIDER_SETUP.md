@@ -6,8 +6,9 @@ Environment: test feature branch and public preview only
 
 ## Already connected — no key required
 
-The NWS API, NOAA/NWS GIS and MRMS services, NOAA nowCOAST satellite/lightning-density services,
-Aviation Weather Center METAR API and MET Norway Locationforecast adapter are configured in code.
+The NWS API, NOAA/NWS GIS and MRMS services, NOAA RIDGE II single-site radar, NOAA nowCOAST
+satellite/lightning-density services, NASA EOSDIS GIBS cloud-top-temperature imagery, Aviation
+Weather Center METAR API and MET Norway Locationforecast adapter are configured in code.
 Users do not need to paste URLs or create accounts for these layers.
 
 If one of these says `CONNECTION ERROR`, inspect **Weather → Data sources**. `NO DATA HERE` should be
@@ -35,7 +36,7 @@ adapter. Setup is an engineering and licensing task, not an end-user URL field:
 | ----------------------------------- | -------------------------------------------------------------- | ----------------------------------------------------------------------- |
 | Individual global lightning strikes | Licensed Xweather/Tomorrow.io-class feed after contract review | API credentials, redistribution rights and usage fees                   |
 | Global/commercial radar             | Commercial tiled radar feed or regional official adapters      | Contract and tile/egress costs                                          |
-| Professional radar moments          | NOAA Level II/III ingestion and radar-site processing          | Compute, object storage, tiling and monitoring                          |
+| Additional professional radar moments | NOAA Level II ingestion and radar-site processing            | Compute, object storage, tiling and monitoring                          |
 | Upper-air/convective/model grids    | ECMWF Open Data or other licensed model ingestion              | GRIB processing, object storage, CDN/egress; attribution                |
 | Soundings/hodographs                | Observed/model sounding adapter plus validated calculations    | Processing and numerical-validation work                                |
 | Storm objects/rotation              | Phase 2 normalization and carefully validated derived analysis | Engineering/QA; never upgrade algorithmic rotation to confirmed tornado |
@@ -65,3 +66,20 @@ Before a provider changes from `SETUP REQUIRED` to available:
    radar or lightning density for individual strikes.
 7. Simulate primary-provider failure and verify that stale data cannot say `LIVE`.
 8. Test desktop, tablet and narrow mobile layouts before promoting.
+
+## Connected in the September 11 public-provider increment
+
+- **Base reflectivity**, **base radial velocity** and **hydrometeor classification** use NOAA's
+  official radar-site catalog and the nearest available NEXRAD RIDGE II WMS. The selected site and
+  distance are shown in source health. These are U.S. site products; LandDraft does not pretend
+  they provide global radar coverage.
+- **Cloud-top temperature** uses NASA EOSDIS GIBS MODIS Terra/Aqua day/night imagery. It is an
+  observed daily orbital product, so transparent gaps between passes are normal. The current
+  increment displays the official colorized product but does not invent a point temperature from
+  image pixels.
+- These integrations require no secret in test or production. The same reviewed adapter code moves
+  between environments, while each deployment keeps independent caches and health telemetry.
+- Storm-relative velocity, correlation coefficient, differential reflectivity, upper-air/model
+  grids, convective grids, individual lightning strikes, historical archives and derived storm
+  objects remain setup-required. Enabling them requires either additional processing or a licensed
+  commercial feed; none is silently substituted.

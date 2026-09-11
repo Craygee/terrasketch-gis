@@ -71,8 +71,12 @@ Read first:
 - `WEATHER_ENABLE_OPEN_METEO_EVALUATION=true` enables the optional global evaluation adapter on the
   server. Keep it disabled for production unless its usage/license has been reviewed. Output is
   labeled `MODEL` and `EVALUATION_ONLY`.
-- Individual lightning strikes, professional radar moments, upper-air/convective grids, soundings,
-  storm objects, historical archives and commercial global radar remain unconfigured.
+- NOAA nearest-site base reflectivity, base radial velocity and digital hydrometeor classification
+  are connected through the public RIDGE II WFS/WMS. NASA MODIS cloud-top-temperature imagery is
+  connected through EOSDIS GIBS; it is a daily orbital product and may contain pass gaps.
+- Individual lightning strikes, additional professional radar moments (including storm-relative
+  velocity, correlation coefficient and differential reflectivity), upper-air/convective grids,
+  soundings, storm objects, historical archives and commercial global radar remain unconfigured.
 
 ## Photography analysis state
 
