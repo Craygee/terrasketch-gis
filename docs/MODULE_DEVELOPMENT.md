@@ -6,7 +6,9 @@ September 10, 2026 stable checkpoint.
 ## Stable checkpoint
 
 - Tag: `landdraft-stable-2026-09-10`
-- Commit: `efc47a3aa9d3cc69bd9bbd7411137dc7535f1b4b`
+- Published checkpoint commit: `e6bef3f1f250b650ef0391db8559f20089653ff5`
+- Test branch starting commit: `efc47a3aa9d3cc69bd9bbd7411137dc7535f1b4b` (the current main
+  head, including the precise layer-order drop-line fix)
 - New module work starts on `feature/test-module-development` or a narrower feature branch based
   on it.
 - Test and review module changes before merging. Do not deploy feature branches to production.
