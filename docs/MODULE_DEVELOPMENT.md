@@ -16,6 +16,7 @@ September 10, 2026 stable checkpoint.
 ## Public test deployment
 
 - Hosting target: the isolated Cloudflare Worker named `landdraft-preview`.
+- Public test URL: `https://landdraft-preview.tight-sky-0ae1.workers.dev/`.
 - Source repository: `Craygee/terrasketch-gis`.
 - Allowed deployment branch: `feature/test-module-development` only.
 - Build command: `bun install --frozen-lockfile && bun run build && node scripts/prepare-preview-worker.mjs`.
