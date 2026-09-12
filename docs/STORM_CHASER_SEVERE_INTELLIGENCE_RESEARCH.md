@@ -241,3 +241,21 @@ backend dependency and is not emulated with browser storage.
     https://mrms.ncep.noaa.gov/2D/RotationTrackML60min/
 12. NWS Radar Operations Center, Level II Data Types,
     https://www.roc.noaa.gov/level-two-data-types.php
+
+## 2026-09-11 mobile field integration and cartography decision
+
+LandDraft now presents current/analyzed severe objects with distinct symbols for tornado/rotation,
+hail, hurricane/tropical cyclone, dust/haboob, lightning and major thunderstorm. A white event glyph
+is placed over a five-step green-to-dark-red severity background so the map does not rely on color
+alone. A provider probability or documented analysis score drives the background where present;
+official warning type supplies only a display-severity floor and is not converted into a fabricated
+probability. Projected positions repeat the icon with explicit +minute labels and remain visually
+distinct from the recent blue object history.
+
+Field users can open Storm Chaser directly, switch/reorder Weather layers, opt into ephemeral GPS
+and follow the moving device. Manual map interaction turns follow off. Directions are allowed only
+to a point the user deliberately selects; LandDraft does not choose a destination or label the route
+safe. The UI repeats that road closures, flooding, lightning and route safety have not yet been
+validated and that official instructions supersede the external route. No paid provider, new
+runtime library or schema change is introduced. Apple Maps/Google Maps links and any later road,
+closure or hazard feeds carry separate terms and possible operating costs; pricing is undecided.

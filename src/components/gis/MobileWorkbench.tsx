@@ -129,8 +129,8 @@ function MobileShell() {
       <MapCanvas />
       {!fieldMode && <SelectionToolbar mobile />}
 
-      <header className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-center gap-2 p-3 pt-[max(.75rem,env(safe-area-inset-top))]">
-        <div className="float-surface pointer-events-auto flex min-w-0 items-center gap-2 rounded-2xl px-2.5 py-2">
+      <header className="mobile-primary-header pointer-events-none absolute inset-x-0 top-0 z-20 flex items-center gap-1.5 p-2 pt-[max(.5rem,env(safe-area-inset-top))] min-[520px]:gap-2 min-[520px]:p-3 min-[520px]:pt-[max(.75rem,env(safe-area-inset-top))]">
+        <div className="float-surface pointer-events-auto flex min-w-0 max-w-[calc(100%-8.75rem)] items-center gap-1.5 rounded-2xl px-2 py-2 min-[520px]:max-w-[calc(100%-15rem)] min-[520px]:gap-2 min-[520px]:px-2.5">
           <span className="flex size-8 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground">
             <LandDraftMark className="size-5" />
           </span>
@@ -145,13 +145,15 @@ function MobileShell() {
             }}
             aria-label="Open main desktop view"
             title="Open the full main map view"
-            className="flex size-7 shrink-0 items-center justify-center rounded-lg border border-border text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            className="hidden size-7 shrink-0 items-center justify-center rounded-lg border border-border text-muted-foreground transition-colors hover:bg-accent hover:text-foreground min-[430px]:flex"
           >
             <Monitor className="size-3.5" />
           </button>
-          <ProjectAreaControl />
+          <span className="hidden shrink-0 min-[620px]:inline-flex">
+            <ProjectAreaControl />
+          </span>
         </div>
-        <div className="float-surface pointer-events-auto ml-auto grid grid-cols-2 rounded-2xl p-1">
+        <div className="float-surface pointer-events-auto ml-auto grid shrink-0 grid-cols-3 rounded-2xl p-1">
           <button
             onClick={() => setFieldMode(true)}
             aria-pressed={fieldMode}
@@ -162,7 +164,7 @@ function MobileShell() {
             )}
           >
             <Navigation className="size-3.5" />{" "}
-            <span className="hidden min-[370px]:inline">Field</span>
+            <span className="hidden min-[520px]:inline">Field</span>
           </button>
           <button
             onClick={() => setFieldMode(false)}
@@ -173,7 +175,16 @@ function MobileShell() {
               !fieldMode && "bg-primary text-primary-foreground",
             )}
           >
-            <Map className="size-3.5" /> <span className="hidden min-[370px]:inline">Map</span>
+            <Map className="size-3.5" /> <span className="hidden min-[520px]:inline">Map</span>
+          </button>
+          <button
+            onClick={() => window.location.assign("/weather?view=storm-chaser&return=field")}
+            title="Open Weather and Storm Chaser"
+            aria-label="Open Weather and Storm Chaser"
+            className="flex items-center gap-1 rounded-xl px-2.5 py-2 text-[10px] font-semibold"
+          >
+            <CloudSun className="size-3.5" />
+            <span className="hidden min-[520px]:inline">Weather</span>
           </button>
         </div>
       </header>

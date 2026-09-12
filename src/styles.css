@@ -274,6 +274,9 @@
 }
 
 .field-action-dock {
+  width: auto;
+  max-width: 34rem;
+  margin-inline: auto;
   max-height: calc(100vh - 5rem);
   max-height: calc(100dvh - 5rem);
   overflow-y: auto;
@@ -348,7 +351,24 @@
 
   .mobile-field-mode .maplibregl-ctrl-bottom-right,
   .mobile-field-mode .maplibregl-ctrl-bottom-left {
-    bottom: calc(7.25rem + env(safe-area-inset-bottom, 0px));
+    bottom: calc(10.25rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  .mobile-field-mode .landdraft-map-lock-controls {
+    right: max(0.75rem, env(safe-area-inset-right, 0px));
+    bottom: calc(17.25rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  .weather-workspace .maplibregl-ctrl-bottom-right,
+  .weather-workspace .maplibregl-ctrl-bottom-left {
+    bottom: calc(4.75rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  .weather-workspace .landdraft-map-lock-controls {
+    right: auto;
+    bottom: calc(5.75rem + env(safe-area-inset-bottom, 0px));
+    left: max(0.75rem, env(safe-area-inset-left, 0px));
+    flex-direction: row;
   }
 
   .mobile-map-mode .maplibregl-ctrl-bottom-right,

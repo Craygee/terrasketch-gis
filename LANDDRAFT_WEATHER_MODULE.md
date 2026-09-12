@@ -107,3 +107,25 @@ Roads, terrain, flood conditions and exact lightning are not yet inputs and are 
 Live adapter verification on 2026-09-11 at Midland, Texas returned a current NWS observation, 14
 forecast periods and 15 official MRMS frames. Provider failure still returns normalized health and
 warnings instead of fabricated values.
+
+## Mobile Field / Storm Chaser integration
+
+- The mobile Field header links directly to the Weather Storm Chaser workspace while retaining the
+  same project context. Weather layers remain independently switchable and reorderable there.
+- Chase GPS is explicit and ephemeral. Once enabled, **Follow car** keeps the Weather map centered
+  on the device; a deliberate map pan/zoom disables follow so the user remains in control.
+- A user may tap **Target**, choose a map point and open same-tab external directions. Apple touch
+  devices use Apple Maps; Android and other browsers use Google Maps. The destination is explicitly
+  user-selected and is never described as safe or chosen automatically by LandDraft.
+- Current/analyzed severe objects and their motion-only projected positions use event-specific white
+  glyphs for tornado/rotation, hail, hurricane/tropical cyclone, dust/haboob, lightning and major
+  thunderstorm. Background severity progresses from green to dark red and is reinforced with text,
+  labels and provenance so color is not the only signal.
+- Phone controls reserve separate screen regions for the compact header, map controls, bottom
+  navigation and capped bottom sheet. The prior permanent Storm Chaser decision-support map bubble
+  was removed; safety/provenance remains in the contextual Storm Intelligence panel.
+
+This increment adds no paid data provider, runtime dependency, database migration or production
+configuration. External navigation providers, GPS, NOAA/CIMSS data and basemap services retain their
+own terms and operating limits. Future authoritative road-closure, flood and individual-lightning
+feeds may add provider and infrastructure costs; pricing remains undecided.

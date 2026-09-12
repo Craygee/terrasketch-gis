@@ -27,9 +27,10 @@ import { useWorkbench } from "@/lib/gis/store";
 import { catalog } from "@/lib/gis/catalog";
 import { resolveCatalogUrl } from "@/lib/gis/connectionHealth";
 import { formatLength, squareMeters } from "@/lib/gis/measure";
+import { directionsUrl, type NavigationActivity } from "@/lib/gis/directions";
 import { cn } from "@/lib/utils";
 
-type Activity = "walking" | "driving";
+type Activity = NavigationActivity;
 type TrackKind = "path" | "area";
 type GpsStatus = "idle" | "requesting" | "active" | "error" | "denied";
 
@@ -82,31 +83,6 @@ const MARKER_OPTIONS = [
   { symbol: "★", label: "Star" },
   { symbol: "▲", label: "Direction" },
 ] as const;
-
-const prefersAppleMaps = () => {
-  const userAgent = navigator.userAgent;
-  return (
-    /iPhone|iPad|iPod/i.test(userAgent) ||
-    (/Macintosh/i.test(userAgent) && navigator.maxTouchPoints > 1)
-  );
-};
-
-const directionsUrl = (lat: number, lng: number, direction: "to" | "from", activity: Activity) => {
-  const coordinate = `${lat},${lng}`;
-  if (prefersAppleMaps()) {
-    const params = new URLSearchParams({
-      [direction === "from" ? "saddr" : "daddr"]: coordinate,
-      dirflg: activity === "walking" ? "w" : "d",
-    });
-    return `https://maps.apple.com/?${params}`;
-  }
-  const params = new URLSearchParams({
-    api: "1",
-    [direction === "from" ? "origin" : "destination"]: coordinate,
-    travelmode: activity,
-  });
-  return `https://www.google.com/maps/dir/?${params}`;
-};
 
 const rad = (value: number) => (value * Math.PI) / 180;
 const segmentMeters = (a: Position, b: Position) => {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { MapMouseEvent } from "maplibre-gl";
+import type { MapMouseEvent, MapMovementEvent } from "maplibre-gl";
 import { bbox } from "@turf/turf";
 import {
   AlertTriangle,
@@ -40,6 +40,7 @@ import { MapCanvas } from "@/components/gis/MapCanvas";
 import { SearchBox } from "@/components/gis/SearchBox";
 import { useMapRef } from "@/lib/gis/mapRef";
 import { useWorkbench } from "@/lib/gis/store";
+import { directionsUrl } from "@/lib/gis/directions";
 import { cn } from "@/lib/utils";
 import { getWeatherAtPoint } from "@/lib/weather/api";
 import { hasWeatherCapability } from "@/lib/weather/entitlements";
@@ -73,6 +74,14 @@ import {
 
 type MobileSheet = "layers" | "weather" | "sources" | null;
 type WorkspaceView = "weather" | "meteorology" | "storm-chaser" | "photography";
+
+function initialWorkspaceView(): WorkspaceView {
+  if (typeof window === "undefined") return "weather";
+  const requested = new URLSearchParams(window.location.search).get("view");
+  return requested === "storm-chaser" || requested === "meteorology" || requested === "photography"
+    ? requested
+    : "weather";
+}
 
 const starterChoices = [
   { name: "Current Weather", category: "Current", layer: "weather.current", icon: CloudSun },
@@ -193,11 +202,14 @@ export function WeatherWorkspace() {
   const [advancedLayers, setAdvancedLayers] = useState(false);
   const [selectedAlert, setSelectedAlert] = useState<WeatherAlert | null>(null);
   const [selectedStormId, setSelectedStormId] = useState<string | null>(null);
-  const [workspaceView, setWorkspaceView] = useState<WorkspaceView>("weather");
+  const [workspaceView, setWorkspaceView] = useState<WorkspaceView>(initialWorkspaceView);
   const [chaseActive, setChaseActive] = useState(false);
+  const [chaseFollow, setChaseFollow] = useState(true);
   const [chaserLocation, setChaserLocation] = useState<[number, number] | undefined>();
   const [chaserAccuracy, setChaserAccuracy] = useState<number | undefined>();
   const [chaseError, setChaseError] = useState<string | null>(null);
+  const [navigationTargetMode, setNavigationTargetMode] = useState(false);
+  const [navigationTarget, setNavigationTarget] = useState<[number, number] | undefined>();
   const [presetName, setPresetName] = useState("");
   const [xweatherConnection, setXweatherConnection] =
     useState<XweatherConnectionStatus>(loadingXweatherConnection);
@@ -206,7 +218,9 @@ export function WeatherWorkspace() {
   const latestWeatherRequest = useRef(0);
   const xweatherReloaded = useRef("");
   const geolocationWatch = useRef<number | null>(null);
+  const chaseFollowRef = useRef(true);
   const stormAutoCenterPending = useRef(false);
+  const initialWorkspaceApplied = useRef(false);
 
   useEffect(
     () => () => {
@@ -310,8 +324,17 @@ export function WeatherWorkspace() {
   ]);
 
   useEffect(() => {
-    if (!map || !workspace.inspectorEnabled) return;
+    if (!map || (!workspace.inspectorEnabled && !navigationTargetMode)) return;
     const inspect = (event: MapMouseEvent) => {
+      if (navigationTargetMode) {
+        const point: [number, number] = [event.lngLat.lng, event.lngLat.lat];
+        setNavigationTarget(point);
+        setNavigationTargetMode(false);
+        toast.success("Navigation point selected", {
+          description: "Review current hazards and road conditions before opening directions.",
+        });
+        return;
+      }
       const selectedWeatherObject = map
         .queryRenderedFeatures(event.point)
         .some(
@@ -330,7 +353,24 @@ export function WeatherWorkspace() {
     return () => {
       map.off("click", inspect);
     };
-  }, [loadPoint, map, updateWorkspace, workspace.inspectorEnabled]);
+  }, [loadPoint, map, navigationTargetMode, updateWorkspace, workspace.inspectorEnabled]);
+
+  useEffect(() => {
+    if (!map || !chaseActive) return;
+    const stopFollowing = (event: MapMovementEvent) => {
+      if (!event.originalEvent) return;
+      chaseFollowRef.current = false;
+      setChaseFollow(false);
+    };
+    map.on("dragstart", stopFollowing);
+    map.on("zoomstart", stopFollowing);
+    map.on("rotatestart", stopFollowing);
+    return () => {
+      map.off("dragstart", stopFollowing);
+      map.off("zoomstart", stopFollowing);
+      map.off("rotatestart", stopFollowing);
+    };
+  }, [chaseActive, map]);
 
   const timelineFrames = useMemo(() => {
     const candidates = [
@@ -420,43 +460,52 @@ export function WeatherWorkspace() {
     );
   };
 
-  const openWorkspace = (view: WorkspaceView) => {
-    if (view === "storm-chaser") stormAutoCenterPending.current = true;
-    setWorkspaceView(view);
-    if (view === "weather") return;
-    setAdvancedLayers(true);
-    const workspaceLayerId =
-      view === "photography"
-        ? "weather.photo"
-        : view === "storm-chaser"
-          ? "weather.severe.intelligence"
-          : null;
-    const workspaceLayerSetting = workspaceLayerId
-      ? workspace.layerSettings[workspaceLayerId]
-      : undefined;
-    const layerSettings =
-      workspaceLayerId && workspaceLayerSetting
-        ? {
-            ...workspace.layerSettings,
-            [workspaceLayerId]: { ...workspaceLayerSetting, visible: true },
-          }
-        : workspace.layerSettings;
-    updateWorkspace({
-      selectedCategory:
-        view === "meteorology"
-          ? "Meteorology"
+  const openWorkspace = useCallback(
+    (view: WorkspaceView) => {
+      if (view === "storm-chaser") stormAutoCenterPending.current = true;
+      setWorkspaceView(view);
+      if (view === "weather") return;
+      setAdvancedLayers(true);
+      const workspaceLayerId =
+        view === "photography"
+          ? "weather.photo"
           : view === "storm-chaser"
-            ? "Storm chaser"
-            : "Photography",
-      layerSettings,
-    });
-    if (workspaceLayerId)
-      void loadPoint(
-        workspace.lastInspectionPoint ?? wb.mapView.center,
-        false,
-        Array.from(new Set([...requestedLayerIds, workspaceLayerId])),
-      );
-  };
+            ? "weather.severe.intelligence"
+            : null;
+      const workspaceLayerSetting = workspaceLayerId
+        ? workspace.layerSettings[workspaceLayerId]
+        : undefined;
+      const layerSettings =
+        workspaceLayerId && workspaceLayerSetting
+          ? {
+              ...workspace.layerSettings,
+              [workspaceLayerId]: { ...workspaceLayerSetting, visible: true },
+            }
+          : workspace.layerSettings;
+      updateWorkspace({
+        selectedCategory:
+          view === "meteorology"
+            ? "Meteorology"
+            : view === "storm-chaser"
+              ? "Storm chaser"
+              : "Photography",
+        layerSettings,
+      });
+      if (workspaceLayerId)
+        void loadPoint(
+          workspace.lastInspectionPoint ?? wb.mapView.center,
+          false,
+          Array.from(new Set([...requestedLayerIds, workspaceLayerId])),
+        );
+    },
+    [loadPoint, requestedLayerIds, updateWorkspace, wb.mapView.center, workspace],
+  );
+
+  useEffect(() => {
+    if (!wb.projectReady || initialWorkspaceApplied.current) return;
+    initialWorkspaceApplied.current = true;
+    if (workspaceView !== "weather") openWorkspace(workspaceView);
+  }, [openWorkspace, wb.projectReady, workspaceView]);
 
   const activeLayerCount = Object.values(workspace.layerSettings).filter(
     (setting) => setting.visible,
@@ -493,20 +542,32 @@ export function WeatherWorkspace() {
       setChaserAccuracy(undefined);
       return;
     }
-    if (!activeStorm) {
-      setChaseError("Select an official storm or alert area before starting Chase mode.");
-      return;
-    }
     if (!navigator.geolocation) {
       setChaseError("This browser does not provide device location.");
       return;
     }
     setChaseError(null);
+    chaseFollowRef.current = true;
+    setChaseFollow(true);
     geolocationWatch.current = navigator.geolocation.watchPosition(
       (position) => {
-        setChaserLocation([position.coords.longitude, position.coords.latitude]);
+        const nextLocation: [number, number] = [
+          position.coords.longitude,
+          position.coords.latitude,
+        ];
+        setChaserLocation(nextLocation);
         setChaserAccuracy(position.coords.accuracy);
         setChaseActive(true);
+        if (chaseFollowRef.current && map) {
+          map.easeTo({
+            center: nextLocation,
+            duration: 450,
+            essential: true,
+            ...(position.coords.heading !== null && position.coords.speed
+              ? { bearing: position.coords.heading }
+              : {}),
+          });
+        }
       },
       (nextError) => {
         setChaseActive(false);
@@ -518,6 +579,20 @@ export function WeatherWorkspace() {
       },
       { enableHighAccuracy: true, maximumAge: 5_000, timeout: 15_000 },
     );
+  };
+
+  const toggleChaseFollow = () => {
+    const next = !chaseFollowRef.current;
+    chaseFollowRef.current = next;
+    setChaseFollow(next);
+    if (next && chaserLocation && map)
+      map.easeTo({ center: chaserLocation, duration: 450, essential: true });
+  };
+
+  const openNavigationTarget = () => {
+    if (!navigationTarget) return;
+    const [longitude, latitude] = navigationTarget;
+    window.location.assign(directionsUrl(latitude, longitude, "to", "driving"));
   };
 
   const selectStorm = useCallback(
@@ -584,7 +659,7 @@ export function WeatherWorkspace() {
     );
 
   return (
-    <div className="app-safe-frame app-viewport flex flex-col overflow-hidden bg-background">
+    <div className="weather-workspace app-safe-frame app-viewport flex flex-col overflow-hidden bg-background">
       <header className="relative z-50 flex h-14 shrink-0 items-center gap-2 border-b border-border bg-card px-2 lg:px-3">
         <button
           onClick={() => window.location.assign("/")}
@@ -693,6 +768,7 @@ export function WeatherWorkspace() {
               }
               selectedStormId={activeStorm?.id ?? null}
               chaserLocation={chaserLocation}
+              navigationTarget={navigationTarget}
             />
 
             <div className="pointer-events-none absolute inset-x-0 top-0 z-30 flex items-start gap-2 p-2 sm:p-3">
@@ -733,19 +809,18 @@ export function WeatherWorkspace() {
                   </p>
                 </div>
               )}
-              {workspaceView === "storm-chaser" && (
-                <div className="pointer-events-auto max-w-sm rounded-2xl border border-rose-200 bg-card/95 p-3 text-[10px] shadow-float backdrop-blur">
-                  <strong>Storm Chaser · decision support</strong>
-                  <p className="mt-1 text-muted-foreground">
-                    NOAA storm objects and recent-motion corridors load automatically. Official
-                    warnings remain distinct, and observation routing stays withheld until road,
-                    flood, lightning, and hazard inputs are validated together.
-                  </p>
-                </div>
+              {navigationTargetMode && (
+                <button
+                  type="button"
+                  onClick={() => setNavigationTargetMode(false)}
+                  className="pointer-events-auto rounded-full border border-border bg-card/95 px-3 py-2 text-[10px] font-semibold shadow-float backdrop-blur"
+                >
+                  Tap map for navigation point · Cancel
+                </button>
               )}
             </div>
 
-            <WeatherLegends workspace={workspace} />
+            <WeatherLegends workspace={workspace} workspaceView={workspaceView} />
 
             <div className="absolute inset-x-2 bottom-[calc(.5rem+env(safe-area-inset-bottom))] z-40 grid grid-cols-4 gap-1 rounded-3xl border border-border bg-card/95 p-1 shadow-float backdrop-blur lg:hidden">
               <MobileButton
@@ -762,9 +837,17 @@ export function WeatherWorkspace() {
               />
               <MobileButton
                 icon={<Crosshair />}
-                label="Inspect"
-                active={workspace.inspectorEnabled}
-                onClick={() => updateWorkspace({ inspectorEnabled: !workspace.inspectorEnabled })}
+                label={workspaceView === "storm-chaser" ? "Target" : "Inspect"}
+                active={
+                  workspaceView === "storm-chaser"
+                    ? navigationTargetMode
+                    : workspace.inspectorEnabled
+                }
+                onClick={() =>
+                  workspaceView === "storm-chaser"
+                    ? setNavigationTargetMode((active) => !active)
+                    : updateWorkspace({ inspectorEnabled: !workspace.inspectorEnabled })
+                }
               />
               <MobileButton
                 icon={<Database />}
@@ -775,7 +858,7 @@ export function WeatherWorkspace() {
             </div>
 
             {mobileSheet && (
-              <section className="absolute inset-x-2 bottom-[calc(4.6rem+env(safe-area-inset-bottom))] z-40 max-h-[62dvh] overflow-hidden rounded-3xl border border-border bg-card shadow-float lg:hidden">
+              <section className="weather-mobile-sheet absolute inset-x-2 bottom-[calc(4.6rem+env(safe-area-inset-bottom))] z-40 max-h-[54dvh] overflow-hidden rounded-3xl border border-border bg-card shadow-float lg:hidden">
                 <div className="flex items-center border-b border-border px-4 py-2">
                   <strong className="text-sm">
                     {mobileSheet === "layers"
@@ -792,7 +875,7 @@ export function WeatherWorkspace() {
                     <X className="size-4" />
                   </button>
                 </div>
-                <div className="max-h-[calc(62dvh-3rem)] overflow-y-auto">
+                <div className="max-h-[calc(54dvh-3rem)] overflow-y-auto">
                   {mobileSheet === "layers" ? (
                     <WeatherLayerPanel
                       workspace={workspace}
@@ -823,11 +906,21 @@ export function WeatherWorkspace() {
                       activeAlert={activeAlert}
                       relativePosition={relativePosition}
                       chaseActive={chaseActive}
+                      chaseFollow={chaseFollow}
                       chaserAccuracy={chaserAccuracy}
                       chaseError={chaseError}
+                      navigationTarget={navigationTarget}
+                      navigationTargetMode={navigationTargetMode}
                       onSelect={selectStorm}
                       onCenterTrack={() => activeStorm && selectStorm(activeStorm)}
                       onToggleChase={toggleChaseLocation}
+                      onToggleFollow={toggleChaseFollow}
+                      onChooseNavigationTarget={() => {
+                        setNavigationTargetMode((active) => !active);
+                        setMobileSheet(null);
+                      }}
+                      onNavigate={openNavigationTarget}
+                      onClearNavigationTarget={() => setNavigationTarget(undefined)}
                     />
                   ) : (
                     <InspectorPanel
@@ -877,11 +970,18 @@ export function WeatherWorkspace() {
                 activeAlert={activeAlert}
                 relativePosition={relativePosition}
                 chaseActive={chaseActive}
+                chaseFollow={chaseFollow}
                 chaserAccuracy={chaserAccuracy}
                 chaseError={chaseError}
+                navigationTarget={navigationTarget}
+                navigationTargetMode={navigationTargetMode}
                 onSelect={selectStorm}
                 onCenterTrack={() => activeStorm && selectStorm(activeStorm)}
                 onToggleChase={toggleChaseLocation}
+                onToggleFollow={toggleChaseFollow}
+                onChooseNavigationTarget={() => setNavigationTargetMode((active) => !active)}
+                onNavigate={openNavigationTarget}
+                onClearNavigationTarget={() => setNavigationTarget(undefined)}
               />
             ) : (
               <InspectorPanel bundle={bundle} activeAlert={activeAlert} workspace={workspace} />
@@ -1471,22 +1571,36 @@ function StormChaserPanel({
   activeAlert,
   relativePosition,
   chaseActive,
+  chaseFollow,
   chaserAccuracy,
   chaseError,
+  navigationTarget,
+  navigationTargetMode,
   onSelect,
   onCenterTrack,
   onToggleChase,
+  onToggleFollow,
+  onChooseNavigationTarget,
+  onNavigate,
+  onClearNavigationTarget,
 }: {
   storms: StormObject[];
   activeStorm: StormObject | null;
   activeAlert: WeatherAlert | null;
   relativePosition: StormRelativePosition | null;
   chaseActive: boolean;
+  chaseFollow: boolean;
   chaserAccuracy: number | undefined;
   chaseError: string | null;
+  navigationTarget: [number, number] | undefined;
+  navigationTargetMode: boolean;
   onSelect: (storm: StormObject) => void;
   onCenterTrack: () => void;
   onToggleChase: () => void;
+  onToggleFollow: () => void;
+  onChooseNavigationTarget: () => void;
+  onNavigate: () => void;
+  onClearNavigationTarget: () => void;
 }) {
   const isGuidance = activeStorm?.basis === "provider-guidance";
   return (
@@ -1508,6 +1622,31 @@ function StormChaserPanel({
         No manual motion or hazard entry is required. NOAA/CIMSS storm objects update about every
         two minutes; LandDraft uses recent matching positions to calculate a limited, widening
         motion corridor when the history passes quality checks.
+      </div>
+
+      <div className="rounded-2xl border border-border p-3">
+        <strong className="text-[10px]">Map event symbols</strong>
+        <p className="mt-1 text-[8px] leading-relaxed text-muted-foreground">
+          Symbols identify tornado/rotation, hail, hurricane, dust/haboob, lightning, and major
+          thunderstorm objects. White glyphs keep each event readable over its severity color.
+        </p>
+        <div className="mt-2 grid grid-cols-5 gap-1 text-center text-[7px]">
+          {[
+            ["#15803d", "Lower"],
+            ["#ca8a04", "Elevated"],
+            ["#ea580c", "Significant"],
+            ["#dc2626", "Severe"],
+            ["#7f1d1d", "Extreme"],
+          ].map(([color, label]) => (
+            <span key={label} className="min-w-0">
+              <span
+                className="mx-auto block size-3 rounded-full border border-white shadow-sm"
+                style={{ backgroundColor: color }}
+              />
+              <span className="mt-0.5 block truncate text-muted-foreground">{label}</span>
+            </span>
+          ))}
+        </div>
       </div>
 
       <div>
@@ -1730,19 +1869,35 @@ function StormChaserPanel({
             <p className="mt-1 text-[9px] text-muted-foreground">
               Device position stays in this browser session and is not saved to the project.
             </p>
-            <button
-              type="button"
-              onClick={onToggleChase}
-              className={cn(
-                "mt-3 flex w-full items-center justify-center gap-2 rounded-xl px-3 py-2 text-[10px] font-semibold",
-                chaseActive
-                  ? "border border-border bg-background text-foreground"
-                  : "bg-primary text-primary-foreground",
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={onToggleChase}
+                className={cn(
+                  "flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-[10px] font-semibold",
+                  chaseActive
+                    ? "border border-border bg-background text-foreground"
+                    : "col-span-2 bg-primary text-primary-foreground",
+                )}
+              >
+                <Navigation className="size-4" />
+                {chaseActive ? "Stop GPS" : "Enable chase GPS"}
+              </button>
+              {chaseActive && (
+                <button
+                  type="button"
+                  onClick={onToggleFollow}
+                  aria-pressed={chaseFollow}
+                  className={cn(
+                    "flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-[10px] font-semibold",
+                    chaseFollow ? "bg-primary text-primary-foreground" : "bg-secondary",
+                  )}
+                >
+                  <Crosshair className="size-4" />
+                  {chaseFollow ? "Following" : "Follow car"}
+                </button>
               )}
-            >
-              <Navigation className="size-4" />
-              {chaseActive ? "Stop chase location" : "Enable chase location"}
-            </button>
+            </div>
             {chaseError && (
               <p className="mt-2 rounded-xl bg-amber-50 p-2 text-[9px] text-amber-950">
                 {chaseError}
@@ -1775,6 +1930,57 @@ function StormChaserPanel({
                 </p>
               </div>
             )}
+          </div>
+
+          <div className="rounded-2xl border border-border p-3">
+            <div className="flex items-center gap-2">
+              <Navigation className="size-4 text-primary" />
+              <strong className="text-xs">User-selected navigation</strong>
+            </div>
+            <p className="mt-1 text-[9px] leading-relaxed text-muted-foreground">
+              Choose a point on the map, then open turn-by-turn directions in Apple Maps on Apple
+              devices or Google Maps on Android and other platforms.
+            </p>
+            <button
+              type="button"
+              onClick={onChooseNavigationTarget}
+              className={cn(
+                "mt-3 flex w-full items-center justify-center gap-2 rounded-xl px-3 py-2 text-[10px] font-semibold",
+                navigationTargetMode
+                  ? "border border-primary bg-primary/10 text-primary"
+                  : "bg-secondary",
+              )}
+            >
+              <Crosshair className="size-4" />
+              {navigationTargetMode ? "Cancel point selection" : "Choose point on map"}
+            </button>
+            {navigationTarget && (
+              <div className="mt-2 rounded-xl bg-secondary p-2">
+                <p className="font-mono text-[8px] text-muted-foreground">
+                  {navigationTarget[1].toFixed(5)}, {navigationTarget[0].toFixed(5)}
+                </p>
+                <div className="mt-2 grid grid-cols-[1fr_auto] gap-2">
+                  <button
+                    type="button"
+                    onClick={onNavigate}
+                    className="flex items-center justify-center gap-2 rounded-xl bg-primary px-3 py-2 text-[10px] font-semibold text-primary-foreground"
+                  >
+                    <Navigation className="size-4" /> Open directions
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onClearNavigationTarget}
+                    className="rounded-xl border border-border px-3 py-2 text-[10px] font-semibold"
+                  >
+                    Clear
+                  </button>
+                </div>
+              </div>
+            )}
+            <p className="mt-2 rounded-xl bg-amber-50 p-2 text-[8px] leading-relaxed text-amber-950">
+              This point is chosen by you. LandDraft has not verified road closures, flooding,
+              lightning, or safety. Official warnings and local instructions supersede directions.
+            </p>
           </div>
 
           <details className="rounded-2xl border border-border p-3" open>
@@ -2133,15 +2339,54 @@ function WeatherStatusPill({
   );
 }
 
-function WeatherLegends({ workspace }: { workspace: WeatherWorkspaceState }) {
+function WeatherLegends({
+  workspace,
+  workspaceView,
+}: {
+  workspace: WeatherWorkspaceState;
+  workspaceView: WorkspaceView;
+}) {
   const layers = weatherLayerRegistry.filter(
     (layer) => workspace.layerSettings[layer.id]?.visible && layer.legend?.length,
   );
-  if (!layers.length) return null;
+  if (!layers.length && workspaceView !== "storm-chaser") return null;
   return (
     <details className="absolute bottom-20 right-3 z-30 hidden max-w-56 rounded-2xl border border-border bg-card/95 p-3 text-[9px] shadow-float backdrop-blur sm:block lg:bottom-24">
-      <summary className="cursor-pointer font-semibold">Weather legends · {layers.length}</summary>
+      <summary className="cursor-pointer font-semibold">
+        Weather legends · {layers.length + (workspaceView === "storm-chaser" ? 1 : 0)}
+      </summary>
       <div className="mt-2 space-y-3">
+        {workspaceView === "storm-chaser" && (
+          <div>
+            <strong className="block text-[9px]">Severe-event symbols</strong>
+            <p className="mt-1 text-[8px] text-muted-foreground">
+              Tornado · hail · hurricane · dust/haboob · lightning · major storm
+            </p>
+            <div className="mt-1 flex items-center gap-1" aria-label="Severity color scale">
+              {[
+                ["#15803d", "Lower"],
+                ["#ca8a04", "Elevated"],
+                ["#ea580c", "Significant"],
+                ["#dc2626", "Severe"],
+                ["#7f1d1d", "Extreme"],
+              ].map(([color, label]) => (
+                <span key={label} className="flex min-w-0 flex-1 flex-col items-center gap-0.5">
+                  <span
+                    className="size-3 rounded-full border border-white shadow-sm"
+                    style={{ backgroundColor: color }}
+                  />
+                  <span className="max-w-full truncate text-[6px] text-muted-foreground">
+                    {label}
+                  </span>
+                </span>
+              ))}
+            </div>
+            <p className="mt-1 text-[7px] text-muted-foreground">
+              Future symbols use the same event icon with +minute labels and projected-state
+              styling.
+            </p>
+          </div>
+        )}
         {layers.map((layer) => (
           <div key={layer.id}>
             <strong className="block text-[9px]">{layer.name}</strong>
