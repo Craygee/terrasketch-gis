@@ -2416,9 +2416,20 @@ function WeatherLegends({
         {workspaceView === "storm-chaser" && (
           <div>
             <strong className="block text-[9px]">Severe-event symbols</strong>
+            <div className="mt-2 flex items-center gap-2 rounded-xl bg-secondary/70 p-2">
+              <span className="flex size-8 shrink-0 items-center justify-center rounded-full border-[3px] border-white bg-[#ca8a04] text-white shadow-sm ring-1 ring-black/15">
+                <WeatherEventLegendGlyph type="hail" />
+              </span>
+              <span className="min-w-0">
+                <strong className="block text-[8px]">ProbSevere tracked storm</strong>
+                <span className="block text-[7px] leading-tight text-muted-foreground">
+                  Center symbol shows the leading hazard; circle color shows analyzed severity.
+                </span>
+              </span>
+            </div>
             <div className="mt-2 grid grid-cols-2 gap-1.5">
               <WeatherEventLegendItem type="tornado" label="Tornado / rotation" />
-              <WeatherEventLegendItem type="hail" label="Hail core" />
+              <WeatherEventLegendItem type="hail" label="Hail-dominant storm" />
               <WeatherEventLegendItem type="hurricane" label="Hurricane" />
               <WeatherEventLegendItem type="dust" label="Dust / haboob" />
               <WeatherEventLegendItem type="lightning" label="Lightning" />
@@ -2515,9 +2526,13 @@ function WeatherEventLegendGlyph({ type }: { type: WeatherEventLegendType }) {
   if (type === "hail") {
     return (
       <svg viewBox="0 0 24 24" className="size-3.5" fill="none" aria-hidden="true">
-        <circle cx="8" cy="9" r="2.5" fill="currentColor" />
-        <circle cx="15.5" cy="8" r="2" fill="currentColor" />
-        <circle cx="12" cy="15.5" r="3" fill="currentColor" />
+        <circle cx="12" cy="12" r="6.5" stroke="currentColor" strokeWidth="1.8" />
+        <path
+          d="M12 6.5v11M6.5 12h11M8.1 8.1l7.8 7.8M15.9 8.1l-7.8 7.8"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+        />
       </svg>
     );
   }
