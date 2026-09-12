@@ -50,7 +50,13 @@ function WeatherRoute() {
             <Suspense fallback={<Loading />}>
               <WeatherWorkspace />
               <RemoteLayerManager />
-              <Toaster />
+              <Toaster
+                mobileOffset={{
+                  bottom: "calc(5rem + env(safe-area-inset-bottom, 0px))",
+                  left: ".5rem",
+                  right: ".5rem",
+                }}
+              />
             </Suspense>
           </MapRefProvider>
         </WorkbenchProvider>

@@ -64,7 +64,13 @@ export default function MobileWorkbench() {
             <RemoteLayerManager />
             <FeatureDestinationDialog />
             <ConnectionManager />
-            <Toaster />
+            <Toaster
+              mobileOffset={{
+                bottom: "calc(10.5rem + env(safe-area-inset-bottom, 0px))",
+                left: ".5rem",
+                right: ".5rem",
+              }}
+            />
           </TourProvider>
         </MapRefProvider>
       </WorkbenchProvider>
