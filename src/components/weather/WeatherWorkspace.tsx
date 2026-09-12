@@ -25,6 +25,7 @@ import {
   PanelLeft,
   PanelRight,
   RefreshCw,
+  Route,
   Save,
   Search,
   ShieldAlert,
@@ -865,7 +866,9 @@ export function WeatherWorkspace() {
                       ? `Weather layers · ${activeLayerCount} on`
                       : mobileSheet === "sources"
                         ? "Data sources"
-                        : "Weather at map point"}
+                        : workspaceView === "storm-chaser"
+                          ? "Storm Chaser"
+                          : "Weather at map point"}
                   </strong>
                   <button
                     onClick={() => setMobileSheet(null)}
@@ -1617,15 +1620,56 @@ function StormChaserPanel({
         </p>
       </div>
 
-      <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-3 text-[9px] leading-relaxed text-emerald-950">
-        <strong className="block text-[10px]">Automatic severe-weather analysis</strong>
-        No manual motion or hazard entry is required. NOAA/CIMSS storm objects update about every
-        two minutes; LandDraft uses recent matching positions to calculate a limited, widening
-        motion corridor when the history passes quality checks.
+      <div className="grid grid-cols-3 gap-1.5">
+        <button
+          type="button"
+          onClick={onToggleChase}
+          className={cn(
+            "flex min-h-12 flex-col items-center justify-center gap-1 rounded-xl px-1 text-[8px] font-semibold",
+            chaseActive
+              ? "border border-border bg-background text-foreground"
+              : "bg-primary text-primary-foreground",
+          )}
+        >
+          <Navigation className="size-4" />
+          {chaseActive ? "Stop GPS" : "Enable GPS"}
+        </button>
+        <button
+          type="button"
+          onClick={onToggleFollow}
+          disabled={!chaseActive}
+          className={cn(
+            "flex min-h-12 flex-col items-center justify-center gap-1 rounded-xl px-1 text-[8px] font-semibold disabled:cursor-not-allowed disabled:opacity-45",
+            chaseActive && chaseFollow ? "bg-primary text-primary-foreground" : "bg-secondary",
+          )}
+        >
+          <Crosshair className="size-4" />
+          {chaseActive && chaseFollow ? "Following car" : "Follow car"}
+        </button>
+        <button
+          type="button"
+          onClick={onCenterTrack}
+          disabled={!activeStorm}
+          className="flex min-h-12 flex-col items-center justify-center gap-1 rounded-xl bg-secondary px-1 text-[8px] font-semibold disabled:cursor-not-allowed disabled:opacity-45"
+        >
+          <Route className="size-4" />
+          Full track
+        </button>
       </div>
 
-      <div className="rounded-2xl border border-border p-3">
-        <strong className="text-[10px]">Map event symbols</strong>
+      <details className="rounded-2xl border border-emerald-200 bg-emerald-50 p-3 text-[9px] leading-relaxed text-emerald-950">
+        <summary className="cursor-pointer text-[10px] font-semibold">
+          Automatic severe-weather analysis
+        </summary>
+        <p className="mt-1">
+          No manual motion or hazard entry is required. NOAA/CIMSS storm objects update about every
+          two minutes; LandDraft uses recent matching positions to calculate a limited, widening
+          motion corridor when the history passes quality checks.
+        </p>
+      </details>
+
+      <details className="rounded-2xl border border-border p-3">
+        <summary className="cursor-pointer text-[10px] font-semibold">Map event symbols</summary>
         <p className="mt-1 text-[8px] leading-relaxed text-muted-foreground">
           Symbols identify tornado/rotation, hail, hurricane, dust/haboob, lightning, and major
           thunderstorm objects. White glyphs keep each event readable over its severity color.
@@ -1647,7 +1691,7 @@ function StormChaserPanel({
             </span>
           ))}
         </div>
-      </div>
+      </details>
 
       <div>
         <div className="flex items-center gap-2 text-[10px] font-semibold">
