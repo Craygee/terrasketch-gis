@@ -362,12 +362,12 @@
   /* Keep transient connection/save messages above the one-hand Field dock.
      Sonner otherwise anchors them to the same bottom edge and hides every
      primary field action until the message times out. */
-  .mobile-field-mode [data-sonner-toaster][data-y-position="bottom"] {
+  body:has(.mobile-field-mode) [data-sonner-toaster][data-y-position="bottom"] {
     bottom: calc(10.5rem + env(safe-area-inset-bottom, 0px)) !important;
   }
 
-  .mobile-map-mode [data-sonner-toaster][data-y-position="bottom"],
-  .weather-workspace [data-sonner-toaster][data-y-position="bottom"] {
+  body:has(.mobile-map-mode) [data-sonner-toaster][data-y-position="bottom"],
+  body:has(.weather-workspace) [data-sonner-toaster][data-y-position="bottom"] {
     bottom: calc(5rem + env(safe-area-inset-bottom, 0px)) !important;
   }
 
