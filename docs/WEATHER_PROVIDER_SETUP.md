@@ -89,6 +89,11 @@ testers using the preview deployment. They can test, replace and disconnect cred
 already-authorized Worker isolates may retain the encrypted credential in memory for at most 30
 seconds. Revoking the application in Xweather is the immediate provider-side kill switch.
 
+The connection dialog links directly to **Xweather Weather API — Pay As You Go** signup and the
+Weather API dashboard. LandDraft currently consumes the Weather API's **Raster Maps** products; it
+does not require customers to choose Xweather Protect, Optimize, Observe or another enterprise
+software product.
+
 Cost controls in this increment:
 
 - NOAA remains the free primary U.S. radar source. Xweather is used only after the current LandDraft

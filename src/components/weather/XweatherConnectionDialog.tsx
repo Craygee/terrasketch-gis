@@ -24,7 +24,9 @@ import {
   type XweatherConnectionStatus,
 } from "@/lib/weather/xweatherConnection";
 
-const XWEATHER_ACCOUNT_URL = "https://www.xweather.com/account";
+const XWEATHER_SIGNUP_URL =
+  "https://www.xweather.com/signup/checkout?items=payg::monthly:v1&source=api-pricing-hero";
+const XWEATHER_DASHBOARD_URL = "https://data.portal.xweather.com/account/";
 
 export function XweatherConnectionDialog({
   open,
@@ -148,7 +150,8 @@ export function XweatherConnectionDialog({
           <div className="space-y-4">
             <ol className="space-y-2 rounded-2xl bg-secondary p-4 text-xs leading-relaxed">
               <li>
-                <strong>1.</strong> Open Xweather and sign in or create a free account.
+                <strong>1.</strong> Choose <strong>Xweather Weather API — Pay As You Go</strong>.
+                LandDraft uses its <strong>Raster Maps</strong> products.
               </li>
               <li>
                 <strong>2.</strong> Under <strong>Apps</strong>, create an application named
@@ -162,14 +165,24 @@ export function XweatherConnectionDialog({
               </li>
             </ol>
 
-            <a
-              href={XWEATHER_ACCOUNT_URL}
-              target="_blank"
-              rel="noreferrer noopener"
-              className="inline-flex items-center gap-2 rounded-xl border border-border px-3 py-2 text-xs font-semibold hover:bg-accent"
-            >
-              Open Xweather account <ExternalLink className="size-3.5" />
-            </a>
+            <div className="flex flex-wrap gap-2">
+              <a
+                href={XWEATHER_SIGNUP_URL}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="inline-flex items-center gap-2 rounded-xl bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground hover:bg-primary/90"
+              >
+                Create free Weather API account <ExternalLink className="size-3.5" />
+              </a>
+              <a
+                href={XWEATHER_DASHBOARD_URL}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="inline-flex items-center gap-2 rounded-xl border border-border px-3 py-2 text-xs font-semibold hover:bg-accent"
+              >
+                Sign in to Weather API <ExternalLink className="size-3.5" />
+              </a>
+            </div>
 
             <div className="space-y-2">
               <Label htmlFor="xweather-client-id">Xweather client ID</Label>
