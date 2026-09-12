@@ -82,9 +82,10 @@ must be backed up in the approved secret manager before production. Apply
 `202609110001_user_weather_connections.sql` before enabling the connection UI. The legacy shared
 `XWEATHER_CLIENT_ID` and `XWEATHER_CLIENT_SECRET` bindings are no longer read by the Weather runtime.
 
-Users create an Xweather application and include both `landdraft.net` and the preview hostname in its
-namespace list if they want one connection to work in both environments. They can test, replace and
-disconnect credentials from **Weather → Data sources**. Disconnect invalidates the UI immediately;
+Users create an Xweather application and add the hostname for the LandDraft environment they use to
+its namespace list. Normal users only need `landdraft.net`; the preview hostname is only needed by
+testers using the preview deployment. They can test, replace and disconnect credentials from
+**Weather → Data sources**. Disconnect invalidates the UI immediately;
 already-authorized Worker isolates may retain the encrypted credential in memory for at most 30
 seconds. Revoking the application in Xweather is the immediate provider-side kill switch.
 

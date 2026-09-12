@@ -42,6 +42,12 @@ export function XweatherConnectionDialog({
   const [editing, setEditing] = useState(!status.connected);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [allowedNamespace, setAllowedNamespace] = useState("landdraft.net");
+
+  useEffect(() => {
+    const hostname = window.location.hostname;
+    setAllowedNamespace(hostname === "localhost" ? "landdraft.net" : hostname);
+  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -149,8 +155,7 @@ export function XweatherConnectionDialog({
                 <strong> LandDraft</strong> with Raster Maps access.
               </li>
               <li>
-                <strong>3.</strong> Add <code>landdraft.net</code> and the test-site hostname to its
-                allowed namespaces, separated by a comma.
+                <strong>3.</strong> Add <code>{allowedNamespace}</code> to its allowed namespaces.
               </li>
               <li>
                 <strong>4.</strong> Paste that application’s client ID and secret below.
