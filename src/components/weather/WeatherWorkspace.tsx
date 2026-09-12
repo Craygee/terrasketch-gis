@@ -17,6 +17,7 @@ import {
   GripVertical,
   Heart,
   Layers3,
+  KeyRound,
   LoaderCircle,
   PanelLeft,
   PanelRight,
@@ -57,6 +58,12 @@ import type {
 } from "@/lib/weather/types";
 import { WeatherMapOverlay } from "./WeatherMapOverlay";
 import { WeatherTimeline } from "./WeatherTimeline";
+import { XweatherConnectionDialog } from "./XweatherConnectionDialog";
+import {
+  getXweatherConnection,
+  loadingXweatherConnection,
+  type XweatherConnectionStatus,
+} from "@/lib/weather/xweatherConnection";
 
 type MobileSheet = "layers" | "weather" | "sources" | null;
 type WorkspaceView = "weather" | "meteorology" | "storm-chaser" | "photography";
@@ -146,12 +153,38 @@ export function WeatherWorkspace() {
   const [selectedAlert, setSelectedAlert] = useState<WeatherAlert | null>(null);
   const [workspaceView, setWorkspaceView] = useState<WorkspaceView>("weather");
   const [presetName, setPresetName] = useState("");
+  const [xweatherConnection, setXweatherConnection] =
+    useState<XweatherConnectionStatus>(loadingXweatherConnection);
+  const [xweatherConnectionOpen, setXweatherConnectionOpen] = useState(false);
   const loadedProject = useRef<string | null>(null);
   const latestWeatherRequest = useRef(0);
+  const xweatherReloaded = useRef("");
 
   useEffect(() => {
     if (wb.projectReady && !wb.weatherWorkspace) wb.setWeatherWorkspace(workspace);
   }, [wb, workspace]);
+
+  useEffect(() => {
+    let active = true;
+    void getXweatherConnection()
+      .then((status) => {
+        if (active) setXweatherConnection(status);
+      })
+      .catch((nextError) => {
+        if (!active) return;
+        setXweatherConnection({
+          state: "server-not-configured",
+          connected: false,
+          error:
+            nextError instanceof Error
+              ? nextError.message
+              : "Xweather connection status is unavailable",
+        });
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const updateWorkspace = useCallback(
     (change: Partial<WeatherWorkspaceState>) => wb.setWeatherWorkspace({ ...workspace, ...change }),
@@ -171,7 +204,12 @@ export function WeatherWorkspace() {
       setError(null);
       try {
         const next = await getWeatherAtPoint({
-          data: { longitude: point[0], latitude: point[1], requestedLayerIds: layers },
+          data: {
+            longitude: point[0],
+            latitude: point[1],
+            requestedLayerIds: layers,
+            xweatherConnected: xweatherConnection.connected,
+          },
         });
         if (requestId === latestWeatherRequest.current) setBundle(next);
         return next;
@@ -187,7 +225,7 @@ export function WeatherWorkspace() {
         if (requestId === latestWeatherRequest.current) setLoading(false);
       }
     },
-    [requestedLayerIds],
+    [requestedLayerIds, xweatherConnection.connected],
   );
 
   useEffect(() => {
@@ -198,6 +236,22 @@ export function WeatherWorkspace() {
       wb.setWeatherWorkspace({ ...workspace, lastInspectionPoint: point });
     void loadPoint(point);
   }, [loadPoint, wb, workspace]);
+
+  useEffect(() => {
+    if (!wb.projectReady || xweatherConnection.state === "loading") return;
+    const connectionRevision = `${xweatherConnection.state}:${xweatherConnection.connected}:${xweatherConnection.lastTestedAt ?? ""}`;
+    if (xweatherReloaded.current === connectionRevision) return;
+    xweatherReloaded.current = connectionRevision;
+    void loadPoint(workspace.lastInspectionPoint ?? wb.mapView.center, true);
+  }, [
+    loadPoint,
+    wb.mapView.center,
+    wb.projectReady,
+    workspace.lastInspectionPoint,
+    xweatherConnection.connected,
+    xweatherConnection.lastTestedAt,
+    xweatherConnection.state,
+  ]);
 
   useEffect(() => {
     if (!map || !workspace.inspectorEnabled) return;
@@ -446,6 +500,8 @@ export function WeatherWorkspace() {
               onLayer={setLayer}
               onLayerOrder={reorderWeatherLayer}
               onWorkspace={(next) => wb.setWeatherWorkspace(next)}
+              xweatherConnection={xweatherConnection}
+              onManageXweather={() => setXweatherConnectionOpen(true)}
             />
           </aside>
         )}
@@ -565,10 +621,16 @@ export function WeatherWorkspace() {
                     onLayer={setLayer}
                     onLayerOrder={reorderWeatherLayer}
                     onWorkspace={(next) => wb.setWeatherWorkspace(next)}
+                    xweatherConnection={xweatherConnection}
+                    onManageXweather={() => setXweatherConnectionOpen(true)}
                     compact
                   />
                 ) : mobileSheet === "sources" ? (
-                  <SourcePanel bundle={bundle} />
+                  <SourcePanel
+                    bundle={bundle}
+                    xweatherConnection={xweatherConnection}
+                    onManageXweather={() => setXweatherConnectionOpen(true)}
+                  />
                 ) : (
                   <InspectorPanel bundle={bundle} activeAlert={activeAlert} workspace={workspace} />
                 )}
@@ -598,10 +660,20 @@ export function WeatherWorkspace() {
         {rightOpen && (
           <aside className="hidden w-80 shrink-0 overflow-y-auto border-l border-border bg-card xl:block">
             <InspectorPanel bundle={bundle} activeAlert={activeAlert} workspace={workspace} />
-            <SourcePanel bundle={bundle} />
+            <SourcePanel
+              bundle={bundle}
+              xweatherConnection={xweatherConnection}
+              onManageXweather={() => setXweatherConnectionOpen(true)}
+            />
           </aside>
         )}
       </div>
+      <XweatherConnectionDialog
+        open={xweatherConnectionOpen}
+        status={xweatherConnection}
+        onOpenChange={setXweatherConnectionOpen}
+        onStatus={setXweatherConnection}
+      />
     </div>
   );
 }
@@ -671,6 +743,8 @@ function WeatherLayerPanel({
   onLayer,
   onLayerOrder,
   onWorkspace,
+  xweatherConnection,
+  onManageXweather,
 }: {
   workspace: WeatherWorkspaceState;
   bundle: WeatherBundle | null;
@@ -684,6 +758,8 @@ function WeatherLayerPanel({
   onLayer: (id: string, change: Partial<WeatherLayerSetting>) => void;
   onLayerOrder: (sourceId: string, targetId: string, edge: "before" | "after") => void;
   onWorkspace: (workspace: WeatherWorkspaceState) => void;
+  xweatherConnection: XweatherConnectionStatus;
+  onManageXweather: () => void;
 }) {
   const [draggedLayer, setDraggedLayer] = useState<string | null>(null);
   const [layerSearch, setLayerSearch] = useState("");
@@ -731,13 +807,8 @@ function WeatherLayerPanel({
     const hasConnectedProvider = registered?.providerProducts.some((product) =>
       product.startsWith("xweather:"),
     );
-    const xweatherNeedsSetup =
-      hasConnectedProvider &&
-      bundle?.providerHealth.some(
-        (provider) =>
-          provider.providerId === "xweather-raster" && provider.status === "not-configured",
-      );
-    if (xweatherNeedsSetup) return { ready: false, label: "SETUP REQUIRED" };
+    if (hasConnectedProvider && !xweatherConnection.connected)
+      return { ready: false, label: "CONNECT XWEATHER" };
     if (!CONNECTED_LAYERS.has(id) && !hasConnectedProvider)
       return { ready: false, label: "SETUP REQUIRED" };
     return { ready: false, label: requested ? "NO DATA HERE" : "TURN ON TO LOAD" };
@@ -763,6 +834,36 @@ function WeatherLayerPanel({
           Products load for the visible location. Layers without a validated feed remain clearly
           unavailable.
         </p>
+      </div>
+
+      <div className="flex items-center gap-2 rounded-2xl border border-border bg-background p-3">
+        <span
+          className={cn(
+            "flex size-8 shrink-0 items-center justify-center rounded-xl",
+            xweatherConnection.connected
+              ? "bg-emerald-100 text-emerald-800"
+              : "bg-secondary text-muted-foreground",
+          )}
+        >
+          <KeyRound className="size-4" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <strong className="block truncate text-[10px]">Xweather premium products</strong>
+          <p className="truncate text-[9px] text-muted-foreground">
+            {xweatherConnection.state === "loading"
+              ? "Checking connection…"
+              : xweatherConnection.connected
+                ? `Connected · ${xweatherConnection.clientIdHint ?? "your account"}`
+                : "Use your own Xweather account and allowance"}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onManageXweather}
+          className="shrink-0 rounded-xl bg-primary px-2.5 py-2 text-[9px] font-semibold text-primary-foreground"
+        >
+          {xweatherConnection.connected ? "Manage" : "Connect"}
+        </button>
       </div>
 
       <details className="rounded-2xl border border-border bg-background" open>
@@ -1259,7 +1360,15 @@ function PhotographyPanel({
   );
 }
 
-function SourcePanel({ bundle }: { bundle: WeatherBundle | null }) {
+function SourcePanel({
+  bundle,
+  xweatherConnection,
+  onManageXweather,
+}: {
+  bundle: WeatherBundle | null;
+  xweatherConnection: XweatherConnectionStatus;
+  onManageXweather: () => void;
+}) {
   return (
     <div className="border-t border-border p-4">
       <div className="flex items-center gap-2">
@@ -1269,6 +1378,33 @@ function SourcePanel({ bundle }: { bundle: WeatherBundle | null }) {
       <p className="mt-1 text-[9px] text-muted-foreground">
         Provider identity and health are never hidden during fallback.
       </p>
+      <button
+        type="button"
+        onClick={onManageXweather}
+        className="mt-3 flex w-full items-center gap-2 rounded-xl border border-border bg-background p-3 text-left hover:bg-accent"
+      >
+        <span
+          className={cn(
+            "size-2 shrink-0 rounded-full",
+            xweatherConnection.connected
+              ? "bg-emerald-600"
+              : xweatherConnection.state === "loading"
+                ? "bg-amber-500"
+                : "bg-slate-400",
+          )}
+        />
+        <span className="min-w-0 flex-1">
+          <strong className="block truncate text-[10px]">Your Xweather account</strong>
+          <span className="block truncate text-[8px] text-muted-foreground">
+            {xweatherConnection.connected
+              ? `${xweatherConnection.clientIdHint ?? "Connected"} · your usage allowance`
+              : "Not connected · public sources remain available"}
+          </span>
+        </span>
+        <span className="text-[8px] font-semibold text-primary">
+          {xweatherConnection.connected ? "MANAGE" : "CONNECT"}
+        </span>
+      </button>
       <div className="mt-3 space-y-2">
         {(bundle?.providerHealth ?? []).map((provider) => (
           <div key={provider.providerId} className="rounded-xl bg-secondary p-3">

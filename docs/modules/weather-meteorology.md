@@ -7,7 +7,7 @@ Pricing: Undecided
 
 ## Capabilities
 
-Phase 1.2 provides the optional Weather workspace, normalized provider contracts, capability hooks,
+Phase 1.3 provides the optional Weather workspace, normalized provider contracts, capability hooks,
 layer catalog, universal multi-product timeline, responsive weather drawer/inspector,
 project-aware viewport, official U.S. warning ingestion, NWS current conditions/forecast,
 MET Norway global model fallback, NOAA/NWS MRMS radar with official NWS radar failover, nearest-site
@@ -15,7 +15,7 @@ NOAA RIDGE II base reflectivity/base radial velocity/hydrometeor classification,
 satellite imagery and lightning-density, NASA MODIS cloud-top temperature, NDFD temperature/wind/precipitation, NHC
 tropical summary, WSSI, SPC fire outlook, NOAA smoke guidance, Aviation Weather Center METAR
 stations, source health/provenance, a conservative photography-candidate analysis, and a server-only
-Xweather adapter for configured global radar/satellite/lightning coverage plus a searchable,
+Xweather bring-your-own-account adapter for global radar/satellite/lightning coverage plus a searchable,
 progressively disclosed catalog of 76 weather-relevant Xweather raster products.
 
 Visible products appear in a persistent **Active layer stack**. The top item renders in front;
@@ -33,24 +33,27 @@ safe chase routing, soundings or certified operational risk.
 - Server-side Weather gateway; official NWS API/GIS, MRMS, RIDGE II, nowCOAST, NASA EOSDIS GIBS and
   Aviation Weather Center adapters; public MET Norway Locationforecast adapter; and Turf geometry
   already used by LandDraft.
-- No new runtime package and no database migration in Phase 1.
+- No new runtime package. The additive `weather_provider_connections` migration stores only
+  AES-GCM ciphertext and non-secret connection status under per-user RLS.
 - Server-side test telemetry counts logical provider requests, successes, failures and cache hits;
   it deliberately leaves unknown data volume and provider cost as `null` rather than inventing a
   price.
-- Xweather requires separate `XWEATHER_CLIENT_ID` and `XWEATHER_CLIENT_SECRET` Worker secrets in
-  preview and production. Its tiles are proxied through same-origin LandDraft routes so credentials
-  never enter the browser bundle or public tile URL.
+- Xweather requires each user to connect their own client ID and secret. The Worker requires one
+  `XWEATHER_CREDENTIAL_ENCRYPTION_KEY`, verifies the LandDraft session, decrypts only the requesting
+  user's record and proxies same-origin tiles. Provider credentials never enter the browser bundle
+  or public tile URL. Legacy shared Xweather deployment credentials are not used.
 - Future providers may require Cloudflare cache/object storage/queues, PostGIS, licensed feeds and
   additional server-side environment variables.
 
 ## Potential operating costs
 
 - Public data still creates server compute, bandwidth, caching and monitoring costs.
-- Xweather global radar/satellite/lightning uses access-based PAYG metering. The current account
-  includes 15,000 free accesses per month, but interactive tiles and animation can consume multiple
-  accesses per view. Air-quality products may count at 5× and detailed lightning products at 10×;
-  the layer card discloses that multiplier. No payment method or LandDraft pricing decision is part
-  of this increment.
+- Xweather global radar/satellite/lightning uses access-based PAYG metering on each connected user's
+  Xweather account. The current public terms include 15,000 free accesses per account each month,
+  but interactive tiles and animation can consume multiple accesses per view. Air-quality products
+  may count at 5× and detailed lightning products at 10×; the layer card discloses that multiplier.
+  LandDraft still incurs ordinary authentication, database and Worker traffic; pricing remains
+  undecided.
 - Exact lightning strike APIs and commercial forecast redistribution may require additional
   contracts. MET Norway requires attribution and appropriate request identification/rates.
 - Radar/satellite/model processing drives compute, object storage and egress.
@@ -62,15 +65,17 @@ safe chase routing, soundings or certified operational risk.
 - Shared frontend state, navigation and route tree are touched.
 - Capability ids are declared, but no subscription, plan, price, paywall, admin permission or
   production setting is created.
-- Future organization capability overrides, provider credentials, usage metering and schema/RLS are
-  pending coordination with administration/billing before merge.
+- Per-user Xweather credentials are an additive, non-entitlement connection setting. Future
+  organization-managed connections, capability overrides, durable usage metering and billing remain
+  pending administration/billing coordination before merge.
 - Phase 1 telemetry is in-memory and not user/org attributed. Durable metering requires the pending
   coordinated schema and privacy review.
 
 ## Security and privacy
 
-- Provider keys stay server-side. Commercial tile requests use a validated same-origin proxy and
-  only normalized metadata plus LandDraft URLs reach clients.
+- Provider keys are encrypted server-side with AES-GCM and authenticated additional data bound to
+  the LandDraft user. Commercial tile requests require the user's Supabase bearer token and use a
+  validated same-origin proxy; only normalized metadata plus LandDraft URLs reach clients.
 - Phase 1 creates Weather display preferences in the existing project snapshot only after the
   workspace is opened and stores no continuous GPS trail.
 - Provider errors, inputs, cache keys and source references are sanitized and bounded.
@@ -95,4 +100,6 @@ safe chase routing, soundings or certified operational risk.
 - Provider setup/connection status is visible and missing feeds say `Unavailable`, never fake data.
 - Xweather products are searchable across categories; only enabled products load, and active products
   use the existing draggable layer stack for ordering.
+- **Connect Xweather** in the layer/source panels supports test-and-save, masked status, credential
+  replacement and disconnect. Public NOAA layers remain available without an Xweather account.
 - Rollback: `landdraft-stable-2026-09-10`.

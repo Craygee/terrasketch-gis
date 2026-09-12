@@ -18,10 +18,12 @@ function validatePoint(input: unknown): WeatherPointRequest {
         )
         .slice(0, 30)
     : undefined;
+  const xweatherConnected = value["xweatherConnected"] === true;
   return {
     latitude,
     longitude,
     ...(requestedLayerIds?.length ? { requestedLayerIds } : {}),
+    ...(xweatherConnected ? { xweatherConnected: true } : {}),
   };
 }
 

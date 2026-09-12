@@ -7,6 +7,10 @@ Phase 1.1 provider increment connects vetted public official raster/API sources,
 failover, global point-model fallback, METAR stations and conservative photography candidates. It
 does not add schema, billing, entitlements, admin permissions or production infrastructure.
 
+Phase 1.3 adds an additive test-only bring-your-own-Xweather connection: per-user AES-GCM encrypted
+credentials, RLS persistence, authenticated same-origin tile delivery, connection management and no
+shared LandDraft Xweather billing fallback. It does not add a plan, price, entitlement or payment.
+
 ## Existing architecture findings
 
 - LandDraft is a TanStack Start/React application with file routes, an authenticated root shell,

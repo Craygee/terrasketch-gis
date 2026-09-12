@@ -7,8 +7,7 @@ import type {
   WeatherTemporalKind,
 } from "./types.ts";
 import { XWEATHER_ADDITIONAL_LAYERS } from "./xweatherCatalog.ts";
-
-type XweatherBindings = Record<string, unknown>;
+import { resolveUserXweatherCredentials } from "./xweatherConnection.server.ts";
 
 type XweatherRasterLayer = {
   providerLayer: string;
@@ -21,12 +20,6 @@ type XweatherRasterLayer = {
   offsets?: string[];
   costMultiplier: number;
 };
-
-const processEnv = (
-  globalThis as typeof globalThis & {
-    process?: { env?: Record<string, string | undefined> };
-  }
-).process?.env;
 
 const XWEATHER_RASTER_LAYERS: Record<string, XweatherRasterLayer> = {
   "radar-global": {
@@ -154,25 +147,6 @@ type XweatherRuntimeStatus = {
 
 const runtimeStatus: XweatherRuntimeStatus = {};
 
-function bindingValue(bindings: unknown, name: string) {
-  if (!bindings || typeof bindings !== "object") return undefined;
-  const value = (bindings as XweatherBindings)[name];
-  return typeof value === "string" && value.trim() ? value.trim() : undefined;
-}
-
-export function xweatherCredentials(bindings?: unknown) {
-  const clientId =
-    bindingValue(bindings, "XWEATHER_CLIENT_ID") ?? processEnv?.["XWEATHER_CLIENT_ID"];
-  const clientSecret =
-    bindingValue(bindings, "XWEATHER_CLIENT_SECRET") ?? processEnv?.["XWEATHER_CLIENT_SECRET"];
-  if (!clientId?.trim() || !clientSecret?.trim()) return null;
-  return { clientId: clientId.trim(), clientSecret: clientSecret.trim() };
-}
-
-export function xweatherConfigured(bindings?: unknown) {
-  return Boolean(xweatherCredentials(bindings));
-}
-
 function frameOffsets(layer: XweatherRasterLayer) {
   if (layer.offsets?.length) return layer.offsets;
   return Array.from({ length: layer.maxFrames }, (_, index) =>
@@ -220,7 +194,7 @@ export function xweatherRasterFramesFor(
   request: WeatherPointRequest,
   now = new Date(),
 ): WeatherRasterFrame[] {
-  if (!xweatherConfigured()) return [];
+  if (!request.xweatherConnected) return [];
   const requested = new Set(request.requestedLayerIds ?? []);
   return Object.entries(LANDDRAFT_XWEATHER_LAYERS).flatMap(([layerId, mapping]) => {
     if (!requested.has(layerId)) return [];
@@ -240,8 +214,8 @@ export function xweatherRasterFramesFor(
   });
 }
 
-export function xweatherRadarFrames(now = new Date()): RadarFrame[] {
-  if (!xweatherConfigured()) return [];
+export function xweatherRadarFrames(now = new Date(), connected = false): RadarFrame[] {
+  if (!connected) return [];
   const layer = XWEATHER_RASTER_LAYERS["radar-global"]!;
   return frameOffsets(layer).map((offset) => {
     const timestamp = offsetTime(offset, now);
@@ -255,9 +229,8 @@ export function xweatherRadarFrames(now = new Date()): RadarFrame[] {
   });
 }
 
-export function xweatherProviderHealth(): WeatherProviderHealth {
-  const configured = xweatherConfigured();
-  const status = !configured
+export function xweatherProviderHealth(connected = false): WeatherProviderHealth {
+  const status = !connected
     ? "not-configured"
     : runtimeStatus.lastSuccess
       ? "up"
@@ -279,8 +252,8 @@ export function xweatherProviderHealth(): WeatherProviderHealth {
     coverage: "Global with product-specific regional limitations",
     ...(runtimeStatus.latencyMs !== undefined ? { latencyMs: runtimeStatus.latencyMs } : {}),
     ...(runtimeStatus.lastSuccess ? { lastSuccessfulRequest: runtimeStatus.lastSuccess } : {}),
-    ...(!configured
-      ? { error: "Preview/production Xweather credentials are not configured" }
+    ...(!connected
+      ? { error: "Connect your own Xweather account to use these optional products" }
       : runtimeStatus.lastError
         ? { error: runtimeStatus.lastError }
         : !runtimeStatus.lastSuccess
@@ -349,8 +322,9 @@ export async function handleXweatherTileProxy(request: Request, bindings?: unkno
   const parts = tileRequestParts(url);
   if (!parts) return plainResponse("Invalid weather tile request", 400);
   if (!sameOriginBrowserRequest(request, url)) return plainResponse("Forbidden", 403);
-  const credentials = xweatherCredentials(bindings);
-  if (!credentials) return plainResponse("Weather provider is not configured", 503);
+  const credentials = await resolveUserXweatherCredentials(request, bindings);
+  if (!credentials)
+    return plainResponse("Connect your Xweather account to use this weather product", 401);
 
   const credentialPath = `${credentials.clientId}_${credentials.clientSecret}`;
   const upstreamUrl =
@@ -381,7 +355,7 @@ export async function handleXweatherTileProxy(request: Request, bindings?: unkno
     headers.set("content-type", contentType);
     headers.set(
       "cache-control",
-      `public, max-age=${parts.layer.cacheSeconds}, s-maxage=${parts.layer.cacheSeconds}, stale-while-revalidate=60`,
+      `private, max-age=${parts.layer.cacheSeconds}, stale-while-revalidate=60`,
     );
     headers.set("x-landdraft-weather-provider", "xweather-raster");
     headers.set("x-landdraft-weather-cost-multiplier", String(parts.layer.costMultiplier));

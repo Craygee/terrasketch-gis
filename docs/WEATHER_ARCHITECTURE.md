@@ -68,6 +68,22 @@ Requests use product-specific timeouts and caches. A failure can fall back only 
 normalized product. Failed/stale/unavailable states are first-class responses. Old data retains its
 original timestamp and becomes `STALE`; it never becomes `LIVE` because a cache returned it.
 
+### User-owned Xweather connection
+
+Optional Xweather products use a bring-your-own-account boundary rather than a shared LandDraft
+provider credential. The browser sends the client ID and secret once over HTTPS to the same-origin
+Worker. The Worker authenticates the Supabase session, validates the credential with Xweather,
+encrypts the pair with AES-GCM and user-bound authenticated data, and writes only ciphertext plus a
+masked hint/status to `weather_provider_connections` under per-user RLS.
+
+MapLibre attaches the current LandDraft bearer token only to same-origin Xweather tile URLs. The
+Worker validates or briefly caches that authorization, reads the requesting user's ciphertext,
+decrypts it in memory and calls Xweather. Tiles use private browser caching; LandDraft does not
+cross-cache one user's provider response for another user. Credential memory cache TTL is 30 seconds.
+Disconnect removes the persisted record. Provider-side key revocation remains the immediate kill
+switch. The client-supplied `xweatherConnected` bundle hint controls only whether tile descriptors
+are returned and is never an authorization decision; every tile is independently authenticated.
+
 ## Cache strategy
 
 | Product                          | Initial policy                                      |

@@ -1,14 +1,32 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { xweatherCredentials, xweatherTileTemplate } from "./xweather.server.ts";
+import { xweatherRasterFramesFor, xweatherTileTemplate } from "./xweather.server.ts";
 import { XWEATHER_ADDITIONAL_LAYERS } from "./xweatherCatalog.ts";
+import {
+  decryptXweatherCredentials,
+  encryptXweatherCredentials,
+} from "./xweatherConnection.server.ts";
 
-test("reads Xweather credentials only from server bindings", () => {
+test("returns commercial frames only after the user's connection is confirmed", () => {
+  const request = {
+    latitude: 31.9,
+    longitude: -102.1,
+    requestedLayerIds: ["weather.xweather.current.temperature"],
+  };
+  assert.equal(xweatherRasterFramesFor(request).length, 0);
+  assert.ok(xweatherRasterFramesFor({ ...request, xweatherConnected: true }).length > 0);
+});
+
+test("encrypts Xweather credentials for one user and rejects a different user", async () => {
+  const credentials = { clientId: "test-client", clientSecret: "test-secret" };
+  const encrypted = await encryptXweatherCredentials(credentials, "user-a", "test-master-key");
+  assert.equal(encrypted.includes(credentials.clientId), false);
+  assert.equal(encrypted.includes(credentials.clientSecret), false);
   assert.deepEqual(
-    xweatherCredentials({ XWEATHER_CLIENT_ID: "client", XWEATHER_CLIENT_SECRET: "secret" }),
-    { clientId: "client", clientSecret: "secret" },
+    await decryptXweatherCredentials(encrypted, "user-a", "test-master-key"),
+    credentials,
   );
-  assert.equal(xweatherCredentials({ XWEATHER_CLIENT_ID: "client" }), null);
+  await assert.rejects(decryptXweatherCredentials(encrypted, "user-b", "test-master-key"));
 });
 
 test("browser tile templates remain same-origin and contain no provider credential", () => {

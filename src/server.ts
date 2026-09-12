@@ -4,6 +4,7 @@ import { LANDDRAFT_APP_CHANNEL } from "./lib/appVersion";
 import { consumeLastCapturedError } from "./lib/error-capture";
 import { renderErrorPage } from "./lib/error-page";
 import { handleXweatherTileProxy } from "./lib/weather/xweather.server";
+import { handleXweatherConnection } from "./lib/weather/xweatherConnection.server";
 
 type ServerEntry = {
   fetch: (request: Request, env: unknown, ctx: unknown) => Promise<Response> | Response;
@@ -61,6 +62,8 @@ function applyEnvironmentHeaders(response: Response): Response {
 export default {
   async fetch(request: Request, env: unknown, ctx: unknown) {
     try {
+      const xweatherConnection = await handleXweatherConnection(request, env);
+      if (xweatherConnection) return applyEnvironmentHeaders(xweatherConnection);
       const weatherTile = await handleXweatherTileProxy(request, env);
       if (weatherTile) return applyEnvironmentHeaders(weatherTile);
       const handler = await getServerEntry();

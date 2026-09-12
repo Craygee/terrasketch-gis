@@ -256,6 +256,12 @@ export interface WeatherPointRequest {
   latitude: number;
   longitude: number;
   requestedLayerIds?: string[] | undefined;
+  /**
+   * Client capability hint used only to decide whether to return commercial
+   * tile descriptors. The tile proxy independently authenticates the user and
+   * resolves their encrypted provider credentials before every upstream call.
+   */
+  xweatherConnected?: boolean | undefined;
 }
 
 export interface WeatherBundle {

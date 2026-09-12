@@ -4,8 +4,9 @@ This file is the durable handoff for future LandDraft Weather sessions.
 
 ## Current phase
 
-Phase 1.2 provider foundation is implemented on `feature/test-module-development`. The module is optional,
-test-only, schema-free, and does not change billing, plans, production infrastructure or backups.
+Phase 1.3 provider foundation is implemented on `feature/test-module-development`. The module is optional,
+test-only, and does not change billing, plans, production infrastructure or backups. One additive
+per-user RLS table supports encrypted bring-your-own Xweather credentials.
 
 Implemented entry point: `/weather`.
 
@@ -39,7 +40,7 @@ Read first:
 ## Next disciplined increments
 
 1. Validate Phase 1 in the public test deployment across desktop, tablet and phone viewports.
-2. Validate the searchable 76-product Xweather raster catalog under preview credentials, measure
+2. Validate the searchable 76-product Xweather raster catalog with a user-connected test account, measure
    actual 1×/5×/10× tile usage and confirm redistribution/attribution terms before production release.
 3. Add severe event normalization/cards without algorithmically upgrading possible rotation to a
    confirmed tornado.
@@ -75,9 +76,10 @@ Read first:
   connected through EOSDIS GIBS; it is a daily orbital product and may contain pass gaps.
 - The Xweather Raster Maps adapter is implemented for global radar, GeoColor/infrared/water-vapor
   satellite and a 76-product weather-relevant catalog spanning conditions, wind, forecasts, severe,
-  lightning, air quality, fire, maritime, tropical and outlooks. It requires separate preview and production
-  `XWEATHER_CLIENT_ID` / `XWEATHER_CLIENT_SECRET` Worker secrets. NOAA remains primary for U.S.
-  radar, and the commercial key is never embedded in a browser URL or frontend bundle.
+  lightning, air quality, fire, maritime, tropical and outlooks. Each user connects their own
+  Xweather application; its client ID/secret is encrypted server-side and never embedded in a browser
+  URL or frontend bundle. The Worker needs `XWEATHER_CREDENTIAL_ENCRYPTION_KEY`, and deployments
+  sharing Supabase must share that encryption key. NOAA remains primary for U.S. radar.
 - Individual raw lightning strikes, additional professional radar moments (including storm-relative
   velocity, correlation coefficient and differential reflectivity), upper-air/convective grids,
   soundings, storm objects, historical archives and commercial global radar remain unconfigured.

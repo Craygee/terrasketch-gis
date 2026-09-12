@@ -24,7 +24,6 @@ import { loadMetNorwayPoint } from "./metNorway.server";
 import { buildPhotographyAssessment } from "./photography.server";
 import { nearestWeatherRadarSite, type WeatherRadarSite } from "./radar";
 import {
-  xweatherConfigured,
   xweatherProviderHealth,
   xweatherRadarFrames,
   xweatherRasterFramesFor,
@@ -738,7 +737,7 @@ function satelliteSpec(
 function rasterSpecsFor(request: WeatherPointRequest) {
   const requested = new Set(request.requestedLayerIds ?? []);
   const specs: WmsRasterSpec[] = [];
-  const useXweather = xweatherConfigured();
+  const useXweather = request.xweatherConnected === true;
   for (const layerId of requested) {
     const registered = WMS_LAYER_SPECS[layerId];
     if (registered && (registered.coverageKind === "global" || withinConus(request)))
@@ -1332,8 +1331,8 @@ export async function loadWeatherBundle(request: WeatherPointRequest): Promise<W
               }),
             );
           } catch (fallbackError) {
-            if (xweatherConfigured()) {
-              radarFrames = xweatherRadarFrames();
+            if (request.xweatherConnected) {
+              radarFrames = xweatherRadarFrames(new Date(), true);
               warnings.push(
                 "Official U.S. radar services were unavailable; LandDraft switched to Xweather global radar.",
               );
@@ -1354,8 +1353,8 @@ export async function loadWeatherBundle(request: WeatherPointRequest): Promise<W
           }
         }
       } else {
-        if (xweatherConfigured()) {
-          radarFrames = xweatherRadarFrames();
+        if (request.xweatherConnected) {
+          radarFrames = xweatherRadarFrames(new Date(), true);
         } else {
           providerHealth.push(
             health({
@@ -1425,7 +1424,7 @@ export async function loadWeatherBundle(request: WeatherPointRequest): Promise<W
       radarFrames.some((frame) => frame.source.providerId === "xweather-raster") ||
       [...requestedLayers].some((id) => id.startsWith("weather.xweather."))
     )
-      providerHealth.push(xweatherProviderHealth());
+      providerHealth.push(xweatherProviderHealth(request.xweatherConnected === true));
 
     if (requestedLayers.has("weather.metar")) {
       try {

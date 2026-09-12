@@ -53,40 +53,55 @@ adapter. Setup is an engineering and licensing task, not an end-user URL field:
 - Database/provider-status migrations, organization controls, billing and production infrastructure
   require administration/billing coordination before merge.
 
-## Xweather commercial adapter
+## Xweather bring-your-own-account adapter
 
 LandDraft now includes a server-only Xweather Raster Maps adapter for its weather-relevant catalog.
 The professional-layer drawer offers 76 verified product choices across radar, current conditions,
 wind, forecasts, severe weather, lightning, air quality, fire, maritime, tropical and CPC outlooks.
 Xweather base maps, masks and administrative overlays are deliberately excluded because LandDraft
 already supplies those as ordinary GIS layers. Browser clients receive only a same-origin LandDraft
-tile URL. The Xweather client ID and secret are added by the Worker and are never returned to the
-browser, committed to Git or embedded in a frontend bundle.
+tile URL. Each signed-in user connects an Xweather application and its allowance/charges remain on
+that Xweather account. LandDraft never requests the user's Xweather password.
 
-Required deployment secrets in each environment:
+The client ID and secret travel once over HTTPS to the LandDraft Worker, are tested against Xweather,
+and are AES-GCM encrypted before storage in `weather_provider_connections`. The ciphertext is bound
+to the LandDraft user ID. MapLibre adds the user's existing Supabase access token to same-origin
+Xweather tile requests; the Worker verifies that session, decrypts only that user's credentials and
+proxies the upstream tile. Provider credentials are never returned to the browser, committed to Git,
+embedded in a frontend bundle, placed in a public tile URL or written to logs.
+
+Required server-only deployment secret:
 
 ```text
-XWEATHER_CLIENT_ID
-XWEATHER_CLIENT_SECRET
+XWEATHER_CREDENTIAL_ENCRYPTION_KEY
 ```
 
-Preview and production must use separate keys so either environment can be revoked independently.
-Restrict each key to its actual deployment domain after confirming server-proxy requests remain
-accepted. The preview key belongs only on the `landdraft-preview` Worker. Production credentials are
-added separately during the coordinated release; they do not transfer through Git.
+Deployments sharing the same Supabase project must receive the same encryption key so a user's
+connection works after promotion. The key is infrastructure configuration, does not enter Git, and
+must be backed up in the approved secret manager before production. Apply
+`202609110001_user_weather_connections.sql` before enabling the connection UI. The legacy shared
+`XWEATHER_CLIENT_ID` and `XWEATHER_CLIENT_SECRET` bindings are no longer read by the Weather runtime.
+
+Users create an Xweather application and include both `landdraft.net` and the preview hostname in its
+namespace list if they want one connection to work in both environments. They can test, replace and
+disconnect credentials from **Weather → Data sources**. Disconnect invalidates the UI immediately;
+already-authorized Worker isolates may retain the encrypted credential in memory for at most 30
+seconds. Revoking the application in Xweather is the immediate provider-side kill switch.
 
 Cost controls in this increment:
 
-- NOAA remains the free primary U.S. radar source; Xweather is the global/outage fallback.
+- NOAA remains the free primary U.S. radar source. Xweather is used only after the current LandDraft
+  user connects their own Xweather application; there is no site-owner paid fallback.
 - Provider tiles are requested only for active layers and the visible viewport.
-- Xweather imagery uses product-specific browser/CDN cache headers.
+- Xweather imagery uses private product-specific browser cache headers so one user's paid response is
+  not served as another user's provider usage.
 - Satellite and radar histories are short; 5× and 10× products start with one current frame.
 - Every catalog card shows provider coverage and access multiplier; all new entries stay behind
   Professional layers unless found through the search box.
-- Xweather usage remains separately visible in the provider portal and LandDraft provider health.
-- No payment method should be added until an explicit operating budget and alert threshold are
-  approved. At the current PAYG terms, the first 15,000 accesses per month are free; usage beyond
-  that amount may become billable if a payment method is later enabled.
+- Xweather usage remains visible in each connected user's provider portal and LandDraft provider
+  health. At the current PAYG terms, the first 15,000 accesses per account each month are free;
+  usage beyond that amount belongs to that account and may become billable if its owner enables
+  billing.
 
 ## Adapter checklist
 
