@@ -7,6 +7,7 @@ import type {
   RadarFrame,
   WeatherAlert,
   WeatherBundle,
+  WeatherChaserPosition,
   WeatherRasterFrame,
   WeatherStationObservation,
   StormObject,
@@ -56,6 +57,10 @@ const STORM_FORECAST_ICON = "landdraft-weather-storm-forecast-icon";
 const STORM_FORECAST_LABEL = "landdraft-weather-storm-forecast-label";
 const CHASER_SOURCE = "landdraft-weather-chaser-location";
 const CHASER_CIRCLE = "landdraft-weather-chaser-location-circle";
+const COMMUNITY_CHASER_SOURCE = "landdraft-weather-community-chasers";
+const COMMUNITY_CHASER_CLUSTER = "landdraft-weather-community-chaser-cluster";
+const COMMUNITY_CHASER_CLUSTER_COUNT = "landdraft-weather-community-chaser-cluster-count";
+const COMMUNITY_CHASER_POINT = "landdraft-weather-community-chaser-point";
 const NAVIGATION_TARGET_SOURCE = "landdraft-weather-navigation-target";
 const NAVIGATION_TARGET_CIRCLE = "landdraft-weather-navigation-target-circle";
 const NAVIGATION_TARGET_LABEL = "landdraft-weather-navigation-target-label";
@@ -190,6 +195,20 @@ function stationCollection(stations: WeatherStationObservation[]): FeatureCollec
         id: station.id,
         stationId: station.stationId,
         category: station.flightCategory ?? "",
+      },
+    })),
+  };
+}
+
+function communityChaserCollection(positions: WeatherChaserPosition[]): FeatureCollection<Point> {
+  return {
+    type: "FeatureCollection",
+    features: positions.map((position) => ({
+      ...position.location,
+      properties: {
+        id: position.id,
+        observedAt: position.observedAt,
+        motionStatus: position.motionStatus,
       },
     })),
   };
@@ -724,6 +743,54 @@ function ensureVectorLayers(map: MlMap) {
         "circle-stroke-width": 3,
       },
     });
+  if (!map.getSource(COMMUNITY_CHASER_SOURCE))
+    map.addSource(COMMUNITY_CHASER_SOURCE, {
+      type: "geojson",
+      data: communityChaserCollection([]),
+      cluster: true,
+      clusterMaxZoom: 10,
+      clusterRadius: 36,
+    });
+  if (!map.getLayer(COMMUNITY_CHASER_CLUSTER))
+    map.addLayer({
+      id: COMMUNITY_CHASER_CLUSTER,
+      type: "circle",
+      source: COMMUNITY_CHASER_SOURCE,
+      filter: ["has", "point_count"],
+      paint: {
+        "circle-radius": ["step", ["get", "point_count"], 13, 10, 17, 50, 21],
+        "circle-color": "#93c5fd",
+        "circle-opacity": 0.94,
+        "circle-stroke-color": "#ffffff",
+        "circle-stroke-width": 2,
+      },
+    });
+  if (!map.getLayer(COMMUNITY_CHASER_CLUSTER_COUNT))
+    map.addLayer({
+      id: COMMUNITY_CHASER_CLUSTER_COUNT,
+      type: "symbol",
+      source: COMMUNITY_CHASER_SOURCE,
+      filter: ["has", "point_count"],
+      layout: {
+        "text-field": ["get", "point_count_abbreviated"],
+        "text-size": 10,
+      },
+      paint: { "text-color": "#172554" },
+    });
+  if (!map.getLayer(COMMUNITY_CHASER_POINT))
+    map.addLayer({
+      id: COMMUNITY_CHASER_POINT,
+      type: "circle",
+      source: COMMUNITY_CHASER_SOURCE,
+      filter: ["!", ["has", "point_count"]],
+      paint: {
+        "circle-radius": 7,
+        "circle-color": ["case", ["==", ["get", "motionStatus"], "moving"], "#1d4ed8", "#2563eb"],
+        "circle-opacity": 0.92,
+        "circle-stroke-color": "#ffffff",
+        "circle-stroke-width": 2,
+      },
+    });
   if (!map.getSource(NAVIGATION_TARGET_SOURCE))
     map.addSource(NAVIGATION_TARGET_SOURCE, { type: "geojson", data: pointCollection(undefined) });
   if (!map.getLayer(NAVIGATION_TARGET_CIRCLE))
@@ -827,6 +894,8 @@ function renderedLayerIds(weatherLayerId: string) {
       STORM_LABEL,
     ];
   if (weatherLayerId === "weather.metar") return [STATION_CIRCLE, STATION_LABEL];
+  if (weatherLayerId === "weather.storm_chaser.spotters")
+    return [COMMUNITY_CHASER_CLUSTER, COMMUNITY_CHASER_CLUSTER_COUNT, COMMUNITY_CHASER_POINT];
   if (weatherLayerId === "weather.photo") return [PHOTO_CIRCLE, PHOTO_LABEL];
   if (weatherLayerId.startsWith("weather.")) return [rasterKey(weatherLayerId)];
   return [];
@@ -837,6 +906,7 @@ export function WeatherMapOverlay({
   workspace,
   onSelectAlert,
   onSelectStorm,
+  onSelectCommunityChaser,
   stormObjectsVisible = false,
   selectedStormId = null,
   forecastReferenceTime,
@@ -847,6 +917,7 @@ export function WeatherMapOverlay({
   workspace: WeatherWorkspaceState;
   onSelectAlert: (alert: WeatherAlert) => void;
   onSelectStorm: (storm: StormObject) => void;
+  onSelectCommunityChaser: (position: WeatherChaserPosition) => void;
   stormObjectsVisible?: boolean;
   selectedStormId?: string | null;
   forecastReferenceTime: string;
@@ -858,6 +929,9 @@ export function WeatherMapOverlay({
   const alertsVisible = Boolean(workspace.layerSettings["weather.severe.alerts"]?.visible);
   const stationsVisible = Boolean(workspace.layerSettings["weather.metar"]?.visible);
   const photographyVisible = Boolean(workspace.layerSettings["weather.photo"]?.visible);
+  const communityChasersVisible = Boolean(
+    workspace.layerSettings["weather.storm_chaser.spotters"]?.visible,
+  );
   const frame = radarVisible
     ? nearestFrame(bundle?.radarFrames ?? [], workspace.timeline.selectedTime)
     : undefined;
@@ -917,6 +991,9 @@ export function WeatherMapOverlay({
       (map.getSource(CHASER_SOURCE) as GeoJSONSource | undefined)?.setData(
         pointCollection(chaserLocation),
       );
+      (map.getSource(COMMUNITY_CHASER_SOURCE) as GeoJSONSource | undefined)?.setData(
+        communityChaserCollection(communityChasersVisible ? (bundle?.chaserPositions ?? []) : []),
+      );
       (map.getSource(NAVIGATION_TARGET_SOURCE) as GeoJSONSource | undefined)?.setData(
         pointCollection(navigationTarget),
       );
@@ -938,6 +1015,13 @@ export function WeatherMapOverlay({
           "fill-opacity",
           (workspace.layerSettings["weather.severe.intelligence"]?.opacity ?? 0.72) * 0.22,
         );
+      for (const id of [COMMUNITY_CHASER_CLUSTER, COMMUNITY_CHASER_POINT])
+        if (map.getLayer(id))
+          map.setPaintProperty(
+            id,
+            "circle-opacity",
+            workspace.layerSettings["weather.storm_chaser.spotters"]?.opacity ?? 0.92,
+          );
       const orderedLayers = [...workspace.layerOrder]
         .reverse()
         .filter((id) => workspace.layerSettings[id]?.visible)
@@ -961,6 +1045,9 @@ export function WeatherMapOverlay({
         STORM_CIRCLE,
         STORM_ICON,
         STORM_LABEL,
+        COMMUNITY_CHASER_CLUSTER,
+        COMMUNITY_CHASER_CLUSTER_COUNT,
+        COMMUNITY_CHASER_POINT,
         CHASER_CIRCLE,
         NAVIGATION_TARGET_CIRCLE,
         NAVIGATION_TARGET_LABEL,
@@ -983,6 +1070,7 @@ export function WeatherMapOverlay({
     selectedStormId,
     forecastReferenceTime,
     chaserLocation,
+    communityChasersVisible,
     navigationTarget,
     workspace.lastInspectionPoint,
     workspace.layerOrder,
@@ -1000,6 +1088,8 @@ export function WeatherMapOverlay({
           STORM_FORECAST_ICON,
           STORM_FORECAST_POINT,
           STORM_AREA_FILL,
+          COMMUNITY_CHASER_CLUSTER,
+          COMMUNITY_CHASER_POINT,
           ALERT_FILL,
         ].filter((id) => map.getLayer(id)),
       })[0];
@@ -1010,6 +1100,28 @@ export function WeatherMapOverlay({
         feature?.layer.id === STORM_FORECAST_POINT ||
         feature?.layer.id === STORM_AREA_FILL;
       const id = String(feature?.properties?.["id"] ?? "");
+      if (feature?.layer.id === COMMUNITY_CHASER_CLUSTER) {
+        const clusterId = Number(feature.properties?.["cluster_id"]);
+        const coordinates =
+          feature.geometry.type === "Point"
+            ? (feature.geometry.coordinates as [number, number])
+            : undefined;
+        const source = map.getSource(COMMUNITY_CHASER_SOURCE) as GeoJSONSource | undefined;
+        if (source && Number.isFinite(clusterId) && coordinates)
+          void source.getClusterExpansionZoom(clusterId).then((zoom) => {
+            map.easeTo({ center: coordinates, zoom, duration: 500, essential: true });
+          });
+        event.originalEvent.stopPropagation();
+        return;
+      }
+      if (feature?.layer.id === COMMUNITY_CHASER_POINT) {
+        const position = bundle?.chaserPositions.find((item) => item.id === id);
+        if (position) {
+          event.originalEvent.stopPropagation();
+          onSelectCommunityChaser(position);
+          return;
+        }
+      }
       if (isStormFeature) {
         const storm = bundle?.stormObjects.find((item) => item.id === id);
         if (storm) {
@@ -1025,7 +1137,15 @@ export function WeatherMapOverlay({
     return () => {
       map.off("click", select);
     };
-  }, [bundle?.alerts, bundle?.stormObjects, map, onSelectAlert, onSelectStorm]);
+  }, [
+    bundle?.alerts,
+    bundle?.chaserPositions,
+    bundle?.stormObjects,
+    map,
+    onSelectAlert,
+    onSelectCommunityChaser,
+    onSelectStorm,
+  ]);
 
   return null;
 }

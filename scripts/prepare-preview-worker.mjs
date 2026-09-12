@@ -32,6 +32,13 @@ const config = JSON.parse(await readFile(configUrl, "utf8"));
 config.name = workerName;
 config.workers_dev = true;
 config.preview_urls = true;
+config.vars = {
+  ...(config.vars ?? {}),
+  // The published Spotter Network position feed is non-commercial. This flag
+  // is deliberately added only by the isolated preview-deployment guard and
+  // must not be copied into production without provider permission.
+  SPOTTER_NETWORK_NONCOMMERCIAL_FEED_ENABLED: "true",
+};
 
 await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
 

@@ -125,6 +125,30 @@ Before a provider changes from `SETUP REQUIRED` to available:
 7. Simulate primary-provider failure and verify that stale data cannot say `LIVE`.
 8. Test desktop, tablet and narrow mobile layouts before promoting.
 
+## Spotter Network evaluation adapter
+
+LandDraft includes a server-side, privacy-minimized adapter for Spotter Network's trained-member
+position feed. The official feed page marks the feed **non-commercial use only** and tells
+application developers to contact Spotter Network. Therefore this integration must not be enabled
+in a commercial or production deployment until written provider permission and any attribution,
+caching, redistribution and cost terms are recorded.
+
+Test/evaluation configuration:
+
+```text
+SPOTTER_NETWORK_NONCOMMERCIAL_FEED_ENABLED=true
+SPOTTER_NETWORK_POSITION_FEED_URL=https://www.spotternetwork.org/feeds/gr-no.txt
+```
+
+The URL is restricted in code to the official HTTPS Spotter Network host. Even the no-name feed can
+contain voluntary identity/contact text. LandDraft parses only coordinates, position time and a
+basic moving/stationary state, then discards the rest before caching. Positions older than 30
+minutes are rejected, results are limited to 500 positions within 800 km of the inspected point,
+and the browser never receives the upstream raw feed.
+
+Potential operating cost is currently provider-permission/licensing work plus Worker requests and
+bandwidth; pricing remains undecided. Production activation must be coordinated before merge.
+
 ## Connected in the September 11 public-provider increment
 
 - **Base reflectivity**, **base radial velocity** and **hydrometeor classification** use NOAA's

@@ -62,9 +62,11 @@ import {
 } from "@/lib/weather/stormIntelligence";
 import type {
   StormObject,
+  StormHazardKind,
   StormRelativePosition,
   WeatherAlert,
   WeatherBundle,
+  WeatherChaserPosition,
   WeatherLayerSetting,
   WeatherTimelineState,
   WeatherWorkspaceState,
@@ -121,6 +123,7 @@ const CONNECTED_LAYERS = new Set([
   "weather.lightning.recent",
   "weather.severe.alerts",
   "weather.severe.intelligence",
+  "weather.storm_chaser.spotters",
   "weather.forecast.precipitation",
   "weather.surface",
   "weather.metar",
@@ -211,6 +214,8 @@ export function WeatherWorkspace() {
   const [advancedLayers, setAdvancedLayers] = useState(false);
   const [selectedAlert, setSelectedAlert] = useState<WeatherAlert | null>(null);
   const [selectedStormId, setSelectedStormId] = useState<string | null>(null);
+  const [selectedCommunityChaser, setSelectedCommunityChaser] =
+    useState<WeatherChaserPosition | null>(null);
   const [workspaceView, setWorkspaceView] = useState<WorkspaceView>(initialWorkspaceView);
   const [chaseActive, setChaseActive] = useState(false);
   const [chaseFollow, setChaseFollow] = useState(true);
@@ -342,6 +347,23 @@ export function WeatherWorkspace() {
     xweatherConnection.lastTestedAt,
     xweatherConnection.state,
   ]);
+
+  useEffect(() => {
+    if (!wb.projectReady || workspaceView !== "storm-chaser") return;
+    const timer = window.setInterval(() => {
+      void loadPoint(workspace.lastInspectionPoint ?? wb.mapView.center, true);
+    }, 60_000);
+    return () => window.clearInterval(timer);
+  }, [loadPoint, wb.mapView.center, wb.projectReady, workspace.lastInspectionPoint, workspaceView]);
+
+  useEffect(() => {
+    if (
+      selectedCommunityChaser &&
+      bundle &&
+      !bundle.chaserPositions.some((position) => position.id === selectedCommunityChaser.id)
+    )
+      setSelectedCommunityChaser(null);
+  }, [bundle, selectedCommunityChaser]);
 
   useEffect(() => {
     if (!map || (!workspace.inspectorEnabled && !navigationTargetMode)) return;
@@ -486,22 +508,18 @@ export function WeatherWorkspace() {
       setWorkspaceView(view);
       if (view === "weather") return;
       setAdvancedLayers(true);
-      const workspaceLayerId =
+      const workspaceLayerIds =
         view === "photography"
-          ? "weather.photo"
+          ? ["weather.photo"]
           : view === "storm-chaser"
-            ? "weather.severe.intelligence"
-            : null;
-      const workspaceLayerSetting = workspaceLayerId
-        ? workspace.layerSettings[workspaceLayerId]
-        : undefined;
-      const layerSettings =
-        workspaceLayerId && workspaceLayerSetting
-          ? {
-              ...workspace.layerSettings,
-              [workspaceLayerId]: { ...workspaceLayerSetting, visible: true },
-            }
-          : workspace.layerSettings;
+            ? ["weather.severe.intelligence", "weather.storm_chaser.spotters"]
+            : [];
+      const layerSettings = { ...workspace.layerSettings };
+      for (const workspaceLayerId of workspaceLayerIds) {
+        const workspaceLayerSetting = layerSettings[workspaceLayerId];
+        if (workspaceLayerSetting)
+          layerSettings[workspaceLayerId] = { ...workspaceLayerSetting, visible: true };
+      }
       updateWorkspace({
         selectedCategory:
           view === "meteorology"
@@ -511,11 +529,11 @@ export function WeatherWorkspace() {
               : "Photography",
         layerSettings,
       });
-      if (workspaceLayerId)
+      if (workspaceLayerIds.length)
         void loadPoint(
           workspace.lastInspectionPoint ?? wb.mapView.center,
           false,
-          Array.from(new Set([...requestedLayerIds, workspaceLayerId])),
+          Array.from(new Set([...requestedLayerIds, ...workspaceLayerIds])),
         );
     },
     [loadPoint, requestedLayerIds, updateWorkspace, wb.mapView.center, workspace],
@@ -787,6 +805,13 @@ export function WeatherWorkspace() {
                 setSelectedStormId(storm?.id ?? null);
               }}
               onSelectStorm={selectStorm}
+              onSelectCommunityChaser={(position) => {
+                setSelectedCommunityChaser(position);
+                toast.info("Community spotter position", {
+                  description: `Updated ${weatherAgeLabel(position.source)} · identity withheld`,
+                });
+                if (window.innerWidth < 1024) setMobileSheet("weather");
+              }}
               stormObjectsVisible={
                 workspaceView === "storm-chaser" &&
                 Boolean(workspace.layerSettings["weather.severe.intelligence"]?.visible)
@@ -933,6 +958,8 @@ export function WeatherWorkspace() {
                   ) : workspaceView === "storm-chaser" ? (
                     <StormChaserPanel
                       storms={bundle?.stormObjects ?? []}
+                      communityChasers={bundle?.chaserPositions ?? []}
+                      selectedCommunityChaser={selectedCommunityChaser}
                       activeStorm={activeStorm}
                       activeAlert={activeAlert}
                       forecastTiming={activeStormForecast}
@@ -998,6 +1025,8 @@ export function WeatherWorkspace() {
             {workspaceView === "storm-chaser" ? (
               <StormChaserPanel
                 storms={bundle?.stormObjects ?? []}
+                communityChasers={bundle?.chaserPositions ?? []}
+                selectedCommunityChaser={selectedCommunityChaser}
                 activeStorm={activeStorm}
                 activeAlert={activeAlert}
                 forecastTiming={activeStormForecast}
@@ -1158,10 +1187,20 @@ function WeatherLayerPanel({
               ? hasRaster || bundle?.current?.windSpeedMS !== undefined
               : id === "weather.metar"
                 ? Boolean(bundle?.stationObservations.length)
-                : id === "weather.photo"
-                  ? Boolean(bundle?.photography)
-                  : hasRaster;
+                : id === "weather.storm_chaser.spotters"
+                  ? Boolean(bundle?.chaserPositions.length)
+                  : id === "weather.photo"
+                    ? Boolean(bundle?.photography)
+                    : hasRaster;
     if (available) return { ready: true, label: "AVAILABLE" };
+    if (id === "weather.storm_chaser.spotters") {
+      const provider = bundle?.providerHealth.find(
+        (item) => item.providerId === "spotter-network-evaluation",
+      );
+      if (provider?.status === "not-configured")
+        return { ready: false, label: "PROVIDER PERMISSION REQUIRED" };
+      if (provider?.status === "down") return { ready: false, label: "CONNECTION ERROR" };
+    }
     const registered = weatherLayerRegistry.find((layer) => layer.id === id);
     const hasConnectedProvider = registered?.providerProducts.some((product) =>
       product.startsWith("xweather:"),
@@ -1546,12 +1585,51 @@ const stormTrendLabel = {
   unknown: "trend unavailable",
 } as const;
 
+type StormPotentialFilter = "all" | StormHazardKind;
+type StormSortMode = "selected-potential" | "overall-potential" | "newest";
+
+const stormPotentialOptions: Array<{ id: StormPotentialFilter; name: string }> = [
+  { id: "all", name: "All storm potential" },
+  { id: "tornado", name: "Tornado potential" },
+  { id: "hail", name: "Hail potential" },
+  { id: "wind", name: "Wind potential" },
+  { id: "flood", name: "Flood potential" },
+  { id: "lightning", name: "Lightning potential" },
+];
+
 function stormMaximumProbability(storm: StormObject) {
   return Math.max(
     storm.hazards.tornado.probabilityPct ?? 0,
     storm.hazards.hail.probabilityPct ?? 0,
     storm.hazards.wind.probabilityPct ?? 0,
   );
+}
+
+function stormPrimaryPotential(storm: StormObject, filter: StormPotentialFilter) {
+  const hazards = filter === "all" ? Object.values(storm.hazards) : [storm.hazards[filter]];
+  return [...hazards].sort(
+    (left, right) =>
+      (right.probabilityPct ?? right.score ?? -1) - (left.probabilityPct ?? left.score ?? -1),
+  )[0]!;
+}
+
+function stormPriorityIndex(storm: StormObject, filter: StormPotentialFilter) {
+  const hazard = stormPrimaryPotential(storm, filter);
+  const base = hazard.probabilityPct ?? hazard.score;
+  if (base === null) return hazard.status === "official-context" ? 50 : null;
+  const confidenceFactor =
+    hazard.confidence === "high"
+      ? 1
+      : hazard.confidence === "moderate"
+        ? 0.95
+        : hazard.confidence === "low"
+          ? 0.85
+          : hazard.confidence === "stale"
+            ? 0.6
+            : 0.75;
+  const trendAdjustment =
+    hazard.trend === "increasing" ? 5 : hazard.trend === "decreasing" ? -4 : 0;
+  return Math.round(Math.max(0, Math.min(100, base * confidenceFactor + trendAdjustment)));
 }
 
 function StormHistorySignal({
@@ -1600,6 +1678,8 @@ function StormHistorySignal({
 
 function StormChaserPanel({
   storms,
+  communityChasers,
+  selectedCommunityChaser,
   activeStorm,
   activeAlert,
   forecastTiming,
@@ -1619,6 +1699,8 @@ function StormChaserPanel({
   onClearNavigationTarget,
 }: {
   storms: StormObject[];
+  communityChasers: WeatherChaserPosition[];
+  selectedCommunityChaser: WeatherChaserPosition | null;
   activeStorm: StormObject | null;
   activeAlert: WeatherAlert | null;
   forecastTiming: TimeAdjustedStormForecast | null;
@@ -1638,6 +1720,32 @@ function StormChaserPanel({
   onClearNavigationTarget: () => void;
 }) {
   const isGuidance = activeStorm?.basis === "provider-guidance";
+  const [potentialFilter, setPotentialFilter] = useState<StormPotentialFilter>("all");
+  const [sortMode, setSortMode] = useState<StormSortMode>("selected-potential");
+  const [expandedStormDetails, setExpandedStormDetails] = useState<string | null>(
+    activeStorm?.id ?? null,
+  );
+  useEffect(() => {
+    if (activeStorm?.id) setExpandedStormDetails(activeStorm.id);
+  }, [activeStorm?.id]);
+  const displayedStorms = useMemo(() => {
+    const filtered =
+      potentialFilter === "all"
+        ? storms
+        : storms.filter((storm) => storm.hazards[potentialFilter].status !== "unavailable");
+    return [...filtered].sort((left, right) => {
+      if (sortMode === "newest")
+        return new Date(right.observedAt).getTime() - new Date(left.observedAt).getTime();
+      const sortFilter = sortMode === "overall-potential" ? "all" : potentialFilter;
+      return (
+        (stormPriorityIndex(right, sortFilter) ?? -1) -
+          (stormPriorityIndex(left, sortFilter) ?? -1) ||
+        stormMaximumProbability(right) - stormMaximumProbability(left)
+      );
+    });
+  }, [potentialFilter, sortMode, storms]);
+  const activePotential = activeStorm ? stormPrimaryPotential(activeStorm, potentialFilter) : null;
+  const activePriority = activeStorm ? stormPriorityIndex(activeStorm, potentialFilter) : null;
   return (
     <div className="space-y-4 p-4">
       <div>
@@ -1725,44 +1833,116 @@ function StormChaserPanel({
         </div>
       </details>
 
+      <details className="rounded-2xl border border-blue-200 bg-blue-50 p-3 text-blue-950">
+        <summary className="cursor-pointer text-[10px] font-semibold">
+          Community spotters · {communityChasers.length} nearby
+        </summary>
+        <p className="mt-1 text-[8px] leading-relaxed">
+          Recent positions appear as blue markers and clusters. LandDraft discards names, callsigns,
+          contact details, and positions older than 30 minutes.
+        </p>
+        {selectedCommunityChaser && (
+          <div className="mt-2 rounded-xl bg-white/80 p-2 text-[8px]">
+            <strong className="block">Selected community spotter</strong>
+            <span className="mt-1 block">
+              Updated {weatherAgeLabel(selectedCommunityChaser.source)} ·{" "}
+              {selectedCommunityChaser.motionStatus}
+            </span>
+            <span className="mt-1 block font-mono">
+              {selectedCommunityChaser.location.geometry.coordinates[1]?.toFixed(4)},{" "}
+              {selectedCommunityChaser.location.geometry.coordinates[0]?.toFixed(4)}
+            </span>
+          </div>
+        )}
+        <p className="mt-2 text-[7px] leading-relaxed opacity-80">
+          Spotter locations do not indicate that a storm is safe to approach and are not an official
+          warning product. Production use requires separate provider authorization.
+        </p>
+      </details>
+
       <div>
         <div className="flex items-center gap-2 text-[10px] font-semibold">
           Active storm intelligence
           <span className="ml-auto rounded-full bg-secondary px-2 py-0.5 text-[8px]">
-            {storms.length}
+            {displayedStorms.length}/{storms.length}
           </span>
         </div>
-        {storms.length ? (
+        <div className="mt-2 grid grid-cols-2 gap-1.5">
+          <label className="min-w-0 text-[8px] font-semibold text-muted-foreground">
+            Potential type
+            <select
+              value={potentialFilter}
+              onChange={(event) => setPotentialFilter(event.target.value as StormPotentialFilter)}
+              className="mt-1 w-full rounded-xl border border-border bg-background px-2 py-2 text-[9px] text-foreground"
+            >
+              {stormPotentialOptions.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="min-w-0 text-[8px] font-semibold text-muted-foreground">
+            Sort by
+            <select
+              value={sortMode}
+              onChange={(event) => setSortMode(event.target.value as StormSortMode)}
+              className="mt-1 w-full rounded-xl border border-border bg-background px-2 py-2 text-[9px] text-foreground"
+            >
+              <option value="selected-potential">Selected potential</option>
+              <option value="overall-potential">Overall potential</option>
+              <option value="newest">Newest analysis</option>
+            </select>
+          </label>
+        </div>
+        <p className="mt-1 text-[7px] leading-relaxed text-muted-foreground">
+          Priority is a LandDraft ordering index based on available provider guidance, confidence,
+          and trend. It is not an additional weather probability or a chase recommendation.
+        </p>
+        {displayedStorms.length ? (
           <div className="mt-2 space-y-1">
-            {storms.slice(0, 40).map((storm) => (
-              <button
-                key={storm.id}
-                type="button"
-                onClick={() => onSelect(storm)}
-                className={cn(
-                  "w-full rounded-xl border p-2 text-left",
-                  activeStorm?.id === storm.id
-                    ? "border-primary bg-primary/10"
-                    : "border-border bg-secondary hover:bg-accent",
-                )}
-              >
-                <span className="block truncate text-[10px] font-semibold">{storm.title}</span>
-                <span className="mt-0.5 flex items-center gap-1 text-[8px] text-muted-foreground">
-                  <span className="truncate">
-                    {storm.basis === "provider-guidance" ? "NOAA guidance" : "Official context"} ·{" "}
-                    {weatherAgeLabel(storm.source)}
-                  </span>
-                  {storm.basis === "provider-guidance" && (
-                    <span className="ml-auto shrink-0 rounded-full bg-orange-100 px-1.5 py-0.5 font-semibold text-orange-900">
-                      max {Math.round(stormMaximumProbability(storm))}%
-                    </span>
+            {displayedStorms.slice(0, 40).map((storm) => {
+              const potential = stormPrimaryPotential(storm, potentialFilter);
+              const priority = stormPriorityIndex(storm, potentialFilter);
+              return (
+                <button
+                  key={storm.id}
+                  type="button"
+                  onClick={() => {
+                    setExpandedStormDetails(storm.id);
+                    onSelect(storm);
+                  }}
+                  className={cn(
+                    "w-full rounded-xl border p-2 text-left",
+                    activeStorm?.id === storm.id
+                      ? "border-primary bg-primary/10"
+                      : "border-border bg-secondary hover:bg-accent",
                   )}
-                </span>
-              </button>
-            ))}
-            {storms.length > 40 && (
+                >
+                  <span className="block truncate text-[10px] font-semibold">{storm.title}</span>
+                  <span className="mt-0.5 flex items-center gap-1 text-[8px] text-muted-foreground">
+                    <span className="truncate">
+                      {storm.basis === "provider-guidance" ? "NOAA guidance" : "Official context"} ·{" "}
+                      {weatherAgeLabel(storm.source)}
+                    </span>
+                    {storm.basis === "provider-guidance" && (
+                      <span className="ml-auto shrink-0 rounded-full bg-orange-100 px-1.5 py-0.5 font-semibold text-orange-900">
+                        {priority === null ? "No index" : `Priority ${priority}`}
+                      </span>
+                    )}
+                  </span>
+                  <span className="mt-1 block text-[7px] font-semibold text-muted-foreground">
+                    {stormHazardNames[potential.kind]}:{" "}
+                    {potential.probabilityPct === null
+                      ? potential.status
+                      : `${Math.round(potential.probabilityPct)}% provider guidance`}
+                  </span>
+                </button>
+              );
+            })}
+            {displayedStorms.length > 40 && (
               <p className="px-2 pt-1 text-[8px] text-muted-foreground">
-                Showing the 40 highest-ranked/relevant objects of {storms.length}.
+                Showing the 40 highest-ranked/relevant objects of {displayedStorms.length}.
               </p>
             )}
           </div>
@@ -1818,7 +1998,81 @@ function StormChaserPanel({
                 </span>
               )}
             </div>
+            <button
+              type="button"
+              onClick={() =>
+                setExpandedStormDetails((current) =>
+                  current === activeStorm.id ? null : activeStorm.id,
+                )
+              }
+              className="mt-2 flex w-full items-center rounded-xl border border-current/20 bg-white/70 px-2 py-2 text-left text-[9px] font-semibold"
+              aria-expanded={expandedStormDetails === activeStorm.id}
+            >
+              Detailed storm potential
+              {expandedStormDetails === activeStorm.id ? (
+                <ChevronDown className="ml-auto size-3" />
+              ) : (
+                <ChevronRight className="ml-auto size-3" />
+              )}
+            </button>
           </div>
+
+          {expandedStormDetails === activeStorm.id && (
+            <div className="rounded-2xl border border-border bg-background p-3">
+              <div className="flex items-center gap-2">
+                <strong className="text-xs">Storm analysis details</strong>
+                {activePriority !== null && (
+                  <span className="ml-auto rounded-full bg-primary/10 px-2 py-1 text-[8px] font-bold text-primary">
+                    Priority {activePriority}/100
+                  </span>
+                )}
+              </div>
+              <div className="mt-2 grid grid-cols-2 gap-2 text-[8px]">
+                <Condition label="Classification" value={activeStorm.classification} />
+                <Condition
+                  label="Classification quality"
+                  value={activeStorm.classificationConfidence.toUpperCase()}
+                />
+                <Condition label="Analysis basis" value={activeStorm.basis.replaceAll("-", " ")} />
+                <Condition label="Observed" value={weatherAgeLabel(activeStorm.source)} />
+              </div>
+              {activePotential && (
+                <div className="mt-3 rounded-xl bg-secondary p-2 text-[9px]">
+                  <strong>{stormHazardNames[activePotential.kind]} potential</strong>
+                  <span className="ml-2 font-bold">
+                    {activePotential.probabilityPct === null
+                      ? activePotential.status
+                      : `${Math.round(activePotential.probabilityPct)}% / next hour`}
+                  </span>
+                  <p className="mt-1 text-[8px] text-muted-foreground">
+                    Confidence {activePotential.confidence} ·{" "}
+                    {stormTrendLabel[activePotential.trend]}
+                  </p>
+                </div>
+              )}
+              <div className="mt-3 grid grid-cols-2 gap-1.5">
+                {Object.values(activeStorm.hazards).map((hazard) => (
+                  <div key={hazard.kind} className="rounded-xl border border-border p-2">
+                    <span className="block text-[8px] font-semibold">
+                      {stormHazardNames[hazard.kind]}
+                    </span>
+                    <span className="mt-1 block text-[10px] font-bold">
+                      {hazard.probabilityPct === null
+                        ? hazard.status === "unavailable"
+                          ? "Unavailable"
+                          : "Official context"
+                        : `${Math.round(hazard.probabilityPct)}%`}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <p className="mt-3 text-[8px] leading-relaxed text-muted-foreground">
+                Provider percentages retain their original calibration and valid time. The priority
+                index only orders storms for review; it does not alter those probabilities or imply
+                that a location is safe.
+              </p>
+            </div>
+          )}
 
           <div>
             <strong className="text-xs">Hazard intelligence</strong>
@@ -2081,7 +2335,7 @@ function StormChaserPanel({
             </p>
           </div>
 
-          <details className="rounded-2xl border border-border p-3" open>
+          <details className="rounded-2xl border border-border p-3">
             <summary className="cursor-pointer text-xs font-semibold">Why / provenance</summary>
             <ul className="mt-2 space-y-1 text-[9px] text-muted-foreground">
               {activeStorm.evidence.map((evidence) => (
@@ -2374,7 +2628,9 @@ function SourcePanel({
                     ? "bg-emerald-600"
                     : provider.status === "degraded"
                       ? "bg-amber-500"
-                      : "bg-rose-600",
+                      : provider.status === "not-configured"
+                        ? "bg-slate-400"
+                        : "bg-rose-600",
                 )}
               />
               <strong className="truncate text-[10px]">{provider.providerName}</strong>
@@ -2400,7 +2656,8 @@ function SourcePanel({
       <p className="mt-3 rounded-xl bg-secondary p-3 text-[9px] leading-relaxed text-muted-foreground">
         NOAA/NWS satellite, regional lightning-density, radar, forecast layers and METAR stations
         are connected. Individual global lightning strikes, global radar and advanced model grids
-        still require reviewed licensed sources. LandDraft never substitutes invented values.
+        still require reviewed licensed sources. Community spotter positions are test-only until
+        provider permission is confirmed. LandDraft never substitutes invented values.
       </p>
     </div>
   );

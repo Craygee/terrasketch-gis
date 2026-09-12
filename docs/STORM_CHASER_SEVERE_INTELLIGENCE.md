@@ -51,6 +51,16 @@ The durable distinction is:
 - The source panel reports ProbSevere health, age and failure separately from official NWS alerts.
 - Pure fixture tests verify probability preservation, trends, motion corridors and that provider
   storm polygons are not mislabeled as official warning areas.
+- The storm browser can filter by tornado, hail, wind, flood or lightning potential and sort by the
+  selected potential, overall potential or newest analysis. A separate LandDraft priority index
+  adjusts available provider guidance for confidence and trend solely to order review; it is never
+  labeled as another probability or as a chase recommendation.
+- Selecting a storm opens a collapsible detailed-potential section with classification quality,
+  analysis basis, source age, each available hazard value and the preserved provider probability.
+- A cluster-aware community-spotter layer is connected through a provider adapter for authorized
+  test/evaluation use. It discards identity/contact text, excludes positions over 30 minutes old and
+  exposes provider permission status rather than silently enabling a non-commercial feed in
+  production.
 
 Detailed research and source decisions: `docs/STORM_CHASER_SEVERE_INTELLIGENCE_RESEARCH.md`.
 
@@ -114,6 +124,9 @@ algorithm, interface or database is copied.
   demand.
 - Individual lightning, global radar, model grids, road closures, push/SMS and commercial SLA feeds
   may require paid licenses and redistribution agreements.
+- Community spotter feeds may require written application/commercial permission. The current
+  Spotter Network feed page marks its published feeds non-commercial; production cost and terms are
+  not yet determined.
 - Generative explanations are not enabled. A future AI explanation service would add inference cost
   and may only verbalize structured evidence produced by deterministic analysis.
 

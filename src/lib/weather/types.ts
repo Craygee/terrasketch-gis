@@ -242,6 +242,19 @@ export interface WeatherStationObservation {
   source: WeatherSourceMetadata;
 }
 
+/**
+ * Privacy-minimized position supplied by an approved community spotter feed.
+ * LandDraft intentionally does not retain names, callsigns, contact details,
+ * or continuous position history in this contract.
+ */
+export interface WeatherChaserPosition {
+  id: string;
+  location: Feature<Point>;
+  observedAt: string;
+  motionStatus: "moving" | "stationary" | "unknown";
+  source: WeatherSourceMetadata;
+}
+
 export type WeatherRiskLevel = "lower" | "elevated" | "high" | "unknown";
 
 export interface WeatherViewingZone {
@@ -381,6 +394,7 @@ export interface WeatherBundle {
   radarFrames: RadarFrame[];
   rasterFrames: WeatherRasterFrame[];
   stationObservations: WeatherStationObservation[];
+  chaserPositions: WeatherChaserPosition[];
   photography: WeatherPhotographyAssessment | null;
   providerHealth: WeatherProviderHealth[];
   warnings: string[];
