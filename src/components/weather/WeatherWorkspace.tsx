@@ -687,8 +687,9 @@ export function WeatherWorkspace() {
                 <div className="pointer-events-auto max-w-sm rounded-2xl border border-rose-200 bg-card/95 p-3 text-[10px] shadow-float backdrop-blur">
                   <strong>Storm Chaser · decision support</strong>
                   <p className="mt-1 text-muted-foreground">
-                    Official alert areas are distinct from LandDraft analysis. No storm track or
-                    route is generated without validated motion and hazard inputs.
+                    NOAA storm objects and recent-motion corridors load automatically. Official
+                    warnings remain distinct, and observation routing stays withheld until road,
+                    flood, lightning, and hazard inputs are validated together.
                   </p>
                 </div>
               )}

@@ -277,7 +277,6 @@ export const weatherLayerRegistry: WeatherLayerDefinition[] = [
     ["winter", "Winter hazards", "Winter", "weather.severe"],
     ["fire", "Fire weather", "Fire & air quality", "weather.infrastructure"],
     ["air-quality", "Air quality / smoke", "Fire & air quality", "weather.infrastructure"],
-    ["storm-objects", "Active storm objects", "Storm chaser", "weather.storm_chaser"],
     ["photo", "Photography potential", "Photography", "weather.photography"],
     ["historical", "Historical events", "Historical", "weather.historical"],
   ].map(([id, name, group, capability]): WeatherLayerDefinition => ({
