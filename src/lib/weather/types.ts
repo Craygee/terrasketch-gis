@@ -5,16 +5,21 @@ export const WEATHER_MODULE_ID = "weather" as const;
 export const WEATHER_CAPABILITIES = [
   "weather.basic",
   "weather.radar",
+  "weather.advanced",
   "weather.satellite",
   "weather.lightning",
   "weather.forecasting",
   "weather.meteorology",
   "weather.severe",
+  "weather.severe_intelligence",
   "weather.storm_chaser",
+  "weather.hurricane",
+  "weather.aviation",
   "weather.photography",
   "weather.infrastructure",
   "weather.historical",
   "weather.models",
+  "weather.ai_analysis",
   "weather.enterprise",
 ] as const;
 
@@ -95,8 +100,94 @@ export interface WeatherAlert {
   urgency?: string | undefined;
   status: WeatherAlertStatus;
   senderName?: string | undefined;
+  messageType?: string | undefined;
+  response?: string | undefined;
+  category?: string | undefined;
+  parameters?: Record<string, string[]> | undefined;
   geometry: Feature<Polygon | MultiPolygon> | null;
   source: WeatherSourceMetadata;
+}
+
+export type StormHazardKind = "tornado" | "hail" | "wind" | "flood" | "lightning";
+export type StormObjectBasis =
+  | "official-alert-area"
+  | "official-report"
+  | "radar-indicated"
+  | "observed"
+  | "model"
+  | "landdraft-derived";
+export type StormTrend = "increasing" | "steady" | "decreasing" | "unknown";
+
+export interface StormHazardAssessment {
+  kind: StormHazardKind;
+  status: "official-context" | "analyzed" | "unavailable";
+  /** A LandDraft analysis score, never a literal probability unless calibrated separately. */
+  score: number | null;
+  probabilityPct: number | null;
+  confidence: WeatherQuality;
+  trend: StormTrend;
+  reasons: string[];
+}
+
+export interface StormEvidence {
+  id: string;
+  label: string;
+  value?: string | undefined;
+  kind: "official" | "observed" | "model" | "derived";
+  validTime?: string | undefined;
+  providerId: string;
+  sourceReference?: string | undefined;
+}
+
+export interface StormMotion {
+  bearingDeg: number;
+  speedMS: number;
+  validTime: string;
+  source: WeatherSourceMetadata;
+}
+
+export interface StormForecastPosition {
+  leadMinutes: number;
+  location: Feature<Point>;
+  likelyRadiusKm: number;
+  possibleRadiusKm: number;
+  confidence: WeatherQuality;
+  validTime: string;
+  source: WeatherSourceMetadata;
+}
+
+/**
+ * Provider-independent severe-weather object. Phase-one objects can be based on
+ * official alert areas without claiming that a radar-observed storm was found.
+ */
+export interface StormObject {
+  id: string;
+  title: string;
+  classification: string;
+  classificationConfidence: WeatherQuality;
+  basis: StormObjectBasis;
+  statusLabel: string;
+  centroid: Feature<Point>;
+  geometry: Feature<Polygon | MultiPolygon> | null;
+  observedAt: string;
+  validFrom?: string | undefined;
+  validUntil?: string | undefined;
+  officialAlertIds: string[];
+  hazards: Record<StormHazardKind, StormHazardAssessment>;
+  motion: StormMotion | null;
+  forecastPositions: StormForecastPosition[];
+  evidence: StormEvidence[];
+  limitations: string[];
+  source: WeatherSourceMetadata;
+}
+
+export interface StormRelativePosition {
+  distanceMiles: number;
+  bearingDeg: number;
+  cardinalBearing: string;
+  insideOfficialAlert: boolean;
+  exposure: "inside-official-hazard" | "near-official-hazard" | "outside-analyzed-area";
+  message: string;
 }
 
 export interface RadarFrame {
@@ -270,6 +361,7 @@ export interface WeatherBundle {
   current: WeatherObservation | null;
   forecast: WeatherForecastPeriod[];
   alerts: WeatherAlert[];
+  stormObjects: StormObject[];
   radarFrames: RadarFrame[];
   rasterFrames: WeatherRasterFrame[];
   stationObservations: WeatherStationObservation[];

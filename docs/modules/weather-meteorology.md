@@ -7,7 +7,7 @@ Pricing: Undecided
 
 ## Capabilities
 
-Phase 1.3 provides the optional Weather workspace, normalized provider contracts, capability hooks,
+Phase 1.4 provides the optional Weather workspace, normalized provider contracts, capability hooks,
 layer catalog, universal multi-product timeline, responsive weather drawer/inspector,
 project-aware viewport, official U.S. warning ingestion, NWS current conditions/forecast,
 MET Norway global model fallback, NOAA/NWS MRMS radar with official NWS radar failover, nearest-site
@@ -17,6 +17,12 @@ tropical summary, WSSI, SPC fire outlook, NOAA smoke guidance, Aviation Weather 
 stations, source health/provenance, a conservative photography-candidate analysis, and a server-only
 Xweather bring-your-own-account adapter for global radar/satellite/lightning coverage plus a searchable,
 progressively disclosed catalog of 76 weather-relevant Xweather raster products.
+
+The Storm Chaser workspace now includes official-alert-backed Storm Objects, stable IDs, explicit
+official-versus-derived labeling, evidence/limitations cards, ephemeral device GPS, relative
+distance/bearing and inside-warning route suppression. It deliberately withholds numerical severe
+scores, storm classification and future tracks until validated observational/model feeds support
+them.
 
 Visible products appear in a persistent **Active layer stack**. The top item renders in front;
 desktop users can drag between insertion lines and touch/keyboard users can move layers forward or
@@ -44,6 +50,8 @@ safe chase routing, soundings or certified operational risk.
   or public tile URL. Legacy shared Xweather deployment credentials are not used.
 - Future providers may require Cloudflare cache/object storage/queues, PostGIS, licensed feeds and
   additional server-side environment variables.
+- Storm Chaser contracts and calculations use the existing Weather gateway and Turf geometry. This
+  increment adds no runtime package or shared database table.
 
 ## Potential operating costs
 
@@ -59,6 +67,8 @@ safe chase routing, soundings or certified operational risk.
 - Radar/satellite/model processing drives compute, object storage and egress.
 - Push, email, SMS, offline packs, historical archives and AI explanations are usage-based cost
   candidates. Product pricing remains undecided.
+- Low-latency raw radar decoding, storm-object history and future road/lightning/terrain-aware chase
+  analysis may add material compute, storage and licensed-data costs.
 
 ## Administration/billing coordination
 
@@ -86,7 +96,8 @@ safe chase routing, soundings or certified operational risk.
 - Verification for this increment covers TypeScript, ESLint, focused Weather tests, production build
   and live capabilities checks for each official WMS/API endpoint.
 - Automated tests cover unit conversions, timestamps/staleness, alert severity, registry uniqueness,
-  entitlement decisions, usage telemetry aggregation and unknown-cost handling.
+  entitlement decisions, usage telemetry aggregation, unknown-cost handling, Storm Object
+  determinism, exercise-data rejection, widening motion uncertainty and chase safety suppression.
 - Provider failures produce explicit health/warning states; MRMS can switch to official NWS radar,
   and missing NWS point data can switch to a clearly labeled MET Norway model result.
 - Signed-in visual QA remains required in the public preview at desktop, tablet, iPhone and narrow

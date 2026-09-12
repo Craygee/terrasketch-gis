@@ -23,6 +23,7 @@ import { recordWeatherUsage } from "./telemetry.server";
 import { loadMetNorwayPoint } from "./metNorway.server";
 import { buildPhotographyAssessment } from "./photography.server";
 import { nearestWeatherRadarSite, type WeatherRadarSite } from "./radar";
+import { buildStormObjectsFromAlerts } from "./stormIntelligence";
 import {
   xweatherProviderHealth,
   xweatherRadarFrames,
@@ -538,6 +539,10 @@ function normalizeNwsAlerts(payload: NwsAlertsResponse): WeatherAlert[] {
       urgency: boundedText(properties["urgency"], 80) || undefined,
       status: normalizeAlertStatus(properties["status"]),
       senderName: boundedText(properties["senderName"], 180) || undefined,
+      messageType: boundedText(properties["messageType"], 80) || undefined,
+      response: boundedText(properties["response"], 80) || undefined,
+      category: boundedText(properties["category"], 80) || undefined,
+      parameters: normalizeAlertParameters(properties["parameters"]),
       geometry,
       source: nwsSource({
         product: "CAP alert",
@@ -548,6 +553,18 @@ function normalizeNwsAlerts(payload: NwsAlertsResponse): WeatherAlert[] {
       }),
     };
   });
+}
+
+function normalizeAlertParameters(value: unknown): Record<string, string[]> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const entries = Object.entries(value as Record<string, unknown>).flatMap(([key, raw]) => {
+    const values = (Array.isArray(raw) ? raw : [raw])
+      .filter((item): item is string => typeof item === "string")
+      .map((item) => boundedText(item, 500))
+      .filter(Boolean);
+    return values.length ? [[key, values] as const] : [];
+  });
+  return entries.length ? Object.fromEntries(entries) : undefined;
 }
 
 async function loadNwsPoint(
@@ -1494,6 +1511,7 @@ export async function loadWeatherBundle(request: WeatherPointRequest): Promise<W
     current,
     forecast,
     alerts,
+    stormObjects: buildStormObjectsFromAlerts(alerts, [request.longitude, request.latitude]),
     radarFrames,
     rasterFrames,
     stationObservations,

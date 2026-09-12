@@ -4,7 +4,7 @@ This file is the durable handoff for future LandDraft Weather sessions.
 
 ## Current phase
 
-Phase 1.3 provider foundation is implemented on `feature/test-module-development`. The module is optional,
+Phase 1.4 provider and Storm Chaser foundation is implemented on `feature/test-module-development`. The module is optional,
 test-only, and does not change billing, plans, production infrastructure or backups. One additive
 per-user RLS table supports encrypted bring-your-own Xweather credentials.
 
@@ -26,6 +26,7 @@ Read first:
 4. `docs/WEATHER_PROVIDER_SETUP.md`
 5. `docs/modules/weather-meteorology.md`
 6. `docs/MODULE_DEVELOPMENT.md`
+7. `docs/STORM_CHASER_SEVERE_INTELLIGENCE.md`
 
 ## Non-negotiable product rules
 
@@ -42,7 +43,8 @@ Read first:
 1. Validate Phase 1 in the public test deployment across desktop, tablet and phone viewports.
 2. Validate the searchable 76-product Xweather raster catalog with a user-connected test account, measure
    actual 1×/5×/10× tile usage and confirm redistribution/attribution terms before production release.
-3. Add severe event normalization/cards without algorithmically upgrading possible rotation to a
+3. Extend the implemented official-alert Storm Object cards into viewport/regional event retrieval,
+   then add raw-radar object tracking without algorithmically upgrading possible rotation to a
    confirmed tornado.
 4. Coordinate organization settings, RLS, provider secrets, cache/usage tables and entitlements
    before any schema migration.
@@ -80,9 +82,11 @@ Read first:
   Xweather API key; its client ID/secret components are encrypted server-side and never embedded in a browser
   URL or frontend bundle. The Worker needs `XWEATHER_CREDENTIAL_ENCRYPTION_KEY`, and deployments
   sharing Supabase must share that encryption key. NOAA remains primary for U.S. radar.
-- Individual raw lightning strikes, additional professional radar moments (including storm-relative
-  velocity, correlation coefficient and differential reflectivity), upper-air/convective grids,
-  soundings, storm objects, historical archives and commercial global radar remain unconfigured.
+- Official-alert-backed Storm Objects and ephemeral GPS-relative Chase context are implemented.
+  Individual raw lightning strikes, additional professional radar moments (including storm-relative
+  velocity, correlation coefficient and differential reflectivity), calibrated storm signatures,
+  upper-air/convective grids, soundings, historical archives and commercial global radar remain
+  unconfigured.
 
 ## Photography analysis state
 

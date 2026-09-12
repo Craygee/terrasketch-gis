@@ -8,6 +8,7 @@ import type {
   WeatherBundle,
   WeatherRasterFrame,
   WeatherStationObservation,
+  StormObject,
   WeatherViewingZone,
   WeatherWorkspaceState,
 } from "@/lib/weather/types";
@@ -25,6 +26,11 @@ const STATION_LABEL = "landdraft-weather-station-label";
 const PHOTO_SOURCE = "landdraft-weather-photo-zones";
 const PHOTO_CIRCLE = "landdraft-weather-photo-circle";
 const PHOTO_LABEL = "landdraft-weather-photo-label";
+const STORM_SOURCE = "landdraft-weather-storm-objects";
+const STORM_CIRCLE = "landdraft-weather-storm-circle";
+const STORM_LABEL = "landdraft-weather-storm-label";
+const CHASER_SOURCE = "landdraft-weather-chaser-location";
+const CHASER_CIRCLE = "landdraft-weather-chaser-location-circle";
 const RASTER_PREFIX = "landdraft-weather-product-";
 
 function alertCollection(alerts: WeatherAlert[]): FeatureCollection<Polygon | MultiPolygon> {
@@ -87,6 +93,25 @@ function photographyCollection(zones: WeatherViewingZone[]): FeatureCollection<P
         name: zone.name,
         riskLevel: zone.riskLevel,
         score: zone.score ?? "",
+      },
+    })),
+  };
+}
+
+function stormCollection(
+  storms: StormObject[],
+  selectedStormId: string | null,
+): FeatureCollection<Point> {
+  return {
+    type: "FeatureCollection",
+    features: storms.map((storm) => ({
+      ...storm.centroid,
+      properties: {
+        id: storm.id,
+        alertId: storm.officialAlertIds[0] ?? "",
+        title: storm.title,
+        basis: storm.basis,
+        selected: storm.id === selectedStormId,
       },
     })),
   };
@@ -252,6 +277,49 @@ function ensureVectorLayers(map: MlMap) {
       },
       paint: { "text-color": "#17221b", "text-halo-color": "#ffffff", "text-halo-width": 2 },
     });
+  if (!map.getSource(STORM_SOURCE))
+    map.addSource(STORM_SOURCE, { type: "geojson", data: stormCollection([], null) });
+  if (!map.getLayer(STORM_CIRCLE))
+    map.addLayer({
+      id: STORM_CIRCLE,
+      type: "circle",
+      source: STORM_SOURCE,
+      paint: {
+        "circle-radius": ["case", ["boolean", ["get", "selected"], false], 12, 9],
+        "circle-color": "#7f1d1d",
+        "circle-opacity": 0.9,
+        "circle-stroke-color": "#ffffff",
+        "circle-stroke-width": ["case", ["boolean", ["get", "selected"], false], 3, 2],
+      },
+    });
+  if (!map.getLayer(STORM_LABEL))
+    map.addLayer({
+      id: STORM_LABEL,
+      type: "symbol",
+      source: STORM_SOURCE,
+      layout: {
+        "text-field": ["get", "title"],
+        "text-size": 11,
+        "text-offset": [0, 1.5],
+        "text-anchor": "top",
+        "text-max-width": 16,
+      },
+      paint: { "text-color": "#571414", "text-halo-color": "#ffffff", "text-halo-width": 2 },
+    });
+  if (!map.getSource(CHASER_SOURCE))
+    map.addSource(CHASER_SOURCE, { type: "geojson", data: pointCollection(undefined) });
+  if (!map.getLayer(CHASER_CIRCLE))
+    map.addLayer({
+      id: CHASER_CIRCLE,
+      type: "circle",
+      source: CHASER_SOURCE,
+      paint: {
+        "circle-radius": 8,
+        "circle-color": "#1687ff",
+        "circle-stroke-color": "#ffffff",
+        "circle-stroke-width": 3,
+      },
+    });
 }
 
 function ensureRadar(map: MlMap, frame: RadarFrame | undefined) {
@@ -323,10 +391,16 @@ export function WeatherMapOverlay({
   bundle,
   workspace,
   onSelectAlert,
+  stormObjectsVisible = false,
+  selectedStormId = null,
+  chaserLocation,
 }: {
   bundle: WeatherBundle | null;
   workspace: WeatherWorkspaceState;
   onSelectAlert: (alert: WeatherAlert) => void;
+  stormObjectsVisible?: boolean;
+  selectedStormId?: string | null;
+  chaserLocation?: [number, number] | undefined;
 }) {
   const { map } = useMapRef();
   const radarVisible = Boolean(workspace.layerSettings["weather.radar.simple"]?.visible);
@@ -375,6 +449,12 @@ export function WeatherMapOverlay({
             : [],
         ),
       );
+      (map.getSource(STORM_SOURCE) as GeoJSONSource | undefined)?.setData(
+        stormCollection(stormObjectsVisible ? (bundle?.stormObjects ?? []) : [], selectedStormId),
+      );
+      (map.getSource(CHASER_SOURCE) as GeoJSONSource | undefined)?.setData(
+        pointCollection(chaserLocation),
+      );
       if (map.getLayer(RADAR_LAYER))
         map.setPaintProperty(
           RADAR_LAYER,
@@ -391,7 +471,7 @@ export function WeatherMapOverlay({
         .reverse()
         .filter((id) => workspace.layerSettings[id]?.visible)
         .flatMap(renderedLayerIds);
-      moveToTop(map, [...orderedLayers, INSPECT_LAYER]);
+      moveToTop(map, [...orderedLayers, INSPECT_LAYER, STORM_CIRCLE, STORM_LABEL, CHASER_CIRCLE]);
     };
     update();
     map.on("style.load", update);
@@ -406,6 +486,9 @@ export function WeatherMapOverlay({
     photographyVisible,
     rasterProducts,
     stationsVisible,
+    stormObjectsVisible,
+    selectedStormId,
+    chaserLocation,
     workspace.lastInspectionPoint,
     workspace.layerOrder,
     workspace.layerSettings,
@@ -415,8 +498,14 @@ export function WeatherMapOverlay({
     if (!map) return;
     const select = (event: MapMouseEvent) => {
       if (!map.getLayer(ALERT_FILL)) return;
-      const feature = map.queryRenderedFeatures(event.point, { layers: [ALERT_FILL] })[0];
-      const id = String(feature?.properties?.["id"] ?? "");
+      const feature = map.queryRenderedFeatures(event.point, {
+        layers: [STORM_CIRCLE, ALERT_FILL].filter((id) => map.getLayer(id)),
+      })[0];
+      const id = String(
+        feature?.layer.id === STORM_CIRCLE
+          ? (feature.properties?.["alertId"] ?? "")
+          : (feature?.properties?.["id"] ?? ""),
+      );
       const alert = bundle?.alerts.find((item) => item.id === id);
       if (alert) onSelectAlert(alert);
     };
