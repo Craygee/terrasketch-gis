@@ -9,6 +9,7 @@ import {
 import { hasWeatherCapability } from "./entitlements.ts";
 import { weatherLayerRegistry } from "./registry.ts";
 import { defaultWeatherWorkspace, normalizeWeatherWorkspace } from "./model.ts";
+import { WEATHER_LAYER_ID_PATTERN } from "./types.ts";
 
 test("normalizes temperatures", () => {
   assert.equal(celsiusToKelvin(0), 273.15);
@@ -43,6 +44,11 @@ test("weather layer registry ids are unique and all layers declare providers", (
   assert.equal(
     weatherLayerRegistry.every((layer) => layer.providerProducts.length > 0),
     true,
+  );
+  assert.equal(
+    weatherLayerRegistry.every((layer) => WEATHER_LAYER_ID_PATTERN.test(layer.id)),
+    true,
+    "every registered layer id must survive the server request validator",
   );
 });
 

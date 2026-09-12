@@ -1,5 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
-import type { WeatherPointRequest } from "./types";
+import { WEATHER_LAYER_ID_PATTERN, type WeatherPointRequest } from "./types";
 
 function validatePoint(input: unknown): WeatherPointRequest {
   if (!input || typeof input !== "object") throw new Error("A map point is required");
@@ -14,7 +14,7 @@ function validatePoint(input: unknown): WeatherPointRequest {
     ? value["requestedLayerIds"]
         .filter(
           (id): id is string =>
-            typeof id === "string" && /^weather\.[a-z0-9.-]+$/i.test(id) && id.length <= 100,
+            typeof id === "string" && WEATHER_LAYER_ID_PATTERN.test(id) && id.length <= 100,
         )
         .slice(0, 30)
     : undefined;

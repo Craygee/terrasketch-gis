@@ -1,6 +1,7 @@
 import type { Feature, MultiPolygon, Point, Polygon } from "geojson";
 
 export const WEATHER_MODULE_ID = "weather" as const;
+export const WEATHER_LAYER_ID_PATTERN = /^weather\.[a-z0-9._-]+$/i;
 
 export const WEATHER_CAPABILITIES = [
   "weather.basic",
