@@ -192,7 +192,8 @@ Storm Chaser now selects the highest-ranked current object when its workspace op
 entire selected storm polygon plus its widening motion corridor in the map viewport. Selecting a
 different storm or pressing **Show full track** repeats that fit. Likely and possible envelopes have
 separate, stronger outlines so that project map position and low-opacity fills cannot make the
-track appear absent.
+track appear absent. A solid blue trail with negative-minute labels shows the provider object's
+recent measured/derived centroid history separately from the dashed orange future extrapolation.
 
 Recent ProbSevere sampling now reaches approximately 30 minutes when matching object identity is
 available. The Storm Intelligence panel plots the provider's any-severe guidance alongside four

@@ -139,6 +139,14 @@ function stormTrackBounds(storm: StormObject): [[number, number], [number, numbe
   let maxLongitude = initialMaxLongitude;
   let maxLatitude = initialMaxLatitude;
 
+  for (const sample of storm.history) {
+    const [longitude, latitude] = sample.location.geometry.coordinates as [number, number];
+    minLongitude = Math.min(minLongitude, longitude);
+    maxLongitude = Math.max(maxLongitude, longitude);
+    minLatitude = Math.min(minLatitude, latitude);
+    maxLatitude = Math.max(maxLatitude, latitude);
+  }
+
   for (const forecast of storm.forecastPositions) {
     const [longitude, latitude] = forecast.location.geometry.coordinates as [number, number];
     const latitudeRadius = forecast.possibleRadiusKm / 111.32;
@@ -1689,10 +1697,10 @@ function StormChaserPanel({
             </div>
           )}
 
-          {activeStorm.forecastPositions.length > 0 && (
+          {(activeStorm.history.length > 1 || activeStorm.forecastPositions.length > 0) && (
             <div className="rounded-2xl border border-orange-200 bg-orange-50 p-3 text-orange-950">
               <div className="flex items-center gap-2">
-                <strong className="text-xs">Map track & uncertainty</strong>
+                <strong className="text-xs">Recent track & future uncertainty</strong>
                 <button
                   type="button"
                   onClick={onCenterTrack}
@@ -1703,9 +1711,12 @@ function StormChaserPanel({
                 </button>
               </div>
               <p className="mt-1 text-[9px] leading-relaxed">
-                The dashed line shows recent-motion extrapolation. Orange likely/possible envelopes
-                widen through {activeStorm.forecastPositions.at(-1)?.leadMinutes} minutes. It is not
-                a deterministic tornado or storm path.
+                The solid blue line and negative-minute labels show recent provider storm-object
+                positions.
+                {activeStorm.forecastPositions.length
+                  ? ` The dashed orange line and likely/possible envelopes are motion-only projections that widen through ${activeStorm.forecastPositions.at(-1)?.leadMinutes} minutes.`
+                  : " A future corridor is withheld because the recent motion did not pass quality checks."}
+                Neither display is a deterministic tornado path.
               </p>
             </div>
           )}

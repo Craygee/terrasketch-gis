@@ -38,6 +38,9 @@ const STORM_FORECAST_POSSIBLE = "landdraft-weather-storm-forecast-possible";
 const STORM_FORECAST_POSSIBLE_LINE = "landdraft-weather-storm-forecast-possible-line";
 const STORM_FORECAST_LIKELY = "landdraft-weather-storm-forecast-likely";
 const STORM_FORECAST_LIKELY_LINE = "landdraft-weather-storm-forecast-likely-line";
+const STORM_HISTORY_LINE = "landdraft-weather-storm-history-line";
+const STORM_HISTORY_POINT = "landdraft-weather-storm-history-point";
+const STORM_HISTORY_LABEL = "landdraft-weather-storm-history-label";
 const STORM_FORECAST_LINE = "landdraft-weather-storm-forecast-line";
 const STORM_FORECAST_POINT = "landdraft-weather-storm-forecast-point";
 const STORM_FORECAST_LABEL = "landdraft-weather-storm-forecast-label";
@@ -160,8 +163,29 @@ function stormAreaCollection(
 function stormForecastCollection(
   storm: StormObject | null,
 ): FeatureCollection<Polygon | LineString | Point> {
-  if (!storm?.forecastPositions.length) return { type: "FeatureCollection", features: [] };
+  if (!storm) return { type: "FeatureCollection", features: [] };
   const features: Array<Feature<Polygon | LineString | Point>> = [];
+  if (storm.history.length > 1) {
+    const latestTime = new Date(storm.history.at(-1)!.validTime).getTime();
+    features.push({
+      type: "Feature",
+      properties: { kind: "history-track" },
+      geometry: {
+        type: "LineString",
+        coordinates: storm.history.map((sample) => sample.location.geometry.coordinates),
+      },
+    });
+    for (const sample of storm.history.slice(0, -1)) {
+      const minutesAgo = Math.max(
+        1,
+        Math.round((latestTime - new Date(sample.validTime).getTime()) / 60_000),
+      );
+      features.push({
+        ...sample.location,
+        properties: { kind: "history-position", label: `−${minutesAgo}m` },
+      });
+    }
+  }
   for (const forecast of storm.forecastPositions) {
     const possible = circle(forecast.location, forecast.possibleRadiusKm, {
       units: "kilometers",
@@ -190,17 +214,18 @@ function stormForecastCollection(
       },
     );
   }
-  features.push({
-    type: "Feature",
-    properties: { kind: "track" },
-    geometry: {
-      type: "LineString",
-      coordinates: [
-        storm.centroid.geometry.coordinates,
-        ...storm.forecastPositions.map((forecast) => forecast.location.geometry.coordinates),
-      ],
-    },
-  });
+  if (storm.forecastPositions.length)
+    features.push({
+      type: "Feature",
+      properties: { kind: "track" },
+      geometry: {
+        type: "LineString",
+        coordinates: [
+          storm.centroid.geometry.coordinates,
+          ...storm.forecastPositions.map((forecast) => forecast.location.geometry.coordinates),
+        ],
+      },
+    });
   return { type: "FeatureCollection", features };
 }
 
@@ -455,6 +480,41 @@ function ensureVectorLayers(map: MlMap) {
       filter: ["==", ["get", "kind"], "likely"],
       paint: { "line-color": "#c2410c", "line-width": 2, "line-opacity": 0.95 },
     });
+  if (!map.getLayer(STORM_HISTORY_LINE))
+    map.addLayer({
+      id: STORM_HISTORY_LINE,
+      type: "line",
+      source: STORM_FORECAST_SOURCE,
+      filter: ["==", ["get", "kind"], "history-track"],
+      paint: { "line-color": "#0369a1", "line-width": 3, "line-opacity": 0.95 },
+    });
+  if (!map.getLayer(STORM_HISTORY_POINT))
+    map.addLayer({
+      id: STORM_HISTORY_POINT,
+      type: "circle",
+      source: STORM_FORECAST_SOURCE,
+      filter: ["==", ["get", "kind"], "history-position"],
+      paint: {
+        "circle-radius": 4,
+        "circle-color": "#e0f2fe",
+        "circle-stroke-color": "#0369a1",
+        "circle-stroke-width": 2,
+      },
+    });
+  if (!map.getLayer(STORM_HISTORY_LABEL))
+    map.addLayer({
+      id: STORM_HISTORY_LABEL,
+      type: "symbol",
+      source: STORM_FORECAST_SOURCE,
+      filter: ["==", ["get", "kind"], "history-position"],
+      layout: {
+        "text-field": ["get", "label"],
+        "text-size": 9,
+        "text-offset": [0, -1.1],
+        "text-anchor": "bottom",
+      },
+      paint: { "text-color": "#075985", "text-halo-color": "#ffffff", "text-halo-width": 2 },
+    });
   if (!map.getLayer(STORM_FORECAST_LINE))
     map.addLayer({
       id: STORM_FORECAST_LINE,
@@ -587,6 +647,9 @@ function renderedLayerIds(weatherLayerId: string) {
       STORM_FORECAST_POSSIBLE_LINE,
       STORM_FORECAST_LIKELY,
       STORM_FORECAST_LIKELY_LINE,
+      STORM_HISTORY_LINE,
+      STORM_HISTORY_POINT,
+      STORM_HISTORY_LABEL,
       STORM_FORECAST_LINE,
       STORM_FORECAST_POINT,
       STORM_FORECAST_LABEL,
@@ -711,6 +774,9 @@ export function WeatherMapOverlay({
         STORM_FORECAST_POSSIBLE_LINE,
         STORM_FORECAST_LIKELY,
         STORM_FORECAST_LIKELY_LINE,
+        STORM_HISTORY_LINE,
+        STORM_HISTORY_POINT,
+        STORM_HISTORY_LABEL,
         STORM_FORECAST_LINE,
         STORM_FORECAST_POINT,
         STORM_FORECAST_LABEL,

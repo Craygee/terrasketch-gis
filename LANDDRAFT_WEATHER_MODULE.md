@@ -84,11 +84,11 @@ Read first:
   sharing Supabase must share that encryption key. NOAA remains primary for U.S. radar.
 - NOAA/CIMSS ProbSevere v3 tracked-storm objects, calibrated next-hour provider guidance, recent
   object history (approximately 30 minutes when object identity persists), quality-controlled
-  centroid motion, automatically fitted widening motion-only map corridors, official alert contexts
-  and ephemeral GPS-relative Chase context are implemented. The selected track can be re-centered
-  explicitly and recent low-level azimuthal shear, MESH, composite reflectivity and flash-rate
-  signals are visible with their provider provenance. Provider guidance is never labeled as an
-  official warning.
+  centroid motion, separately styled recent-object trails, automatically fitted widening
+  motion-only map corridors, official alert contexts and ephemeral GPS-relative Chase context are
+  implemented. The selected track can be re-centered explicitly and recent low-level azimuthal
+  shear, MESH, composite reflectivity and flash-rate signals are visible with their provider
+  provenance. Provider guidance is never labeled as an official warning.
   Individual raw lightning strikes, additional professional radar moments (including storm-relative
   velocity, correlation coefficient and differential reflectivity), calibrated storm signatures,
   upper-air/convective grids, soundings, historical archives and commercial global radar remain
