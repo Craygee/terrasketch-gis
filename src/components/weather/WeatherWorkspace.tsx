@@ -797,8 +797,11 @@ export function WeatherWorkspace() {
               </div>
             </div>
 
-            <div className="pointer-events-none absolute left-3 top-16 z-30 flex max-w-[calc(100%-6rem)] flex-col gap-2">
+            <div className="pointer-events-none absolute left-2 top-2 z-30 max-w-[calc(100%-6rem)] sm:left-3 sm:top-16">
               <WeatherStatusPill bundle={bundle} loading={loading} error={error} />
+            </div>
+
+            <div className="pointer-events-none absolute left-2 top-14 z-30 flex max-w-[calc(100%-6rem)] flex-col gap-2 sm:left-3 sm:top-28">
               {workspaceView === "meteorology" && (
                 <div className="pointer-events-auto max-w-sm rounded-2xl border border-border bg-card/95 p-3 text-[10px] shadow-float backdrop-blur">
                   <strong>
@@ -2390,22 +2393,37 @@ function WeatherLegends({
   workspace: WeatherWorkspaceState;
   workspaceView: WorkspaceView;
 }) {
-  const layers = weatherLayerRegistry.filter(
-    (layer) => workspace.layerSettings[layer.id]?.visible && layer.legend?.length,
+  const activeLayers = weatherLayerRegistry.filter(
+    (layer) => workspace.layerSettings[layer.id]?.visible,
   );
-  if (!layers.length && workspaceView !== "storm-chaser") return null;
+  const layersWithLegends = activeLayers.filter((layer) => layer.legend?.length);
+  if (!activeLayers.length && workspaceView !== "storm-chaser") return null;
+
   return (
-    <details className="absolute bottom-20 right-3 z-30 hidden max-w-56 rounded-2xl border border-border bg-card/95 p-3 text-[9px] shadow-float backdrop-blur sm:block lg:bottom-24">
-      <summary className="cursor-pointer font-semibold">
-        Weather legends · {layers.length + (workspaceView === "storm-chaser" ? 1 : 0)}
+    <details className="pointer-events-auto absolute right-2 top-28 z-30 text-[9px] lg:bottom-24 lg:right-3 lg:top-auto">
+      <summary
+        className="ml-auto flex min-h-10 w-fit cursor-pointer list-none items-center gap-1.5 rounded-full border border-border bg-card/95 px-3 font-semibold shadow-float backdrop-blur transition-colors hover:bg-accent [&::-webkit-details-marker]:hidden"
+        title="Open weather icon and layer legend"
+        aria-label="Open weather icon and layer legend"
+      >
+        <Layers3 className="size-4 text-primary" />
+        <span className="hidden sm:inline">Legend</span>
+        <span className="rounded-full bg-secondary px-1.5 py-0.5 text-[8px]">
+          {activeLayers.length + (workspaceView === "storm-chaser" ? 1 : 0)}
+        </span>
       </summary>
-      <div className="mt-2 space-y-3">
+      <div className="absolute right-0 top-12 max-h-[45dvh] w-64 max-w-[calc(100vw-1rem)] space-y-3 overflow-y-auto rounded-2xl border border-border bg-card/95 p-3 shadow-float backdrop-blur lg:bottom-12 lg:top-auto lg:max-h-[55dvh]">
         {workspaceView === "storm-chaser" && (
           <div>
             <strong className="block text-[9px]">Severe-event symbols</strong>
-            <p className="mt-1 text-[8px] text-muted-foreground">
-              Tornado · hail · hurricane · dust/haboob · lightning · major storm
-            </p>
+            <div className="mt-2 grid grid-cols-2 gap-1.5">
+              <WeatherEventLegendItem type="tornado" label="Tornado / rotation" />
+              <WeatherEventLegendItem type="hail" label="Hail core" />
+              <WeatherEventLegendItem type="hurricane" label="Hurricane" />
+              <WeatherEventLegendItem type="dust" label="Dust / haboob" />
+              <WeatherEventLegendItem type="lightning" label="Lightning" />
+              <WeatherEventLegendItem type="storm" label="Major storm" />
+            </div>
             <div className="mt-1 flex items-center gap-1" aria-label="Severity color scale">
               {[
                 ["#15803d", "Lower"],
@@ -2431,7 +2449,29 @@ function WeatherLegends({
             </p>
           </div>
         )}
-        {layers.map((layer) => (
+        {activeLayers.length > 0 && (
+          <div>
+            <strong className="block text-[9px]">Active weather layers</strong>
+            <div className="mt-1.5 space-y-1">
+              {activeLayers.map((layer) => (
+                <div key={layer.id} className="flex items-center gap-2 text-muted-foreground">
+                  <span
+                    className="size-2.5 shrink-0 rounded-sm border border-black/10 bg-primary/70"
+                    style={
+                      layer.legend?.[0]?.color
+                        ? { backgroundColor: layer.legend[0].color }
+                        : undefined
+                    }
+                  />
+                  <span className="min-w-0 truncate" title={layer.name}>
+                    {layer.name}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        {layersWithLegends.map((layer) => (
           <div key={layer.id}>
             <strong className="block text-[9px]">{layer.name}</strong>
             <div className="mt-1 flex flex-wrap gap-x-2 gap-y-1">
@@ -2449,6 +2489,68 @@ function WeatherLegends({
         ))}
       </div>
     </details>
+  );
+}
+
+type WeatherEventLegendType = "tornado" | "hail" | "hurricane" | "dust" | "lightning" | "storm";
+
+function WeatherEventLegendItem({ type, label }: { type: WeatherEventLegendType; label: string }) {
+  return (
+    <span className="flex min-w-0 items-center gap-1.5 text-[8px] text-muted-foreground">
+      <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm">
+        <WeatherEventLegendGlyph type={type} />
+      </span>
+      <span className="truncate" title={label}>
+        {label}
+      </span>
+    </span>
+  );
+}
+
+function WeatherEventLegendGlyph({ type }: { type: WeatherEventLegendType }) {
+  if (type === "lightning") return <Zap className="size-3.5 fill-current" />;
+  if (type === "dust") return <Wind className="size-3.5" />;
+  if (type === "storm") return <CloudLightning className="size-3.5" />;
+
+  if (type === "hail") {
+    return (
+      <svg viewBox="0 0 24 24" className="size-3.5" fill="none" aria-hidden="true">
+        <circle cx="8" cy="9" r="2.5" fill="currentColor" />
+        <circle cx="15.5" cy="8" r="2" fill="currentColor" />
+        <circle cx="12" cy="15.5" r="3" fill="currentColor" />
+      </svg>
+    );
+  }
+
+  if (type === "hurricane") {
+    return (
+      <svg viewBox="0 0 24 24" className="size-4" fill="none" aria-hidden="true">
+        <path
+          d="M4 8.5c2.2-3.4 7.1-4.4 10.2-1.8 2.1 1.8 2.1 5.2 0 7.1-2.7 2.4-6.9.8-6.9-2.2 0-2.2 2.7-3.3 4.2-1.8 1 1 .5 2.8-.8 3.3"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+        />
+        <path
+          d="M20 15.5c-2.2 3.4-7.1 4.4-10.2 1.8-2.1-1.8-2.1-5.2 0-7.1"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+        />
+      </svg>
+    );
+  }
+
+  return (
+    <svg viewBox="0 0 24 24" className="size-4" fill="none" aria-hidden="true">
+      <path
+        d="M5 5h14l-3 4H8l7 4H9l5 3H9l3 3"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
   );
 }
 
