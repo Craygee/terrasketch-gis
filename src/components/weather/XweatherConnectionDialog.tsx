@@ -44,11 +44,11 @@ export function XweatherConnectionDialog({
   const [editing, setEditing] = useState(!status.connected);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [allowedNamespace, setAllowedNamespace] = useState("landdraft.net");
+  const [previewHostname, setPreviewHostname] = useState<string | null>(null);
 
   useEffect(() => {
     const hostname = window.location.hostname;
-    setAllowedNamespace(hostname === "localhost" ? "landdraft.net" : hostname);
+    setPreviewHostname(hostname.endsWith(".workers.dev") ? hostname : null);
   }, []);
 
   useEffect(() => {
@@ -158,12 +158,20 @@ export function XweatherConnectionDialog({
                 <strong> LandDraft</strong> with Raster Maps access.
               </li>
               <li>
-                <strong>3.</strong> Add <code>{allowedNamespace}</code> to its allowed namespaces.
+                <strong>3.</strong> Add <code>landdraft.net</code> to its allowed namespaces.
               </li>
               <li>
                 <strong>4.</strong> Paste that application’s client ID and secret below.
               </li>
             </ol>
+
+            {previewHostname && (
+              <p className="px-1 text-[10px] leading-relaxed text-muted-foreground">
+                Preview testing only: developers testing the connection here must also allow
+                <code className="ml-1">{previewHostname}</code>. Live LandDraft users do not need
+                this preview hostname.
+              </p>
+            )}
 
             <div className="flex flex-wrap gap-2">
               <a
