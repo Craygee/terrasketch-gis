@@ -2412,7 +2412,7 @@ function WeatherLegends({
           {activeLayers.length + (workspaceView === "storm-chaser" ? 1 : 0)}
         </span>
       </summary>
-      <div className="absolute right-0 top-12 max-h-[45dvh] w-64 max-w-[calc(100vw-1rem)] space-y-3 overflow-y-auto rounded-2xl border border-border bg-card/95 p-3 shadow-float backdrop-blur lg:bottom-12 lg:top-auto lg:max-h-[55dvh]">
+      <div className="absolute right-14 top-0 max-h-[45dvh] w-64 max-w-[calc(100vw-5rem)] space-y-3 overflow-y-auto rounded-2xl border border-border bg-card/95 p-3 shadow-float backdrop-blur lg:bottom-12 lg:right-0 lg:top-auto lg:max-h-[55dvh] lg:max-w-[calc(100vw-1rem)]">
         {workspaceView === "storm-chaser" && (
           <div>
             <strong className="block text-[9px]">Severe-event symbols</strong>
