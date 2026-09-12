@@ -115,6 +115,7 @@ export type StormObjectBasis =
   | "radar-indicated"
   | "observed"
   | "model"
+  | "provider-guidance"
   | "landdraft-derived";
 export type StormTrend = "increasing" | "steady" | "decreasing" | "unknown";
 
@@ -156,6 +157,19 @@ export interface StormForecastPosition {
   source: WeatherSourceMetadata;
 }
 
+export interface StormHistorySample {
+  validTime: string;
+  location: Feature<Point>;
+  probabilitySeverePct?: number | undefined;
+  probabilityTornadoPct?: number | undefined;
+  probabilityHailPct?: number | undefined;
+  probabilityWindPct?: number | undefined;
+  meshInches?: number | undefined;
+  flashRatePerMinute?: number | undefined;
+  compositeReflectivityDbz?: number | undefined;
+  lowLevelAzimuthalShearS1?: number | undefined;
+}
+
 /**
  * Provider-independent severe-weather object. Phase-one objects can be based on
  * official alert areas without claiming that a radar-observed storm was found.
@@ -176,6 +190,7 @@ export interface StormObject {
   hazards: Record<StormHazardKind, StormHazardAssessment>;
   motion: StormMotion | null;
   forecastPositions: StormForecastPosition[];
+  history: StormHistorySample[];
   evidence: StormEvidence[];
   limitations: string[];
   source: WeatherSourceMetadata;
@@ -186,6 +201,7 @@ export interface StormRelativePosition {
   bearingDeg: number;
   cardinalBearing: string;
   insideOfficialAlert: boolean;
+  insideAnalyzedArea: boolean;
   exposure: "inside-official-hazard" | "near-official-hazard" | "outside-analyzed-area";
   message: string;
 }

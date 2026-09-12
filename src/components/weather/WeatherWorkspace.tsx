@@ -104,6 +104,7 @@ const CONNECTED_LAYERS = new Set([
   "weather.wind.surface",
   "weather.lightning.recent",
   "weather.severe.alerts",
+  "weather.severe.intelligence",
   "weather.forecast.precipitation",
   "weather.surface",
   "weather.metar",
@@ -156,6 +157,7 @@ export function WeatherWorkspace() {
   const [mobileSheet, setMobileSheet] = useState<MobileSheet>(null);
   const [advancedLayers, setAdvancedLayers] = useState(false);
   const [selectedAlert, setSelectedAlert] = useState<WeatherAlert | null>(null);
+  const [selectedStormId, setSelectedStormId] = useState<string | null>(null);
   const [workspaceView, setWorkspaceView] = useState<WorkspaceView>("weather");
   const [chaseActive, setChaseActive] = useState(false);
   const [chaserLocation, setChaserLocation] = useState<[number, number] | undefined>();
@@ -274,9 +276,18 @@ export function WeatherWorkspace() {
   useEffect(() => {
     if (!map || !workspace.inspectorEnabled) return;
     const inspect = (event: MapMouseEvent) => {
+      const selectedWeatherObject = map
+        .queryRenderedFeatures(event.point)
+        .some(
+          (feature) =>
+            feature.layer.id.startsWith("landdraft-weather-storm") ||
+            feature.layer.id.startsWith("landdraft-weather-alert"),
+        );
+      if (selectedWeatherObject) return;
       const point: [number, number] = [event.lngLat.lng, event.lngLat.lat];
       updateWorkspace({ lastInspectionPoint: point });
       setSelectedAlert(null);
+      setSelectedStormId(null);
       void loadPoint(point);
     };
     map.on("click", inspect);
@@ -377,12 +388,20 @@ export function WeatherWorkspace() {
     setWorkspaceView(view);
     if (view === "weather") return;
     setAdvancedLayers(true);
-    const photographySetting = workspace.layerSettings["weather.photo"];
+    const workspaceLayerId =
+      view === "photography"
+        ? "weather.photo"
+        : view === "storm-chaser"
+          ? "weather.severe.intelligence"
+          : null;
+    const workspaceLayerSetting = workspaceLayerId
+      ? workspace.layerSettings[workspaceLayerId]
+      : undefined;
     const layerSettings =
-      view === "photography" && photographySetting
+      workspaceLayerId && workspaceLayerSetting
         ? {
             ...workspace.layerSettings,
-            "weather.photo": { ...photographySetting, visible: true },
+            [workspaceLayerId]: { ...workspaceLayerSetting, visible: true },
           }
         : workspace.layerSettings;
     updateWorkspace({
@@ -394,11 +413,11 @@ export function WeatherWorkspace() {
             : "Photography",
       layerSettings,
     });
-    if (view === "photography")
+    if (workspaceLayerId)
       void loadPoint(
         workspace.lastInspectionPoint ?? wb.mapView.center,
         false,
-        Array.from(new Set([...requestedLayerIds, "weather.photo"])),
+        Array.from(new Set([...requestedLayerIds, workspaceLayerId])),
       );
   };
 
@@ -406,16 +425,21 @@ export function WeatherWorkspace() {
     (setting) => setting.visible,
   ).length;
   const current = bundle?.current;
-  const activeAlert = selectedAlert ?? bundle?.alerts[0] ?? null;
   const activeStorm = useMemo(
     () =>
+      bundle?.stormObjects?.find((storm) => storm.id === selectedStormId) ??
       bundle?.stormObjects?.find((storm) =>
         selectedAlert ? storm.officialAlertIds.includes(selectedAlert.id) : false,
       ) ??
       bundle?.stormObjects?.[0] ??
       null,
-    [bundle?.stormObjects, selectedAlert],
+    [bundle?.stormObjects, selectedAlert, selectedStormId],
   );
+  const activeAlert =
+    selectedAlert ??
+    (activeStorm
+      ? (bundle?.alerts.find((alert) => activeStorm.officialAlertIds.includes(alert.id)) ?? null)
+      : (bundle?.alerts[0] ?? null));
   const relativePosition = useMemo(
     () =>
       activeStorm && chaserLocation ? stormRelativePosition(activeStorm, chaserLocation) : null,
@@ -459,8 +483,15 @@ export function WeatherWorkspace() {
   };
 
   const selectStorm = (storm: StormObject) => {
+    setSelectedStormId(storm.id);
     const alert = bundle?.alerts.find((item) => storm.officialAlertIds.includes(item.id));
-    if (alert) setSelectedAlert(alert);
+    setSelectedAlert(alert ?? null);
+    const [longitude, latitude] = storm.centroid.geometry.coordinates as [number, number];
+    map?.flyTo({
+      center: [longitude, latitude],
+      zoom: Math.max(map.getZoom(), 7),
+      essential: true,
+    });
   };
 
   const visibleGroups = useMemo(
@@ -598,8 +629,18 @@ export function WeatherWorkspace() {
             <WeatherMapOverlay
               bundle={bundle}
               workspace={workspace}
-              onSelectAlert={setSelectedAlert}
-              stormObjectsVisible={workspaceView === "storm-chaser"}
+              onSelectAlert={(alert) => {
+                setSelectedAlert(alert);
+                const storm = bundle?.stormObjects.find((item) =>
+                  item.officialAlertIds.includes(alert.id),
+                );
+                setSelectedStormId(storm?.id ?? null);
+              }}
+              onSelectStorm={selectStorm}
+              stormObjectsVisible={
+                workspaceView === "storm-chaser" &&
+                Boolean(workspace.layerSettings["weather.severe.intelligence"]?.visible)
+              }
               selectedStormId={activeStorm?.id ?? null}
               chaserLocation={chaserLocation}
             />
@@ -1312,6 +1353,21 @@ const stormHazardNames = {
   lightning: "Lightning",
 } as const;
 
+const stormTrendLabel = {
+  increasing: "↑ increasing",
+  steady: "→ steady",
+  decreasing: "↓ decreasing",
+  unknown: "trend unavailable",
+} as const;
+
+function stormMaximumProbability(storm: StormObject) {
+  return Math.max(
+    storm.hazards.tornado.probabilityPct ?? 0,
+    storm.hazards.hail.probabilityPct ?? 0,
+    storm.hazards.wind.probabilityPct ?? 0,
+  );
+}
+
 function StormChaserPanel({
   storms,
   activeStorm,
@@ -1333,6 +1389,7 @@ function StormChaserPanel({
   onSelect: (storm: StormObject) => void;
   onToggleChase: () => void;
 }) {
+  const isGuidance = activeStorm?.basis === "provider-guidance";
   return (
     <div className="space-y-4 p-4">
       <div>
@@ -1341,21 +1398,29 @@ function StormChaserPanel({
           <strong className="text-xs">Storm Chaser / Severe Intelligence</strong>
         </div>
         <p className="mt-1 text-[9px] leading-relaxed text-muted-foreground">
-          Official information and LandDraft-derived analysis remain visibly separate. This is
-          decision support—not an official warning or a guarantee of safety.
+          LandDraft automatically combines NOAA tracked-storm guidance with official alerts.
+          Provider probabilities, LandDraft motion projections, and official warnings remain visibly
+          separate.
         </p>
+      </div>
+
+      <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-3 text-[9px] leading-relaxed text-emerald-950">
+        <strong className="block text-[10px]">Automatic severe-weather analysis</strong>
+        No manual motion or hazard entry is required. NOAA/CIMSS storm objects update about every
+        two minutes; LandDraft uses recent matching positions to calculate a limited, widening
+        motion corridor when the history passes quality checks.
       </div>
 
       <div>
         <div className="flex items-center gap-2 text-[10px] font-semibold">
-          Active official contexts
+          Active storm intelligence
           <span className="ml-auto rounded-full bg-secondary px-2 py-0.5 text-[8px]">
             {storms.length}
           </span>
         </div>
         {storms.length ? (
           <div className="mt-2 space-y-1">
-            {storms.map((storm) => (
+            {storms.slice(0, 40).map((storm) => (
               <button
                 key={storm.id}
                 type="button"
@@ -1368,23 +1433,43 @@ function StormChaserPanel({
                 )}
               >
                 <span className="block truncate text-[10px] font-semibold">{storm.title}</span>
-                <span className="block truncate text-[8px] text-muted-foreground">
-                  {storm.id} · {weatherAgeLabel(storm.source)}
+                <span className="mt-0.5 flex items-center gap-1 text-[8px] text-muted-foreground">
+                  <span className="truncate">
+                    {storm.basis === "provider-guidance" ? "NOAA guidance" : "Official context"} ·{" "}
+                    {weatherAgeLabel(storm.source)}
+                  </span>
+                  {storm.basis === "provider-guidance" && (
+                    <span className="ml-auto shrink-0 rounded-full bg-orange-100 px-1.5 py-0.5 font-semibold text-orange-900">
+                      max {Math.round(stormMaximumProbability(storm))}%
+                    </span>
+                  )}
                 </span>
               </button>
             ))}
+            {storms.length > 40 && (
+              <p className="px-2 pt-1 text-[8px] text-muted-foreground">
+                Showing the 40 highest-ranked/relevant objects of {storms.length}.
+              </p>
+            )}
           </div>
         ) : (
           <p className="mt-2 rounded-2xl bg-secondary p-3 text-[10px] text-muted-foreground">
-            No active official severe-weather alert was returned for the inspected point. This is
-            not an all-clear, and LandDraft will not invent a storm object.
+            No current tracked storm object or official alert context was returned. This is not an
+            all-clear; unavailable data is never replaced with an invented storm.
           </p>
         )}
       </div>
 
       {activeStorm && (
         <>
-          <div className="rounded-2xl border border-rose-200 bg-rose-50 p-3 text-rose-950">
+          <div
+            className={cn(
+              "rounded-2xl border p-3",
+              isGuidance
+                ? "border-orange-200 bg-orange-50 text-orange-950"
+                : "border-rose-200 bg-rose-50 text-rose-950",
+            )}
+          >
             <span className="inline-flex rounded-full bg-white/80 px-2 py-1 text-[8px] font-bold">
               {activeStorm.statusLabel}
             </span>
@@ -1395,8 +1480,16 @@ function StormChaserPanel({
             <div className="mt-2 grid grid-cols-2 gap-1 text-[8px]">
               <span>Updated {weatherAgeLabel(activeStorm.source)}</span>
               <span>Quality {activeStorm.source.quality.toUpperCase()}</span>
-              <span>Motion: unavailable</span>
-              <span>Future track: withheld</span>
+              <span>
+                Motion:{" "}
+                {activeStorm.motion
+                  ? `${Math.round(activeStorm.motion.bearingDeg)}° at ${(activeStorm.motion.speedMS * 2.23694).toFixed(0)} mph`
+                  : "insufficient history"}
+              </span>
+              <span>
+                Forecast:{" "}
+                {activeStorm.forecastPositions.length ? "motion-only corridor" : "withheld"}
+              </span>
             </div>
           </div>
 
@@ -1414,19 +1507,81 @@ function StormChaserPanel({
                       "ml-auto rounded-full px-2 py-0.5 text-[8px] font-semibold uppercase",
                       hazard.status === "official-context"
                         ? "bg-rose-100 text-rose-800"
-                        : "bg-background text-muted-foreground",
+                        : hazard.status === "analyzed"
+                          ? "bg-orange-100 text-orange-900"
+                          : "bg-background text-muted-foreground",
                     )}
                   >
-                    {hazard.status === "official-context" ? "Official context" : "Unavailable"}
+                    {hazard.probabilityPct !== null
+                      ? `${Math.round(hazard.probabilityPct)}% / next hour`
+                      : hazard.status === "official-context"
+                        ? "Official context"
+                        : hazard.status === "analyzed"
+                          ? "signal available"
+                          : "Unavailable"}
+                  </span>
+                  <span className="w-20 text-right text-[8px] text-muted-foreground">
+                    {stormTrendLabel[hazard.trend]}
                   </span>
                 </div>
               ))}
             </div>
             <p className="mt-2 text-[8px] leading-relaxed text-muted-foreground">
-              Blank scores are intentional. LandDraft does not convert an alert name into a made-up
-              probability, trend, hail size, wind speed, or tornado location.
+              Percentages are NOAA/CIMSS calibrated next-hour guidance for a tracked object—not an
+              official warning, tornado location, or guarantee that a hazard will occur.
             </p>
           </div>
+
+          {activeStorm.history.length > 1 && (
+            <div className="rounded-2xl border border-border p-3">
+              <div className="flex items-center gap-2">
+                <strong className="text-xs">Recent analyzed history</strong>
+                <span className="ml-auto text-[8px] text-muted-foreground">
+                  {activeStorm.history.length} samples
+                </span>
+              </div>
+              <div
+                className="mt-3 flex h-16 items-end gap-1.5"
+                aria-label="Any-severe guidance trend"
+              >
+                {activeStorm.history.map((sample) => (
+                  <div
+                    key={sample.validTime}
+                    className="flex min-w-0 flex-1 flex-col items-center gap-1"
+                  >
+                    <span className="text-[7px] font-semibold">
+                      {sample.probabilitySeverePct === undefined
+                        ? "—"
+                        : `${Math.round(sample.probabilitySeverePct)}%`}
+                    </span>
+                    <span
+                      className="w-full rounded-t bg-orange-400"
+                      style={{
+                        height: `${Math.max(3, sample.probabilitySeverePct ?? 0) * 0.42}px`,
+                      }}
+                    />
+                    <span className="text-[7px] text-muted-foreground">
+                      {new Date(sample.validTime).toLocaleTimeString([], {
+                        hour: "numeric",
+                        minute: "2-digit",
+                      })}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {activeStorm.forecastPositions.length > 0 && (
+            <div className="rounded-2xl border border-orange-200 bg-orange-50 p-3 text-orange-950">
+              <strong className="text-xs">Map track & uncertainty</strong>
+              <p className="mt-1 text-[9px] leading-relaxed">
+                The dashed line shows recent-motion extrapolation. Orange likely/possible envelopes
+                widen through {activeStorm.forecastPositions.at(-1)?.leadMinutes} minutes. It is not
+                a deterministic tornado or storm path.
+              </p>
+            </div>
+          )}
 
           <div className="rounded-2xl border border-border p-3">
             <div className="flex items-center gap-2">
@@ -1459,14 +1614,14 @@ function StormChaserPanel({
               <div
                 className={cn(
                   "mt-2 rounded-xl p-3",
-                  relativePosition.insideOfficialAlert
+                  relativePosition.insideAnalyzedArea
                     ? "bg-rose-100 text-rose-950"
                     : "bg-secondary",
                 )}
               >
                 <div className="grid grid-cols-2 gap-2">
                   <Condition
-                    label="Alert reference distance"
+                    label="Storm reference distance"
                     value={`${relativePosition.distanceMiles.toFixed(1)} mi`}
                   />
                   <Condition
@@ -1494,6 +1649,13 @@ function StormChaserPanel({
                 </li>
               ))}
             </ul>
+            <ul className="mt-2 space-y-1 border-t border-border pt-2 text-[8px] text-muted-foreground">
+              {Object.values(activeStorm.hazards).flatMap((hazard) =>
+                hazard.reasons.map((reason) => (
+                  <li key={`${hazard.kind}-${reason}`}>• {reason}</li>
+                )),
+              )}
+            </ul>
             <p className="mt-2 text-[8px] font-semibold uppercase text-primary">
               {activeStorm.source.providerName} · {activeStorm.source.temporalKind}
             </p>
@@ -1507,8 +1669,9 @@ function StormChaserPanel({
       )}
 
       <div className="rounded-2xl bg-amber-50 p-3 text-[9px] leading-relaxed text-amber-950">
-        Official warnings supersede LandDraft analysis. Routing toward a storm, “safe route” claims,
-        and exact tornado timing are deliberately unavailable.
+        Official warnings supersede LandDraft and provider guidance. Historical records support
+        later calibration/validation; they are not substituted for current radar. Routing toward a
+        storm, “safe route” claims, and exact tornado timing remain deliberately unavailable.
       </div>
     </div>
   );

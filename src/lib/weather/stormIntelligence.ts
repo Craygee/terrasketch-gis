@@ -125,6 +125,7 @@ export function buildStormObjectsFromAlerts(
         hazards,
         motion: null,
         forecastPositions: [],
+        history: [],
         evidence: [
           {
             id: `${alert.id}-official-alert`,
@@ -224,15 +225,15 @@ export function stormRelativePosition(
   const user = point(userCoordinates);
   const bearingDeg = ((bearing(user, storm.centroid) % 360) + 360) % 360;
   const distanceMiles = distance(user, storm.centroid, { units: "miles" });
-  const insideOfficialAlert = Boolean(
-    storm.geometry && booleanPointInPolygon(user, storm.geometry),
-  );
-  const nearOfficialHazard = !insideOfficialAlert && distanceMiles <= 10;
+  const insideAnalyzedArea = Boolean(storm.geometry && booleanPointInPolygon(user, storm.geometry));
+  const insideOfficialAlert = storm.basis === "official-alert-area" && insideAnalyzedArea;
+  const nearOfficialHazard = !insideAnalyzedArea && distanceMiles <= 10;
   return {
     distanceMiles,
     bearingDeg,
     cardinalBearing: cardinal(bearingDeg),
     insideOfficialAlert,
+    insideAnalyzedArea,
     exposure: insideOfficialAlert
       ? "inside-official-hazard"
       : nearOfficialHazard
@@ -240,8 +241,10 @@ export function stormRelativePosition(
         : "outside-analyzed-area",
     message: insideOfficialAlert
       ? "You are inside an official alert area. Prioritize official instructions; LandDraft will not recommend an observation route."
-      : nearOfficialHazard
-        ? "You are near the selected official alert area. Conditions can change quickly; no route is represented as safe."
-        : "Outside the selected alert polygon does not mean safe. Check warnings, roads, flooding, lightning, and current conditions.",
+      : insideAnalyzedArea
+        ? "You are inside the selected provider-tracked storm object. This is not an official warning boundary, but conditions may be hazardous."
+        : nearOfficialHazard
+          ? "You are near the selected official alert area. Conditions can change quickly; no route is represented as safe."
+          : "Outside the selected alert polygon does not mean safe. Check warnings, roads, flooding, lightning, and current conditions.",
   };
 }

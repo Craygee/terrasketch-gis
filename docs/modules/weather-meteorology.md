@@ -7,7 +7,7 @@ Pricing: Undecided
 
 ## Capabilities
 
-Phase 1.4 provides the optional Weather workspace, normalized provider contracts, capability hooks,
+Phase 1.5 provides the optional Weather workspace, normalized provider contracts, capability hooks,
 layer catalog, universal multi-product timeline, responsive weather drawer/inspector,
 project-aware viewport, official U.S. warning ingestion, NWS current conditions/forecast,
 MET Norway global model fallback, NOAA/NWS MRMS radar with official NWS radar failover, nearest-site
@@ -18,11 +18,13 @@ stations, source health/provenance, a conservative photography-candidate analysi
 Xweather bring-your-own-account adapter for global radar/satellite/lightning coverage plus a searchable,
 progressively disclosed catalog of 76 weather-relevant Xweather raster products.
 
-The Storm Chaser workspace now includes official-alert-backed Storm Objects, stable IDs, explicit
-official-versus-derived labeling, evidence/limitations cards, ephemeral device GPS, relative
-distance/bearing and inside-warning route suppression. It deliberately withholds numerical severe
-scores, storm classification and future tracks until validated observational/model feeds support
-them.
+The Storm Chaser workspace now automatically loads NOAA/CIMSS ProbSevere v3 tracked-storm polygons,
+calibrated next-hour hail/wind/tornado guidance, recent trends and quality-controlled centroid
+motion. Selecting a storm flies to it and draws widening +5 to +60 minute motion-only uncertainty
+corridors. Official-alert-backed contexts remain separate, as do provider guidance and LandDraft
+derived projections. Ephemeral device GPS supplies distance/bearing and preserves inside-warning
+route suppression. Unsupported classifications, exact event locations and unsafe routes remain
+withheld.
 
 Visible products appear in a persistent **Active layer stack**. The top item renders in front;
 desktop users can drag between insertion lines and touch/keyboard users can move layers forward or
@@ -50,7 +52,8 @@ safe chase routing, soundings or certified operational risk.
   or public tile URL. Legacy shared Xweather deployment credentials are not used.
 - Future providers may require Cloudflare cache/object storage/queues, PostGIS, licensed feeds and
   additional server-side environment variables.
-- Storm Chaser contracts and calculations use the existing Weather gateway and Turf geometry. This
+- Storm Chaser contracts and calculations use the existing Weather gateway, NOAA public ProbSevere
+  GeoJSON frames and Turf geometry. This
   increment adds no runtime package or shared database table.
 
 ## Potential operating costs

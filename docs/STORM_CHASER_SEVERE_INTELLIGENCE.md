@@ -41,6 +41,18 @@ The durable distinction is:
   explicitly withholds observation-route recommendations.
 - Automated tests cover deterministic objects, exclusion of exercise data, absence of fabricated
   scores, widening uncertainty and inside-warning safety suppression.
+- Entering Storm Chaser automatically activates the NOAA/CIMSS ProbSevere v3 tracked-storm layer.
+- Current CONUS storm-object polygons are ranked with calibrated next-hour hail, wind and tornado
+  guidance; the UI repeatedly labels this provider guidance as **not an official warning**.
+- Recent matching provider frames create probability/lightning trends and a quality-controlled
+  centroid-motion estimate without requiring manual motion or hazard entry.
+- A selected object flies the map to the storm and displays +5 to +60 minute motion-only positions
+  with widening likely/possible envelopes. Forecasts are withheld when recent history fails QC.
+- The source panel reports ProbSevere health, age and failure separately from official NWS alerts.
+- Pure fixture tests verify probability preservation, trends, motion corridors and that provider
+  storm polygons are not mislabeled as official warning areas.
+
+Detailed research and source decisions: `docs/STORM_CHASER_SEVERE_INTELLIGENCE_RESEARCH.md`.
 
 ## Current data flow
 
@@ -51,6 +63,16 @@ NWS CAP alert
   -> official WeatherAlert polygon
   -> StormObject context (basis = official-alert-area)
   -> map marker + intelligence/provenance card
+```
+
+```text
+NOAA ProbSevere current + recent immutable frames
+  -> validate and associate by provider storm ID
+  -> StormObject (basis = provider-guidance)
+  -> probabilities + trends + predictor evidence
+  -> quality-controlled recent centroid motion
+  -> widening, time-limited LandDraft motion-only corridor
+  -> selectable polygon/marker + intelligence/provenance card
 ```
 
 Datasets are not time-aligned merely because they appear on the same map. Each normalized object
@@ -118,12 +140,16 @@ permissions, production infrastructure or backups.
 
 ## Known limitations
 
-- Storm contexts currently come from official alert polygons returned for the inspected point, not
-  a nationwide/global event feed.
-- The marker is the alert polygon centroid/fallback reference point, not a detected storm centroid.
-- No raw velocity, correlation coefficient, lightning strike, road closure or model-analysis grid is
-  yet part of a storm object.
-- Tornado/hail/wind/flood/lightning scores, trends and future tracks intentionally show unavailable.
+- NOAA ProbSevere tracked-storm coverage is CONUS, not global. Official alert contexts are still
+  point-based rather than viewport/regional.
+- ProbSevere probabilities are provider guidance; LandDraft does not reproduce the upstream model or
+  claim a probability for an exact point/tornado location.
+- Current LandDraft tracks are recent-centroid, motion-only projections. They do not yet blend
+  environmental steering, optical tracking, model or ensemble solutions and do not handle every
+  object split/merge.
+- No raw velocity, correlation coefficient, individual lightning strike, road closure or full model
+  grid is yet ingested into the LandDraft analysis engine.
+- Flood probability remains unavailable in the connected ProbSevere product.
 - Continuous GPS is ephemeral and works only while Chase mode is active; no location history is
   persisted.
 - No route is represented as safe or recommended toward a storm.

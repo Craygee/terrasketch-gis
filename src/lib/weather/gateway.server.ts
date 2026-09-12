@@ -10,6 +10,7 @@ import {
 } from "./normalize";
 import type {
   RadarFrame,
+  StormObject,
   WeatherAlert,
   WeatherBundle,
   WeatherForecastPeriod,
@@ -24,6 +25,7 @@ import { loadMetNorwayPoint } from "./metNorway.server";
 import { buildPhotographyAssessment } from "./photography.server";
 import { nearestWeatherRadarSite, type WeatherRadarSite } from "./radar";
 import { buildStormObjectsFromAlerts } from "./stormIntelligence";
+import { loadProbSevereStormObjects } from "./probSevere.server";
 import {
   xweatherProviderHealth,
   xweatherRadarFrames,
@@ -1148,6 +1150,7 @@ export async function loadWeatherBundle(request: WeatherPointRequest): Promise<W
   let radarFrames: RadarFrame[] = [];
   const rasterFrames: WeatherRasterFrame[] = [];
   let stationObservations: WeatherStationObservation[] = [];
+  let probSevereObjects: StormObject[] = [];
   let photography: WeatherBundle["photography"] = null;
   let nwsCovered = false;
 
@@ -1494,6 +1497,42 @@ export async function loadWeatherBundle(request: WeatherPointRequest): Promise<W
       );
     }
 
+    if (requestedLayers.has("weather.severe.intelligence")) {
+      try {
+        probSevereObjects = await loadProbSevereStormObjects(request, controller.signal);
+        const latest = probSevereObjects[0]?.source;
+        providerHealth.push(
+          health({
+            providerId: "noaa-probsevere-v3",
+            providerName: "NOAA / CIMSS ProbSevere",
+            status: latest?.quality === "stale" ? "degraded" : "up",
+            products: ["tracked storm objects", "next-hour hail/wind/tornado guidance"],
+            coverage: "Contiguous United States",
+            lastSuccessfulRequest: generatedAt,
+            lastUpdate: latest?.sourceTimestamp,
+            error:
+              latest?.quality === "stale" ? "The newest published guidance is stale" : undefined,
+            costClass: "public",
+          }),
+        );
+      } catch (error) {
+        warnings.push(
+          "NOAA ProbSevere storm intelligence is temporarily unavailable; official alerts remain available.",
+        );
+        providerHealth.push(
+          health({
+            providerId: "noaa-probsevere-v3",
+            providerName: "NOAA / CIMSS ProbSevere",
+            status: "down",
+            products: ["tracked storm objects", "next-hour hail/wind/tornado guidance"],
+            coverage: "Contiguous United States",
+            error: error instanceof Error ? error.message : "ProbSevere request failed",
+            costClass: "public",
+          }),
+        );
+      }
+    }
+
     if (!current)
       warnings.push(
         nwsCovered
@@ -1511,7 +1550,10 @@ export async function loadWeatherBundle(request: WeatherPointRequest): Promise<W
     current,
     forecast,
     alerts,
-    stormObjects: buildStormObjectsFromAlerts(alerts, [request.longitude, request.latitude]),
+    stormObjects: [
+      ...probSevereObjects,
+      ...buildStormObjectsFromAlerts(alerts, [request.longitude, request.latitude]),
+    ],
     radarFrames,
     rasterFrames,
     stationObservations,

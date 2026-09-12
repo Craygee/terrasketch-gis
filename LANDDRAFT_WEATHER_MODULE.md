@@ -4,7 +4,7 @@ This file is the durable handoff for future LandDraft Weather sessions.
 
 ## Current phase
 
-Phase 1.4 provider and Storm Chaser foundation is implemented on `feature/test-module-development`. The module is optional,
+Phase 1.5 provider and automated Storm Chaser foundation is implemented on `feature/test-module-development`. The module is optional,
 test-only, and does not change billing, plans, production infrastructure or backups. One additive
 per-user RLS table supports encrypted bring-your-own Xweather credentials.
 
@@ -82,11 +82,17 @@ Read first:
   Xweather API key; its client ID/secret components are encrypted server-side and never embedded in a browser
   URL or frontend bundle. The Worker needs `XWEATHER_CREDENTIAL_ENCRYPTION_KEY`, and deployments
   sharing Supabase must share that encryption key. NOAA remains primary for U.S. radar.
-- Official-alert-backed Storm Objects and ephemeral GPS-relative Chase context are implemented.
+- NOAA/CIMSS ProbSevere v3 tracked-storm objects, calibrated next-hour provider guidance, recent
+  object history, quality-controlled centroid motion, widening motion-only map corridors, official
+  alert contexts and ephemeral GPS-relative Chase context are implemented. Provider guidance is
+  never labeled as an official warning.
   Individual raw lightning strikes, additional professional radar moments (including storm-relative
   velocity, correlation coefficient and differential reflectivity), calibrated storm signatures,
   upper-air/convective grids, soundings, historical archives and commercial global radar remain
   unconfigured.
+
+Research and safety decisions for automated Storm Chaser analysis are maintained in
+`docs/STORM_CHASER_SEVERE_INTELLIGENCE_RESEARCH.md`.
 
 ## Photography analysis state
 
