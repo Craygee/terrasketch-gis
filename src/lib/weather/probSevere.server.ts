@@ -101,12 +101,12 @@ async function recentFrameNames(signal: AbortSignal) {
   );
 }
 
-function selectHistoryFrames(filenames: string[]) {
+export function selectHistoryFrames(filenames: string[]) {
   const latest = filenames.at(-1);
   const latestTime = latest ? frameTime(latest) : undefined;
   if (!latest || !latestTime) return [];
   const latestMs = new Date(latestTime).getTime();
-  const selected = [0, 5, 10, 15].flatMap((minutes) => {
+  const selected = [0, 5, 10, 15, 30].flatMap((minutes) => {
     const target = latestMs - minutes * 60_000;
     const closest = filenames.reduce<string | undefined>((best, candidate) => {
       const candidateTime = frameTime(candidate);
@@ -169,11 +169,17 @@ function trend(current: number | undefined, previous: number | undefined): Storm
   return "steady";
 }
 
-function changeReason(label: string, current: number | undefined, previous: number | undefined) {
+function changeReason(
+  label: string,
+  current: number | undefined,
+  previous: number | undefined,
+  windowMinutes?: number,
+) {
   if (current === undefined || previous === undefined) return undefined;
   const change = current - previous;
   const sign = change > 0 ? "+" : "";
-  return `${label} ${sign}${change.toFixed(0)} points over ${change === 0 ? "the sampled history" : "about 15 minutes"}.`;
+  const windowLabel = windowMinutes ? `about ${windowMinutes} minutes` : "the sampled history";
+  return `${label} ${sign}${change.toFixed(0)} points over ${windowLabel}.`;
 }
 
 function guidanceHazard(
@@ -181,6 +187,7 @@ function guidanceHazard(
   probabilityPct: number | undefined,
   previousProbabilityPct: number | undefined,
   validTime: string,
+  windowMinutes?: number,
 ): StormHazardAssessment {
   if (probabilityPct === undefined)
     return {
@@ -201,7 +208,7 @@ function guidanceHazard(
     trend: trend(probabilityPct, previousProbabilityPct),
     reasons: [
       `NOAA/CIMSS ProbSevere next-hour ${kind} guidance is ${probabilityPct.toFixed(0)}%.`,
-      changeReason("Probability change", probabilityPct, previousProbabilityPct),
+      changeReason("Probability change", probabilityPct, previousProbabilityPct, windowMinutes),
       "This is probabilistic guidance for the tracked storm object, not an official warning or an exact event location.",
     ].filter((value): value is string => Boolean(value)),
   };
@@ -223,6 +230,7 @@ function lightningHazard(
   current: StormHistorySample,
   previous: StormHistorySample | undefined,
   validTime: string,
+  windowMinutes?: number,
 ): StormHazardAssessment {
   const rate = current.flashRatePerMinute;
   if (rate === undefined) return unavailableHazard("lightning");
@@ -235,7 +243,7 @@ function lightningHazard(
     trend: trend(rate, previous?.flashRatePerMinute),
     reasons: [
       `Current provider flash-rate predictor: ${rate.toFixed(0)} flashes/min.`,
-      changeReason("Flash-rate change", rate, previous?.flashRatePerMinute),
+      changeReason("Flash-rate change", rate, previous?.flashRatePerMinute, windowMinutes),
       "Flash rate is context, not a probability and not an individual-strike location.",
     ].filter((value): value is string => Boolean(value)),
   };
@@ -336,6 +344,14 @@ function stormFromFeature(
   });
   const current = history.at(-1) ?? sampleFrom(feature, validTime);
   const previous = history[0];
+  const historyWindowMinutes = previous
+    ? Math.max(
+        1,
+        Math.round(
+          (new Date(current.validTime).getTime() - new Date(previous.validTime).getTime()) / 60_000,
+        ),
+      )
+    : undefined;
   const tornado = probability(feature.properties, "ProbTor");
   const hail = probability(feature.properties, "ProbHail");
   const wind = probability(feature.properties, "ProbWind");
@@ -354,11 +370,29 @@ function stormFromFeature(
     validUntil: source.expirationTime,
     officialAlertIds: [],
     hazards: {
-      tornado: guidanceHazard("tornado", tornado, previous?.probabilityTornadoPct, validTime),
-      hail: guidanceHazard("hail", hail, previous?.probabilityHailPct, validTime),
-      wind: guidanceHazard("wind", wind, previous?.probabilityWindPct, validTime),
+      tornado: guidanceHazard(
+        "tornado",
+        tornado,
+        previous?.probabilityTornadoPct,
+        validTime,
+        historyWindowMinutes,
+      ),
+      hail: guidanceHazard(
+        "hail",
+        hail,
+        previous?.probabilityHailPct,
+        validTime,
+        historyWindowMinutes,
+      ),
+      wind: guidanceHazard(
+        "wind",
+        wind,
+        previous?.probabilityWindPct,
+        validTime,
+        historyWindowMinutes,
+      ),
       flood: unavailableHazard("flood"),
-      lightning: lightningHazard(current, previous, validTime),
+      lightning: lightningHazard(current, previous, validTime, historyWindowMinutes),
     },
     motion,
     forecastPositions: motion

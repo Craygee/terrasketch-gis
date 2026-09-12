@@ -35,7 +35,9 @@ const STORM_AREA_FILL = "landdraft-weather-storm-area-fill";
 const STORM_AREA_LINE = "landdraft-weather-storm-area-line";
 const STORM_FORECAST_SOURCE = "landdraft-weather-storm-forecast";
 const STORM_FORECAST_POSSIBLE = "landdraft-weather-storm-forecast-possible";
+const STORM_FORECAST_POSSIBLE_LINE = "landdraft-weather-storm-forecast-possible-line";
 const STORM_FORECAST_LIKELY = "landdraft-weather-storm-forecast-likely";
+const STORM_FORECAST_LIKELY_LINE = "landdraft-weather-storm-forecast-likely-line";
 const STORM_FORECAST_LINE = "landdraft-weather-storm-forecast-line";
 const STORM_FORECAST_POINT = "landdraft-weather-storm-forecast-point";
 const STORM_FORECAST_LABEL = "landdraft-weather-storm-forecast-label";
@@ -127,7 +129,10 @@ function stormCollection(
   };
 }
 
-function stormAreaCollection(storms: StormObject[]): FeatureCollection<Polygon | MultiPolygon> {
+function stormAreaCollection(
+  storms: StormObject[],
+  selectedStormId: string | null = null,
+): FeatureCollection<Polygon | MultiPolygon> {
   return {
     type: "FeatureCollection",
     features: storms.flatMap((storm) =>
@@ -138,6 +143,7 @@ function stormAreaCollection(storms: StormObject[]): FeatureCollection<Polygon |
               properties: {
                 id: storm.id,
                 title: storm.title,
+                selected: storm.id === selectedStormId,
                 maximumProbability: Math.max(
                   storm.hazards.tornado.probabilityPct ?? 0,
                   storm.hazards.hail.probabilityPct ?? 0,
@@ -400,7 +406,12 @@ function ensureVectorLayers(map: MlMap) {
       id: STORM_AREA_LINE,
       type: "line",
       source: STORM_AREA_SOURCE,
-      paint: { "line-color": "#7f1d1d", "line-width": 2, "line-dasharray": [2, 1] },
+      paint: {
+        "line-color": "#7f1d1d",
+        "line-width": ["case", ["boolean", ["get", "selected"], false], 4, 1.5],
+        "line-opacity": ["case", ["boolean", ["get", "selected"], false], 1, 0.55],
+        "line-dasharray": [2, 1],
+      },
     });
   if (!map.getSource(STORM_FORECAST_SOURCE))
     map.addSource(STORM_FORECAST_SOURCE, {
@@ -413,7 +424,20 @@ function ensureVectorLayers(map: MlMap) {
       type: "fill",
       source: STORM_FORECAST_SOURCE,
       filter: ["==", ["get", "kind"], "possible"],
-      paint: { "fill-color": "#fdba74", "fill-opacity": 0.07 },
+      paint: { "fill-color": "#fdba74", "fill-opacity": 0.13 },
+    });
+  if (!map.getLayer(STORM_FORECAST_POSSIBLE_LINE))
+    map.addLayer({
+      id: STORM_FORECAST_POSSIBLE_LINE,
+      type: "line",
+      source: STORM_FORECAST_SOURCE,
+      filter: ["==", ["get", "kind"], "possible"],
+      paint: {
+        "line-color": "#ea580c",
+        "line-width": 1.5,
+        "line-opacity": 0.75,
+        "line-dasharray": [3, 2],
+      },
     });
   if (!map.getLayer(STORM_FORECAST_LIKELY))
     map.addLayer({
@@ -421,7 +445,15 @@ function ensureVectorLayers(map: MlMap) {
       type: "fill",
       source: STORM_FORECAST_SOURCE,
       filter: ["==", ["get", "kind"], "likely"],
-      paint: { "fill-color": "#f97316", "fill-opacity": 0.12 },
+      paint: { "fill-color": "#f97316", "fill-opacity": 0.23 },
+    });
+  if (!map.getLayer(STORM_FORECAST_LIKELY_LINE))
+    map.addLayer({
+      id: STORM_FORECAST_LIKELY_LINE,
+      type: "line",
+      source: STORM_FORECAST_SOURCE,
+      filter: ["==", ["get", "kind"], "likely"],
+      paint: { "line-color": "#c2410c", "line-width": 2, "line-opacity": 0.95 },
     });
   if (!map.getLayer(STORM_FORECAST_LINE))
     map.addLayer({
@@ -552,7 +584,9 @@ function renderedLayerIds(weatherLayerId: string) {
       STORM_AREA_FILL,
       STORM_AREA_LINE,
       STORM_FORECAST_POSSIBLE,
+      STORM_FORECAST_POSSIBLE_LINE,
       STORM_FORECAST_LIKELY,
+      STORM_FORECAST_LIKELY_LINE,
       STORM_FORECAST_LINE,
       STORM_FORECAST_POINT,
       STORM_FORECAST_LABEL,
@@ -633,7 +667,10 @@ export function WeatherMapOverlay({
         stormCollection(stormObjectsVisible ? (bundle?.stormObjects ?? []) : [], selectedStormId),
       );
       (map.getSource(STORM_AREA_SOURCE) as GeoJSONSource | undefined)?.setData(
-        stormAreaCollection(stormObjectsVisible ? (bundle?.stormObjects ?? []) : []),
+        stormAreaCollection(
+          stormObjectsVisible ? (bundle?.stormObjects ?? []) : [],
+          selectedStormId,
+        ),
       );
       const selectedStorm =
         bundle?.stormObjects.find((storm) => storm.id === selectedStormId) ?? null;
@@ -671,7 +708,9 @@ export function WeatherMapOverlay({
         STORM_AREA_FILL,
         STORM_AREA_LINE,
         STORM_FORECAST_POSSIBLE,
+        STORM_FORECAST_POSSIBLE_LINE,
         STORM_FORECAST_LIKELY,
+        STORM_FORECAST_LIKELY_LINE,
         STORM_FORECAST_LINE,
         STORM_FORECAST_POINT,
         STORM_FORECAST_LABEL,

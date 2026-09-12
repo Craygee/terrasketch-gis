@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MapMouseEvent } from "maplibre-gl";
+import { bbox } from "@turf/turf";
 import {
   AlertTriangle,
   ArrowDown,
@@ -129,6 +130,32 @@ function closestFrameIndex(frames: Array<{ timestamp: string }>, selectedTime: s
   return selected;
 }
 
+function stormTrackBounds(storm: StormObject): [[number, number], [number, number]] {
+  const [initialMinLongitude, initialMinLatitude, initialMaxLongitude, initialMaxLatitude] = bbox(
+    storm.geometry ?? storm.centroid,
+  ) as [number, number, number, number];
+  let minLongitude = initialMinLongitude;
+  let minLatitude = initialMinLatitude;
+  let maxLongitude = initialMaxLongitude;
+  let maxLatitude = initialMaxLatitude;
+
+  for (const forecast of storm.forecastPositions) {
+    const [longitude, latitude] = forecast.location.geometry.coordinates as [number, number];
+    const latitudeRadius = forecast.possibleRadiusKm / 111.32;
+    const longitudeRadius =
+      forecast.possibleRadiusKm / (111.32 * Math.max(0.2, Math.cos((latitude * Math.PI) / 180)));
+    minLongitude = Math.min(minLongitude, longitude - longitudeRadius);
+    maxLongitude = Math.max(maxLongitude, longitude + longitudeRadius);
+    minLatitude = Math.min(minLatitude, latitude - latitudeRadius);
+    maxLatitude = Math.max(maxLatitude, latitude + latitudeRadius);
+  }
+
+  return [
+    [minLongitude, minLatitude],
+    [maxLongitude, maxLatitude],
+  ];
+}
+
 export function WeatherWorkspace() {
   const wb = useWorkbench();
   const { map } = useMapRef();
@@ -171,6 +198,7 @@ export function WeatherWorkspace() {
   const latestWeatherRequest = useRef(0);
   const xweatherReloaded = useRef("");
   const geolocationWatch = useRef<number | null>(null);
+  const stormAutoCenterPending = useRef(false);
 
   useEffect(
     () => () => {
@@ -385,6 +413,7 @@ export function WeatherWorkspace() {
   };
 
   const openWorkspace = (view: WorkspaceView) => {
+    if (view === "storm-chaser") stormAutoCenterPending.current = true;
     setWorkspaceView(view);
     if (view === "weather") return;
     setAdvancedLayers(true);
@@ -431,6 +460,7 @@ export function WeatherWorkspace() {
       bundle?.stormObjects?.find((storm) =>
         selectedAlert ? storm.officialAlertIds.includes(selectedAlert.id) : false,
       ) ??
+      bundle?.stormObjects?.find((storm) => storm.forecastPositions.length > 0) ??
       bundle?.stormObjects?.[0] ??
       null,
     [bundle?.stormObjects, selectedAlert, selectedStormId],
@@ -482,17 +512,29 @@ export function WeatherWorkspace() {
     );
   };
 
-  const selectStorm = (storm: StormObject) => {
-    setSelectedStormId(storm.id);
-    const alert = bundle?.alerts.find((item) => storm.officialAlertIds.includes(item.id));
-    setSelectedAlert(alert ?? null);
-    const [longitude, latitude] = storm.centroid.geometry.coordinates as [number, number];
-    map?.flyTo({
-      center: [longitude, latitude],
-      zoom: Math.max(map.getZoom(), 7),
-      essential: true,
-    });
-  };
+  const selectStorm = useCallback(
+    (storm: StormObject) => {
+      setSelectedStormId(storm.id);
+      const alert = bundle?.alerts.find((item) => storm.officialAlertIds.includes(item.id));
+      setSelectedAlert(alert ?? null);
+      if (window.innerWidth < 768) setMobileSheet(null);
+      if (!map) return;
+      map.fitBounds(stormTrackBounds(storm), {
+        padding: window.innerWidth < 768 ? 46 : 70,
+        maxZoom: storm.forecastPositions.length ? 8 : 9,
+        duration: 850,
+        essential: true,
+      });
+    },
+    [bundle?.alerts, map],
+  );
+
+  useEffect(() => {
+    if (workspaceView !== "storm-chaser" || !stormAutoCenterPending.current || !activeStorm || !map)
+      return;
+    stormAutoCenterPending.current = false;
+    selectStorm(activeStorm);
+  }, [activeStorm, map, selectStorm, workspaceView]);
 
   const visibleGroups = useMemo(
     () =>
@@ -776,6 +818,7 @@ export function WeatherWorkspace() {
                       chaserAccuracy={chaserAccuracy}
                       chaseError={chaseError}
                       onSelect={selectStorm}
+                      onCenterTrack={() => activeStorm && selectStorm(activeStorm)}
                       onToggleChase={toggleChaseLocation}
                     />
                   ) : (
@@ -829,6 +872,7 @@ export function WeatherWorkspace() {
                 chaserAccuracy={chaserAccuracy}
                 chaseError={chaseError}
                 onSelect={selectStorm}
+                onCenterTrack={() => activeStorm && selectStorm(activeStorm)}
                 onToggleChase={toggleChaseLocation}
               />
             ) : (
@@ -1369,6 +1413,50 @@ function stormMaximumProbability(storm: StormObject) {
   );
 }
 
+function StormHistorySignal({
+  label,
+  values,
+  format,
+}: {
+  label: string;
+  values: Array<number | undefined>;
+  format: (value: number) => string;
+}) {
+  const available = values.filter((value): value is number => value !== undefined);
+  if (!available.length) return null;
+  const first = available[0]!;
+  const latest = available.at(-1)!;
+  const change = latest - first;
+  const minimum = Math.min(...available);
+  const maximum = Math.max(...available);
+  const spread = Math.max(maximum - minimum, Math.abs(maximum) * 0.05, 0.001);
+  return (
+    <div className="rounded-xl bg-secondary p-2">
+      <div className="flex items-center gap-1">
+        <span className="truncate text-[8px] font-semibold">{label}</span>
+        <span className="ml-auto text-[8px] font-bold">{format(latest)}</span>
+      </div>
+      <div className="mt-1 flex h-4 items-end gap-0.5" aria-hidden="true">
+        {values.map((value, index) => (
+          <span
+            key={`${label}-${index}`}
+            className="min-w-0 flex-1 rounded-t bg-primary/65"
+            style={{
+              height: value === undefined ? "2px" : `${3 + ((value - minimum) / spread) * 13}px`,
+              opacity: value === undefined ? 0.2 : 1,
+            }}
+          />
+        ))}
+      </div>
+      <span className="mt-1 block text-[7px] text-muted-foreground">
+        {available.length > 1
+          ? `${change > 0 ? "↑" : change < 0 ? "↓" : "→"} ${format(Math.abs(change))} across available samples`
+          : "one available sample"}
+      </span>
+    </div>
+  );
+}
+
 function StormChaserPanel({
   storms,
   activeStorm,
@@ -1378,6 +1466,7 @@ function StormChaserPanel({
   chaserAccuracy,
   chaseError,
   onSelect,
+  onCenterTrack,
   onToggleChase,
 }: {
   storms: StormObject[];
@@ -1388,6 +1477,7 @@ function StormChaserPanel({
   chaserAccuracy: number | undefined;
   chaseError: string | null;
   onSelect: (storm: StormObject) => void;
+  onCenterTrack: () => void;
   onToggleChase: () => void;
 }) {
   const isGuidance = activeStorm?.basis === "provider-guidance";
@@ -1570,12 +1660,48 @@ function StormChaserPanel({
                   </div>
                 ))}
               </div>
+              <div className="mt-3 grid grid-cols-2 gap-1.5">
+                <StormHistorySignal
+                  label="Low-level rotation"
+                  values={activeStorm.history.map((sample) => sample.lowLevelAzimuthalShearS1)}
+                  format={(value) => value.toFixed(3)}
+                />
+                <StormHistorySignal
+                  label="MESH hail size"
+                  values={activeStorm.history.map((sample) => sample.meshInches)}
+                  format={(value) => `${value.toFixed(1)} in`}
+                />
+                <StormHistorySignal
+                  label="Composite reflectivity"
+                  values={activeStorm.history.map((sample) => sample.compositeReflectivityDbz)}
+                  format={(value) => `${value.toFixed(0)} dBZ`}
+                />
+                <StormHistorySignal
+                  label="Flash rate"
+                  values={activeStorm.history.map((sample) => sample.flashRatePerMinute)}
+                  format={(value) => `${value.toFixed(0)}/min`}
+                />
+              </div>
+              <p className="mt-2 text-[7px] leading-relaxed text-muted-foreground">
+                NOAA/CIMSS predictors are displayed as recent storm-object signals. They are not
+                independent measurements at every point inside the polygon.
+              </p>
             </div>
           )}
 
           {activeStorm.forecastPositions.length > 0 && (
             <div className="rounded-2xl border border-orange-200 bg-orange-50 p-3 text-orange-950">
-              <strong className="text-xs">Map track & uncertainty</strong>
+              <div className="flex items-center gap-2">
+                <strong className="text-xs">Map track & uncertainty</strong>
+                <button
+                  type="button"
+                  onClick={onCenterTrack}
+                  className="ml-auto inline-flex items-center gap-1 rounded-lg border border-orange-300 bg-white/80 px-2 py-1 text-[8px] font-semibold hover:bg-white"
+                >
+                  <Crosshair className="size-3" />
+                  Show full track
+                </button>
+              </div>
               <p className="mt-1 text-[9px] leading-relaxed">
                 The dashed line shows recent-motion extrapolation. Orange likely/possible envelopes
                 widen through {activeStorm.forecastPositions.at(-1)?.leadMinutes} minutes. It is not

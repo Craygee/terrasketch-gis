@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { Feature, FeatureCollection, Polygon } from "geojson";
-import { normalizeProbSevereFrames, type ProbSevereInputFrame } from "./probSevere.server.ts";
+import {
+  normalizeProbSevereFrames,
+  selectHistoryFrames,
+  type ProbSevereInputFrame,
+} from "./probSevere.server.ts";
 import { stormRelativePosition } from "./stormIntelligence.ts";
 
 function stormFeature(
@@ -79,6 +83,10 @@ test("ProbSevere normalization preserves calibrated probabilities and builds a r
   assert.equal(storm.hazards.tornado.probabilityPct, 16);
   assert.equal(storm.hazards.hail.trend, "increasing");
   assert.equal(storm.history.length, 2);
+  assert.equal(storm.history.at(-1)?.lowLevelAzimuthalShearS1, 0.012);
+  assert.equal(storm.history.at(-1)?.meshInches, 1.4);
+  assert.equal(storm.history.at(-1)?.compositeReflectivityDbz, 61);
+  assert.equal(storm.history.at(-1)?.flashRatePerMinute, 18);
   assert.ok(storm.motion);
   assert.equal(storm.forecastPositions.length, 6);
   assert.ok(
@@ -87,6 +95,18 @@ test("ProbSevere normalization preserves calibrated probabilities and builds a r
     ),
   );
   assert.match(storm.statusLabel, /NOT AN OFFICIAL WARNING/);
+});
+
+test("recent history selection retains an approximately 30-minute analysis window", () => {
+  const filenames = Array.from({ length: 16 }, (_, index) => {
+    const minute = String(index * 2).padStart(2, "0");
+    return `MRMS_PROBSEVERE_20260911_20${minute}00.json`;
+  });
+  const selected = selectHistoryFrames(filenames);
+
+  assert.equal(selected.at(-1), "MRMS_PROBSEVERE_20260911_203000.json");
+  assert.equal(selected[0], "MRMS_PROBSEVERE_20260911_200000.json");
+  assert.equal(selected.length, 5);
 });
 
 test("provider storm geometry is not mislabeled as an official warning area", () => {

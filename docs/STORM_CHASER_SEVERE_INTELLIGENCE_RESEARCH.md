@@ -186,6 +186,32 @@ remains undecided.
 8. Add road/flood/lightning/terrain-aware lower-exposure viewing zones after every required input is
    current and attributable.
 
+## 2026-09-11 track-visibility and signal-history increment
+
+Storm Chaser now selects the highest-ranked current object when its workspace opens and fits the
+entire selected storm polygon plus its widening motion corridor in the map viewport. Selecting a
+different storm or pressing **Show full track** repeats that fit. Likely and possible envelopes have
+separate, stronger outlines so that project map position and low-opacity fills cannot make the
+track appear absent.
+
+Recent ProbSevere sampling now reaches approximately 30 minutes when matching object identity is
+available. The Storm Intelligence panel plots the provider's any-severe guidance alongside four
+documented storm-object predictors: 0–2 km maximum azimuthal shear, MESH, composite reflectivity
+and flash rate. These are NOAA/CIMSS object-level inputs, not point measurements and not an
+independent LandDraft tornado-detection algorithm.[10]
+
+The longer window adds one small public GeoJSON frame request per uncached Storm Chaser refresh
+(five rather than four). It introduces no paid provider charge or new runtime dependency, but it
+does increase Worker fetches, parsing CPU and cache traffic; those remain potential operating costs
+to measure before production pricing is decided.
+
+MRMS publishes rotation-track grids as compressed GRIB2 products, and NEXRAD Level II supplies the
+base velocity and dual-polarization moments needed for deeper analysis.[11][12] Those products need
+server-side decoding, temporal/spatial alignment, archived-case validation, durable object history
+and meteorological review. This increment deliberately does not label the displayed ProbSevere
+predictors as a debris signature or confirmed rotation track. Durable history remains a coordinated
+backend dependency and is not emulated with browser storage.
+
 ## Sources
 
 1. NOAA Central Library, _ProbSevere v3: Probabilities of Severe Weather Hazards in the Next Hour_,
@@ -208,3 +234,9 @@ remains undecided.
    https://www.ncei.noaa.gov/metadata/geoportal/rest/metadata/item/gov.noaa.ncdc%3AC00510/html
 9. National Hurricane Center GIS Products,
    https://www.nhc.noaa.gov/gis/
+10. NOAA/CIMSS, _ProbSevere v3 File Description_,
+    https://cimss.ssec.wisc.edu/probsevere/wp-content/uploads/sites/29/2025/11/ProbSevere_v3_FileDescription.docx.pdf
+11. NOAA/NCEP MRMS public RotationTrackML60min product directory,
+    https://mrms.ncep.noaa.gov/2D/RotationTrackML60min/
+12. NWS Radar Operations Center, Level II Data Types,
+    https://www.roc.noaa.gov/level-two-data-types.php
