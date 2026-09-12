@@ -359,6 +359,18 @@
     bottom: calc(17.25rem + env(safe-area-inset-bottom, 0px));
   }
 
+  /* Keep transient connection/save messages above the one-hand Field dock.
+     Sonner otherwise anchors them to the same bottom edge and hides every
+     primary field action until the message times out. */
+  .mobile-field-mode [data-sonner-toaster][data-y-position="bottom"] {
+    bottom: calc(10.5rem + env(safe-area-inset-bottom, 0px)) !important;
+  }
+
+  .mobile-map-mode [data-sonner-toaster][data-y-position="bottom"],
+  .weather-workspace [data-sonner-toaster][data-y-position="bottom"] {
+    bottom: calc(5rem + env(safe-area-inset-bottom, 0px)) !important;
+  }
+
   .weather-workspace .maplibregl-ctrl-bottom-right,
   .weather-workspace .maplibregl-ctrl-bottom-left {
     bottom: calc(4.75rem + env(safe-area-inset-bottom, 0px));

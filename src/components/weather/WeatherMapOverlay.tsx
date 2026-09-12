@@ -86,14 +86,15 @@ function drawWeatherEventIcon(context: CanvasRenderingContext2D, icon: WeatherEv
     context.moveTo(29, 40);
     context.lineTo(35, 40);
   } else if (icon === "hail") {
-    for (const [x, y] of [
-      [22, 23],
-      [42, 23],
-      [32, 41],
-    ] as Array<[number, number]>) {
-      context.moveTo(x + 5, y);
-      context.arc(x, y, 5, 0, Math.PI * 2);
-    }
+    context.arc(32, 32, 14, 0, Math.PI * 2);
+    context.moveTo(32, 21);
+    context.lineTo(32, 43);
+    context.moveTo(21, 32);
+    context.lineTo(43, 32);
+    context.moveTo(24, 24);
+    context.lineTo(40, 40);
+    context.moveTo(40, 24);
+    context.lineTo(24, 40);
   } else if (icon === "hurricane") {
     context.arc(32, 32, 7, 0, Math.PI * 2);
     context.moveTo(25, 27);
