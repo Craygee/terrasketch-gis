@@ -1,4 +1,4 @@
-import { Pause, Play, RotateCcw, SkipBack, SkipForward } from "lucide-react";
+import { Clock3, Pause, Play, RotateCcw, SkipBack, SkipForward } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { WeatherTimelineState } from "@/lib/weather/types";
 
@@ -38,17 +38,30 @@ export function WeatherTimeline({
     onChange({ selectedTime: frames[next]!.timestamp, playing: false });
   };
 
+  if (!frames.length) {
+    return (
+      <div
+        className="flex h-9 items-center justify-center gap-2 rounded-xl bg-secondary/70 px-3 text-[9px] text-muted-foreground"
+        aria-label="Weather timeline"
+      >
+        <Clock3 className="size-3.5" />
+        <strong className="font-semibold text-foreground">Weather timeline</strong>
+        <span>· Turn on a time-enabled layer to view history</span>
+      </div>
+    );
+  }
+
   return (
     <div
       className={cn(
         "rounded-2xl border border-border bg-card/95 shadow-float backdrop-blur",
-        compact ? "p-2" : "p-3",
+        "p-2",
       )}
       aria-label="Weather timeline"
     >
       <div className="flex items-center gap-1.5">
         <button
-          className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground"
+          className="flex size-8 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground"
           onClick={() => onChange({ playing: !timeline.playing })}
           aria-label={timeline.playing ? "Pause weather animation" : "Play weather animation"}
           title={timeline.playing ? "Pause" : "Play"}

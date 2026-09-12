@@ -506,155 +506,163 @@ export function WeatherWorkspace() {
           </aside>
         )}
 
-        <main className="relative min-w-0 flex-1">
-          <MapCanvas />
-          <WeatherMapOverlay
-            bundle={bundle}
-            workspace={workspace}
-            onSelectAlert={setSelectedAlert}
-          />
+        <main className="relative flex min-w-0 flex-1 flex-col">
+          <div className="relative min-h-0 flex-1">
+            <MapCanvas />
+            <WeatherMapOverlay
+              bundle={bundle}
+              workspace={workspace}
+              onSelectAlert={setSelectedAlert}
+            />
 
-          <div className="pointer-events-none absolute inset-x-0 top-0 z-30 flex items-start gap-2 p-2 sm:p-3">
-            <div className="pointer-events-auto hidden sm:block">
-              <SearchBox />
-            </div>
-            <div className="pointer-events-auto ml-auto flex items-center gap-2">
-              <button
-                onClick={() => setLeftOpen((open) => !open)}
-                className="hidden size-10 items-center justify-center rounded-2xl border border-border bg-card/95 shadow-float lg:flex"
-                title={leftOpen ? "Hide weather layers" : "Show weather layers"}
-                aria-label={leftOpen ? "Hide weather layers" : "Show weather layers"}
-              >
-                <PanelLeft className="size-4" />
-              </button>
-              <button
-                onClick={() => setRightOpen((open) => !open)}
-                className="hidden size-10 items-center justify-center rounded-2xl border border-border bg-card/95 shadow-float xl:flex"
-                title={rightOpen ? "Hide weather inspector" : "Show weather inspector"}
-                aria-label={rightOpen ? "Hide weather inspector" : "Show weather inspector"}
-              >
-                <PanelRight className="size-4" />
-              </button>
-              <BasemapControl dropDirection="down" />
-            </div>
-          </div>
-
-          <div className="pointer-events-none absolute left-3 top-16 z-30 flex max-w-[calc(100%-6rem)] flex-col gap-2">
-            <WeatherStatusPill bundle={bundle} loading={loading} error={error} />
-            {workspaceView !== "weather" && workspaceView !== "photography" && (
-              <div className="pointer-events-auto max-w-sm rounded-2xl border border-border bg-card/95 p-3 text-[10px] shadow-float backdrop-blur">
-                <strong>{workspaceChoices.find((item) => item.id === workspaceView)?.name}</strong>
-                <p className="mt-1 text-muted-foreground">
-                  Connected professional products are available in the layer drawer. Additional
-                  products remain disabled until their data and licensing are validated.
-                </p>
+            <div className="pointer-events-none absolute inset-x-0 top-0 z-30 flex items-start gap-2 p-2 sm:p-3">
+              <div className="pointer-events-auto hidden sm:block">
+                <SearchBox />
               </div>
+              <div className="pointer-events-auto ml-auto flex items-center gap-2">
+                <button
+                  onClick={() => setLeftOpen((open) => !open)}
+                  className="hidden size-10 items-center justify-center rounded-2xl border border-border bg-card/95 shadow-float lg:flex"
+                  title={leftOpen ? "Hide weather layers" : "Show weather layers"}
+                  aria-label={leftOpen ? "Hide weather layers" : "Show weather layers"}
+                >
+                  <PanelLeft className="size-4" />
+                </button>
+                <button
+                  onClick={() => setRightOpen((open) => !open)}
+                  className="hidden size-10 items-center justify-center rounded-2xl border border-border bg-card/95 shadow-float xl:flex"
+                  title={rightOpen ? "Hide weather inspector" : "Show weather inspector"}
+                  aria-label={rightOpen ? "Hide weather inspector" : "Show weather inspector"}
+                >
+                  <PanelRight className="size-4" />
+                </button>
+                <BasemapControl dropDirection="down" />
+              </div>
+            </div>
+
+            <div className="pointer-events-none absolute left-3 top-16 z-30 flex max-w-[calc(100%-6rem)] flex-col gap-2">
+              <WeatherStatusPill bundle={bundle} loading={loading} error={error} />
+              {workspaceView !== "weather" && workspaceView !== "photography" && (
+                <div className="pointer-events-auto max-w-sm rounded-2xl border border-border bg-card/95 p-3 text-[10px] shadow-float backdrop-blur">
+                  <strong>
+                    {workspaceChoices.find((item) => item.id === workspaceView)?.name}
+                  </strong>
+                  <p className="mt-1 text-muted-foreground">
+                    Connected professional products are available in the layer drawer. Additional
+                    products remain disabled until their data and licensing are validated.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <WeatherLegends workspace={workspace} />
+
+            <div className="absolute inset-x-2 bottom-[calc(.5rem+env(safe-area-inset-bottom))] z-40 grid grid-cols-4 gap-1 rounded-3xl border border-border bg-card/95 p-1 shadow-float backdrop-blur lg:hidden">
+              <MobileButton
+                icon={<Layers3 />}
+                label="Layers"
+                active={mobileSheet === "layers"}
+                onClick={() => setMobileSheet(mobileSheet === "layers" ? null : "layers")}
+              />
+              <MobileButton
+                icon={<CloudSun />}
+                label="Weather"
+                active={mobileSheet === "weather"}
+                onClick={() => setMobileSheet(mobileSheet === "weather" ? null : "weather")}
+              />
+              <MobileButton
+                icon={<Crosshair />}
+                label="Inspect"
+                active={workspace.inspectorEnabled}
+                onClick={() => updateWorkspace({ inspectorEnabled: !workspace.inspectorEnabled })}
+              />
+              <MobileButton
+                icon={<Database />}
+                label="Sources"
+                active={mobileSheet === "sources"}
+                onClick={() => setMobileSheet(mobileSheet === "sources" ? null : "sources")}
+              />
+            </div>
+
+            {mobileSheet && (
+              <section className="absolute inset-x-2 bottom-[calc(4.6rem+env(safe-area-inset-bottom))] z-40 max-h-[62dvh] overflow-hidden rounded-3xl border border-border bg-card shadow-float lg:hidden">
+                <div className="flex items-center border-b border-border px-4 py-2">
+                  <strong className="text-sm">
+                    {mobileSheet === "layers"
+                      ? `Weather layers · ${activeLayerCount} on`
+                      : mobileSheet === "sources"
+                        ? "Data sources"
+                        : "Weather at map point"}
+                  </strong>
+                  <button
+                    onClick={() => setMobileSheet(null)}
+                    className="ml-auto flex size-8 items-center justify-center rounded-xl hover:bg-accent"
+                    aria-label="Close weather panel"
+                  >
+                    <X className="size-4" />
+                  </button>
+                </div>
+                <div className="max-h-[calc(62dvh-3rem)] overflow-y-auto">
+                  {mobileSheet === "layers" ? (
+                    <WeatherLayerPanel
+                      workspace={workspace}
+                      bundle={bundle}
+                      groups={visibleGroups}
+                      advanced={advancedLayers}
+                      presetName={presetName}
+                      onPresetName={setPresetName}
+                      onAdvanced={setAdvancedLayers}
+                      onCategory={(selectedCategory) => updateWorkspace({ selectedCategory })}
+                      onLayer={setLayer}
+                      onLayerOrder={reorderWeatherLayer}
+                      onWorkspace={(next) => wb.setWeatherWorkspace(next)}
+                      xweatherConnection={xweatherConnection}
+                      onManageXweather={() => setXweatherConnectionOpen(true)}
+                      compact
+                    />
+                  ) : mobileSheet === "sources" ? (
+                    <SourcePanel
+                      bundle={bundle}
+                      xweatherConnection={xweatherConnection}
+                      onManageXweather={() => setXweatherConnectionOpen(true)}
+                    />
+                  ) : (
+                    <InspectorPanel
+                      bundle={bundle}
+                      activeAlert={activeAlert}
+                      workspace={workspace}
+                    />
+                  )}
+                </div>
+                {mobileSheet === "weather" && (
+                  <div className="border-t border-border p-2">
+                    <WeatherTimeline
+                      timeline={workspace.timeline}
+                      frames={timelineFrames}
+                      onChange={updateTimeline}
+                      compact
+                    />
+                  </div>
+                )}
+              </section>
+            )}
+
+            {!workspace.introductoryChooserSeen && (
+              <FirstRunPanel
+                choices={starterChoices}
+                onChoose={chooseStarter}
+                onSkip={() => updateWorkspace({ introductoryChooserSeen: true })}
+              />
             )}
           </div>
 
-          <div className="absolute inset-x-3 bottom-4 z-30 hidden lg:block">
+          <div className="hidden shrink-0 border-t border-border bg-card px-2 py-1.5 lg:block">
             <WeatherTimeline
               timeline={workspace.timeline}
               frames={timelineFrames}
               onChange={updateTimeline}
             />
           </div>
-
-          <WeatherLegends workspace={workspace} />
-
-          <div className="absolute inset-x-2 bottom-[calc(.5rem+env(safe-area-inset-bottom))] z-40 grid grid-cols-4 gap-1 rounded-3xl border border-border bg-card/95 p-1 shadow-float backdrop-blur lg:hidden">
-            <MobileButton
-              icon={<Layers3 />}
-              label="Layers"
-              active={mobileSheet === "layers"}
-              onClick={() => setMobileSheet(mobileSheet === "layers" ? null : "layers")}
-            />
-            <MobileButton
-              icon={<CloudSun />}
-              label="Weather"
-              active={mobileSheet === "weather"}
-              onClick={() => setMobileSheet(mobileSheet === "weather" ? null : "weather")}
-            />
-            <MobileButton
-              icon={<Crosshair />}
-              label="Inspect"
-              active={workspace.inspectorEnabled}
-              onClick={() => updateWorkspace({ inspectorEnabled: !workspace.inspectorEnabled })}
-            />
-            <MobileButton
-              icon={<Database />}
-              label="Sources"
-              active={mobileSheet === "sources"}
-              onClick={() => setMobileSheet(mobileSheet === "sources" ? null : "sources")}
-            />
-          </div>
-
-          {mobileSheet && (
-            <section className="absolute inset-x-2 bottom-[calc(4.6rem+env(safe-area-inset-bottom))] z-40 max-h-[62dvh] overflow-hidden rounded-3xl border border-border bg-card shadow-float lg:hidden">
-              <div className="flex items-center border-b border-border px-4 py-2">
-                <strong className="text-sm">
-                  {mobileSheet === "layers"
-                    ? `Weather layers · ${activeLayerCount} on`
-                    : mobileSheet === "sources"
-                      ? "Data sources"
-                      : "Weather at map point"}
-                </strong>
-                <button
-                  onClick={() => setMobileSheet(null)}
-                  className="ml-auto flex size-8 items-center justify-center rounded-xl hover:bg-accent"
-                  aria-label="Close weather panel"
-                >
-                  <X className="size-4" />
-                </button>
-              </div>
-              <div className="max-h-[calc(62dvh-3rem)] overflow-y-auto">
-                {mobileSheet === "layers" ? (
-                  <WeatherLayerPanel
-                    workspace={workspace}
-                    bundle={bundle}
-                    groups={visibleGroups}
-                    advanced={advancedLayers}
-                    presetName={presetName}
-                    onPresetName={setPresetName}
-                    onAdvanced={setAdvancedLayers}
-                    onCategory={(selectedCategory) => updateWorkspace({ selectedCategory })}
-                    onLayer={setLayer}
-                    onLayerOrder={reorderWeatherLayer}
-                    onWorkspace={(next) => wb.setWeatherWorkspace(next)}
-                    xweatherConnection={xweatherConnection}
-                    onManageXweather={() => setXweatherConnectionOpen(true)}
-                    compact
-                  />
-                ) : mobileSheet === "sources" ? (
-                  <SourcePanel
-                    bundle={bundle}
-                    xweatherConnection={xweatherConnection}
-                    onManageXweather={() => setXweatherConnectionOpen(true)}
-                  />
-                ) : (
-                  <InspectorPanel bundle={bundle} activeAlert={activeAlert} workspace={workspace} />
-                )}
-              </div>
-              {mobileSheet === "weather" && (
-                <div className="border-t border-border p-2">
-                  <WeatherTimeline
-                    timeline={workspace.timeline}
-                    frames={timelineFrames}
-                    onChange={updateTimeline}
-                    compact
-                  />
-                </div>
-              )}
-            </section>
-          )}
-
-          {!workspace.introductoryChooserSeen && (
-            <FirstRunPanel
-              choices={starterChoices}
-              onChoose={chooseStarter}
-              onSkip={() => updateWorkspace({ introductoryChooserSeen: true })}
-            />
-          )}
         </main>
 
         {rightOpen && (
@@ -836,31 +844,42 @@ function WeatherLayerPanel({
         </p>
       </div>
 
-      <div className="flex items-center gap-2 rounded-2xl border border-border bg-background p-3">
+      <div
+        className={cn(
+          "flex items-center gap-2 border border-border bg-background",
+          xweatherConnection.connected ? "rounded-xl px-2 py-1.5" : "rounded-2xl p-3",
+        )}
+      >
         <span
           className={cn(
-            "flex size-8 shrink-0 items-center justify-center rounded-xl",
+            "flex shrink-0 items-center justify-center rounded-xl",
+            xweatherConnection.connected ? "size-6" : "size-8",
             xweatherConnection.connected
               ? "bg-emerald-100 text-emerald-800"
               : "bg-secondary text-muted-foreground",
           )}
         >
-          <KeyRound className="size-4" />
+          <KeyRound className={xweatherConnection.connected ? "size-3.5" : "size-4"} />
         </span>
         <div className="min-w-0 flex-1">
-          <strong className="block truncate text-[10px]">Xweather premium products</strong>
-          <p className="truncate text-[9px] text-muted-foreground">
-            {xweatherConnection.state === "loading"
-              ? "Checking connection…"
-              : xweatherConnection.connected
-                ? `Connected · ${xweatherConnection.clientIdHint ?? "your account"}`
+          <strong className="block truncate text-[10px]">
+            {xweatherConnection.connected ? "Xweather connected" : "Xweather premium products"}
+          </strong>
+          {!xweatherConnection.connected && (
+            <p className="truncate text-[9px] text-muted-foreground">
+              {xweatherConnection.state === "loading"
+                ? "Checking connection…"
                 : "Use your own Xweather account and allowance"}
-          </p>
+            </p>
+          )}
         </div>
         <button
           type="button"
           onClick={onManageXweather}
-          className="shrink-0 rounded-xl bg-primary px-2.5 py-2 text-[9px] font-semibold text-primary-foreground"
+          className={cn(
+            "shrink-0 rounded-xl bg-primary font-semibold text-primary-foreground",
+            xweatherConnection.connected ? "px-2 py-1 text-[8px]" : "px-2.5 py-2 text-[9px]",
+          )}
         >
           {xweatherConnection.connected ? "Manage" : "Connect"}
         </button>
