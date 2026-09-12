@@ -234,6 +234,7 @@ export function WeatherWorkspace() {
   const loadedProject = useRef<string | null>(null);
   const latestWeatherRequest = useRef(0);
   const xweatherReloaded = useRef("");
+  const synchronizedLayerRequest = useRef("");
   const geolocationWatch = useRef<number | null>(null);
   const chaseFollowRef = useRef(true);
   const stormAutoCenterPending = useRef(false);
@@ -351,7 +352,13 @@ export function WeatherWorkspace() {
   useEffect(() => {
     if (!wb.projectReady || !bundle) return;
     const loadedLayerIds = new Set(bundle.request.requestedLayerIds ?? []);
-    if (requestedLayerIds.every((id) => loadedLayerIds.has(id))) return;
+    const requestKey = [...requestedLayerIds].sort().join("|");
+    if (requestedLayerIds.every((id) => loadedLayerIds.has(id))) {
+      synchronizedLayerRequest.current = requestKey;
+      return;
+    }
+    if (synchronizedLayerRequest.current === requestKey) return;
+    synchronizedLayerRequest.current = requestKey;
     void loadPoint(workspace.lastInspectionPoint ?? wb.mapView.center, true, requestedLayerIds);
   }, [
     bundle,
