@@ -54,7 +54,12 @@ import {
 } from "@/lib/weather/format";
 import { createWeatherPreset, normalizeWeatherWorkspace } from "@/lib/weather/model";
 import { WEATHER_LAYER_GROUPS, weatherLayerRegistry } from "@/lib/weather/registry";
-import { stormRelativePosition } from "@/lib/weather/stormIntelligence";
+import {
+  MAX_ROLLING_STORM_FORECAST_AGE_MINUTES,
+  stormRelativePosition,
+  timeAdjustedStormForecast,
+  type TimeAdjustedStormForecast,
+} from "@/lib/weather/stormIntelligence";
 import type {
   StormObject,
   StormRelativePosition,
@@ -140,7 +145,10 @@ function closestFrameIndex(frames: Array<{ timestamp: string }>, selectedTime: s
   return selected;
 }
 
-function stormTrackBounds(storm: StormObject): [[number, number], [number, number]] {
+function stormTrackBounds(
+  storm: StormObject,
+  forecastPositions = storm.forecastPositions,
+): [[number, number], [number, number]] {
   const [initialMinLongitude, initialMinLatitude, initialMaxLongitude, initialMaxLatitude] = bbox(
     storm.geometry ?? storm.centroid,
   ) as [number, number, number, number];
@@ -157,7 +165,7 @@ function stormTrackBounds(storm: StormObject): [[number, number], [number, numbe
     maxLatitude = Math.max(maxLatitude, latitude);
   }
 
-  for (const forecast of storm.forecastPositions) {
+  for (const forecast of forecastPositions) {
     const [longitude, latitude] = forecast.location.geometry.coordinates as [number, number];
     const latitudeRadius = forecast.possibleRadiusKm / 111.32;
     const longitudeRadius =
@@ -211,6 +219,9 @@ export function WeatherWorkspace() {
   const [chaseError, setChaseError] = useState<string | null>(null);
   const [navigationTargetMode, setNavigationTargetMode] = useState(false);
   const [navigationTarget, setNavigationTarget] = useState<[number, number] | undefined>();
+  const [forecastReferenceTime, setForecastReferenceTime] = useState(() =>
+    new Date().toISOString(),
+  );
   const [presetName, setPresetName] = useState("");
   const [xweatherConnection, setXweatherConnection] =
     useState<XweatherConnectionStatus>(loadingXweatherConnection);
@@ -230,6 +241,14 @@ export function WeatherWorkspace() {
     },
     [],
   );
+
+  useEffect(() => {
+    const timer = window.setInterval(
+      () => setForecastReferenceTime(new Date().toISOString()),
+      30_000,
+    );
+    return () => window.clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     if (wb.projectReady && !wb.weatherWorkspace) wb.setWeatherWorkspace(workspace);
@@ -533,6 +552,10 @@ export function WeatherWorkspace() {
       activeStorm && chaserLocation ? stormRelativePosition(activeStorm, chaserLocation) : null,
     [activeStorm, chaserLocation],
   );
+  const activeStormForecast = useMemo(
+    () => (activeStorm ? timeAdjustedStormForecast(activeStorm, forecastReferenceTime) : null),
+    [activeStorm, forecastReferenceTime],
+  );
 
   const toggleChaseLocation = () => {
     if (geolocationWatch.current !== null) {
@@ -603,14 +626,15 @@ export function WeatherWorkspace() {
       setSelectedAlert(alert ?? null);
       if (window.innerWidth < 768) setMobileSheet(null);
       if (!map) return;
-      map.fitBounds(stormTrackBounds(storm), {
+      const rollingForecast = timeAdjustedStormForecast(storm, forecastReferenceTime);
+      map.fitBounds(stormTrackBounds(storm, rollingForecast.positions), {
         padding: window.innerWidth < 768 ? 46 : 70,
-        maxZoom: storm.forecastPositions.length ? 8 : 9,
+        maxZoom: rollingForecast.positions.length ? 8 : 9,
         duration: 850,
         essential: true,
       });
     },
-    [bundle?.alerts, map],
+    [bundle?.alerts, forecastReferenceTime, map],
   );
 
   useEffect(() => {
@@ -768,6 +792,7 @@ export function WeatherWorkspace() {
                 Boolean(workspace.layerSettings["weather.severe.intelligence"]?.visible)
               }
               selectedStormId={activeStorm?.id ?? null}
+              forecastReferenceTime={forecastReferenceTime}
               chaserLocation={chaserLocation}
               navigationTarget={navigationTarget}
             />
@@ -910,6 +935,7 @@ export function WeatherWorkspace() {
                       storms={bundle?.stormObjects ?? []}
                       activeStorm={activeStorm}
                       activeAlert={activeAlert}
+                      forecastTiming={activeStormForecast}
                       relativePosition={relativePosition}
                       chaseActive={chaseActive}
                       chaseFollow={chaseFollow}
@@ -974,6 +1000,7 @@ export function WeatherWorkspace() {
                 storms={bundle?.stormObjects ?? []}
                 activeStorm={activeStorm}
                 activeAlert={activeAlert}
+                forecastTiming={activeStormForecast}
                 relativePosition={relativePosition}
                 chaseActive={chaseActive}
                 chaseFollow={chaseFollow}
@@ -1575,6 +1602,7 @@ function StormChaserPanel({
   storms,
   activeStorm,
   activeAlert,
+  forecastTiming,
   relativePosition,
   chaseActive,
   chaseFollow,
@@ -1593,6 +1621,7 @@ function StormChaserPanel({
   storms: StormObject[];
   activeStorm: StormObject | null;
   activeAlert: WeatherAlert | null;
+  forecastTiming: TimeAdjustedStormForecast | null;
   relativePosition: StormRelativePosition | null;
   chaseActive: boolean;
   chaseFollow: boolean;
@@ -1773,8 +1802,21 @@ function StormChaserPanel({
               </span>
               <span>
                 Forecast:{" "}
-                {activeStorm.forecastPositions.length ? "motion-only corridor" : "withheld"}
+                {forecastTiming?.positions.length ? "rolling motion corridor" : "withheld"}
               </span>
+              {forecastTiming?.ageAdjusted && (
+                <span className="col-span-2 mt-1 rounded-lg border border-orange-300 bg-white/75 px-2 py-1.5 font-semibold">
+                  ESTIMATED FROM DELAYED MOTION · source is{" "}
+                  {Math.max(1, Math.round(forecastTiming.sourceAgeMinutes))} min old · +minute
+                  labels remain relative to now
+                </span>
+              )}
+              {forecastTiming?.expired && (
+                <span className="col-span-2 mt-1 rounded-lg border border-rose-300 bg-rose-100 px-2 py-1.5 font-semibold text-rose-900">
+                  FUTURE PATH WITHHELD · motion is {Math.round(forecastTiming.sourceAgeMinutes)} min
+                  old, beyond the {MAX_ROLLING_STORM_FORECAST_AGE_MINUTES}-minute freshness limit
+                </span>
+              )}
             </div>
           </div>
 
@@ -1883,7 +1925,9 @@ function StormChaserPanel({
             </div>
           )}
 
-          {(activeStorm.history.length > 1 || activeStorm.forecastPositions.length > 0) && (
+          {(activeStorm.history.length > 1 ||
+            Boolean(forecastTiming?.positions.length) ||
+            Boolean(forecastTiming?.expired)) && (
             <div className="rounded-2xl border border-orange-200 bg-orange-50 p-3 text-orange-950">
               <div className="flex items-center gap-2">
                 <strong className="text-xs">Recent track & future uncertainty</strong>
@@ -1899,10 +1943,17 @@ function StormChaserPanel({
               <p className="mt-1 text-[9px] leading-relaxed">
                 The solid blue line and negative-minute labels show recent provider storm-object
                 positions.
-                {activeStorm.forecastPositions.length
-                  ? ` The dashed orange line and likely/possible envelopes are motion-only projections that widen through ${activeStorm.forecastPositions.at(-1)?.leadMinutes} minutes.`
-                  : " A future corridor is withheld because the recent motion did not pass quality checks."}
-                Neither display is a deterministic tornado path.
+                {forecastTiming?.positions.length
+                  ? ` The dashed orange line and likely/possible envelopes remain ${forecastTiming.positions.at(-1)?.leadMinutes} minutes ahead of the current clock. ${
+                      forecastTiming.ageAdjusted
+                        ? `The last validated motion is ${Math.max(1, Math.round(forecastTiming.sourceAgeMinutes))} minutes old, so LandDraft has carried that motion forward and widened its uncertainty while waiting for new analysis.`
+                        : "The path is anchored to the latest analysis."
+                    }`
+                  : forecastTiming?.expired
+                    ? ` The future corridor is withheld because the last validated motion is ${Math.round(forecastTiming.sourceAgeMinutes)} minutes old and has exceeded the ${MAX_ROLLING_STORM_FORECAST_AGE_MINUTES}-minute freshness limit.`
+                    : " A future corridor is withheld because the recent motion did not pass quality checks."}{" "}
+                New provider analysis automatically re-anchors and recalculates the path. Neither
+                display is a deterministic tornado path.
               </p>
             </div>
           )}

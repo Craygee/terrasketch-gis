@@ -20,6 +20,7 @@ import {
   stormSeverityScore,
   type WeatherEventIcon,
 } from "@/lib/weather/stormPresentation";
+import { timeAdjustedStormForecast } from "@/lib/weather/stormIntelligence";
 
 const ALERT_SOURCE = "landdraft-weather-alerts";
 const ALERT_FILL = "landdraft-weather-alert-fill";
@@ -265,11 +266,14 @@ function stormAreaCollection(
 
 function stormForecastCollection(
   storm: StormObject | null,
+  referenceTime: string,
 ): FeatureCollection<Polygon | LineString | Point> {
   if (!storm) return { type: "FeatureCollection", features: [] };
   const features: Array<Feature<Polygon | LineString | Point>> = [];
   const severity = stormSeverityScore(storm);
   const eventIcon = stormIconImageId(stormEventIcon(storm));
+  const rollingForecast = timeAdjustedStormForecast(storm, referenceTime);
+  const forecastPositions = rollingForecast.positions;
   if (storm.history.length > 1) {
     const latestTime = new Date(storm.history.at(-1)!.validTime).getTime();
     features.push({
@@ -291,7 +295,7 @@ function stormForecastCollection(
       });
     }
   }
-  for (const forecast of storm.forecastPositions) {
+  for (const forecast of forecastPositions) {
     const possible = circle(forecast.location, forecast.possibleRadiusKm, {
       units: "kilometers",
       steps: 48,
@@ -324,15 +328,20 @@ function stormForecastCollection(
       },
     );
   }
-  if (storm.forecastPositions.length)
+  if (forecastPositions.length)
     features.push({
       type: "Feature",
-      properties: { kind: "track", id: storm.id },
+      properties: {
+        kind: "track",
+        id: storm.id,
+        ageAdjusted: rollingForecast.ageAdjusted,
+        sourceAgeMinutes: rollingForecast.sourceAgeMinutes,
+      },
       geometry: {
         type: "LineString",
         coordinates: [
-          storm.centroid.geometry.coordinates,
-          ...storm.forecastPositions.map((forecast) => forecast.location.geometry.coordinates),
+          rollingForecast.anchor.geometry.coordinates,
+          ...forecastPositions.map((forecast) => forecast.location.geometry.coordinates),
         ],
       },
     });
@@ -564,7 +573,7 @@ function ensureVectorLayers(map: MlMap) {
   if (!map.getSource(STORM_FORECAST_SOURCE))
     map.addSource(STORM_FORECAST_SOURCE, {
       type: "geojson",
-      data: stormForecastCollection(null),
+      data: stormForecastCollection(null, new Date().toISOString()),
     });
   if (!map.getLayer(STORM_FORECAST_POSSIBLE))
     map.addLayer({
@@ -830,6 +839,7 @@ export function WeatherMapOverlay({
   onSelectStorm,
   stormObjectsVisible = false,
   selectedStormId = null,
+  forecastReferenceTime,
   chaserLocation,
   navigationTarget,
 }: {
@@ -839,6 +849,7 @@ export function WeatherMapOverlay({
   onSelectStorm: (storm: StormObject) => void;
   stormObjectsVisible?: boolean;
   selectedStormId?: string | null;
+  forecastReferenceTime: string;
   chaserLocation?: [number, number] | undefined;
   navigationTarget?: [number, number] | undefined;
 }) {
@@ -901,7 +912,7 @@ export function WeatherMapOverlay({
       const selectedStorm =
         bundle?.stormObjects.find((storm) => storm.id === selectedStormId) ?? null;
       (map.getSource(STORM_FORECAST_SOURCE) as GeoJSONSource | undefined)?.setData(
-        stormForecastCollection(stormObjectsVisible ? selectedStorm : null),
+        stormForecastCollection(stormObjectsVisible ? selectedStorm : null, forecastReferenceTime),
       );
       (map.getSource(CHASER_SOURCE) as GeoJSONSource | undefined)?.setData(
         pointCollection(chaserLocation),
@@ -970,6 +981,7 @@ export function WeatherMapOverlay({
     stationsVisible,
     stormObjectsVisible,
     selectedStormId,
+    forecastReferenceTime,
     chaserLocation,
     navigationTarget,
     workspace.lastInspectionPoint,

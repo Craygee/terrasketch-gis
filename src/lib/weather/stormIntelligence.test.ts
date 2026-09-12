@@ -6,8 +6,9 @@ import {
   buildStormObjectsFromAlerts,
   forecastFromValidatedMotion,
   stormRelativePosition,
+  timeAdjustedStormForecast,
 } from "./stormIntelligence.ts";
-import type { StormMotion, WeatherAlert } from "./types.ts";
+import type { StormMotion, StormObject, WeatherAlert } from "./types.ts";
 
 const source = sourceMetadata({
   providerId: "nws",
@@ -88,6 +89,71 @@ test("validated motion projections widen uncertainty with lead time", () => {
   assert.ok(
     forecasts.every((item) => item.source.qualityFlags.includes("NOT_AN_OFFICIAL_WARNING")),
   );
+});
+
+test("delayed storm motion keeps displayed lead times relative to the current clock", () => {
+  const motion: StormMotion = {
+    bearingDeg: 90,
+    speedMS: 20,
+    validTime: "2026-09-11T20:00:00Z",
+    source,
+  };
+  const origin = {
+    type: "Feature" as const,
+    properties: {},
+    geometry: { type: "Point" as const, coordinates: [-102, 32] },
+  };
+  const storm = {
+    ...buildStormObjectsFromAlerts([alert], [-102, 32])[0]!,
+    basis: "provider-guidance" as const,
+    centroid: origin,
+    motion,
+    forecastPositions: forecastFromValidatedMotion(origin, motion, [5, 30, 60]),
+  } satisfies StormObject;
+
+  const adjusted = timeAdjustedStormForecast(storm, "2026-09-11T20:10:00Z");
+  assert.equal(adjusted.ageAdjusted, true);
+  assert.equal(adjusted.expired, false);
+  assert.equal(Math.round(adjusted.sourceAgeMinutes), 10);
+  assert.deepEqual(
+    adjusted.positions.map((position) => position.leadMinutes),
+    [5, 30, 60],
+  );
+  assert.equal(adjusted.positions.at(-1)?.validTime, "2026-09-11T21:10:00.000Z");
+  assert.ok(
+    adjusted.positions.at(-1)!.location.geometry.coordinates[0]! >
+      storm.forecastPositions.at(-1)!.location.geometry.coordinates[0]!,
+  );
+  assert.ok(
+    adjusted.positions.every((position) =>
+      position.source.qualityFlags.includes("AGE_ADJUSTED_DISPLAY"),
+    ),
+  );
+});
+
+test("rolling storm motion is withheld after its freshness window", () => {
+  const motion: StormMotion = {
+    bearingDeg: 90,
+    speedMS: 20,
+    validTime: "2026-09-11T20:00:00Z",
+    source,
+  };
+  const origin = {
+    type: "Feature" as const,
+    properties: {},
+    geometry: { type: "Point" as const, coordinates: [-102, 32] },
+  };
+  const storm = {
+    ...buildStormObjectsFromAlerts([alert], [-102, 32])[0]!,
+    basis: "provider-guidance" as const,
+    centroid: origin,
+    motion,
+    forecastPositions: forecastFromValidatedMotion(origin, motion, [5, 30, 60]),
+  } satisfies StormObject;
+
+  const adjusted = timeAdjustedStormForecast(storm, "2026-09-11T20:31:00Z");
+  assert.equal(adjusted.expired, true);
+  assert.equal(adjusted.positions.length, 0);
 });
 
 test("chase position inside an official polygon suppresses safety claims", () => {

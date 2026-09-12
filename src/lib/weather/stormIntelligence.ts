@@ -167,6 +167,16 @@ export function buildStormObjectsFromAlerts(
 const qualityByLead = (leadMinutes: number): WeatherQuality =>
   leadMinutes <= 15 ? "moderate" : leadMinutes <= 60 ? "low" : "estimated";
 
+export const MAX_ROLLING_STORM_FORECAST_AGE_MINUTES = 30;
+
+export interface TimeAdjustedStormForecast {
+  positions: StormForecastPosition[];
+  anchor: Feature<Point>;
+  sourceAgeMinutes: number;
+  ageAdjusted: boolean;
+  expired: boolean;
+}
+
 /**
  * Produces a widening motion-only corridor. Callers must provide a validated
  * motion vector and should layer model/object-tracking solutions separately.
@@ -210,6 +220,83 @@ export function forecastFromValidatedMotion(
       }),
     };
   });
+}
+
+/**
+ * Keeps displayed +minute positions relative to the viewer's current clock
+ * while the latest validated motion is briefly delayed. The projection is
+ * withheld after the freshness window rather than extending stale motion
+ * indefinitely. New provider data naturally re-anchors this calculation.
+ */
+export function timeAdjustedStormForecast(
+  storm: StormObject,
+  referenceTime: string,
+  maximumSourceAgeMinutes = MAX_ROLLING_STORM_FORECAST_AGE_MINUTES,
+): TimeAdjustedStormForecast {
+  if (!storm.motion || storm.forecastPositions.length === 0)
+    return {
+      positions: [],
+      anchor: storm.centroid,
+      sourceAgeMinutes: 0,
+      ageAdjusted: false,
+      expired: false,
+    };
+
+  const motionTime = new Date(storm.motion.validTime).getTime();
+  const reference = new Date(referenceTime).getTime();
+  if (!Number.isFinite(motionTime) || !Number.isFinite(reference))
+    return {
+      positions: storm.forecastPositions,
+      anchor: storm.centroid,
+      sourceAgeMinutes: 0,
+      ageAdjusted: false,
+      expired: false,
+    };
+
+  const sourceAgeMinutes = Math.max(0, (reference - motionTime) / 60_000);
+  if (sourceAgeMinutes > maximumSourceAgeMinutes)
+    return {
+      positions: [],
+      anchor: storm.centroid,
+      sourceAgeMinutes,
+      ageAdjusted: false,
+      expired: true,
+    };
+
+  if (sourceAgeMinutes < 0.25)
+    return {
+      positions: storm.forecastPositions,
+      anchor: storm.centroid,
+      sourceAgeMinutes,
+      ageAdjusted: false,
+      expired: false,
+    };
+
+  const displayLeads = storm.forecastPositions.map((position) => position.leadMinutes);
+  const adjustedPositions = forecastFromValidatedMotion(
+    storm.centroid,
+    storm.motion,
+    displayLeads.map((lead) => lead + sourceAgeMinutes),
+  ).map((position, index) => ({
+    ...position,
+    leadMinutes: displayLeads[index]!,
+    source: {
+      ...position.source,
+      qualityFlags: Array.from(
+        new Set([...position.source.qualityFlags, "AGE_ADJUSTED_DISPLAY", "SOURCE_DATA_DELAYED"]),
+      ),
+    },
+  }));
+  const anchor = forecastFromValidatedMotion(storm.centroid, storm.motion, [sourceAgeMinutes])[0]
+    ?.location;
+
+  return {
+    positions: adjustedPositions,
+    anchor: anchor ?? storm.centroid,
+    sourceAgeMinutes,
+    ageAdjusted: true,
+    expired: false,
+  };
 }
 
 function cardinal(value: number) {
