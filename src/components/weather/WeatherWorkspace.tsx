@@ -349,6 +349,20 @@ export function WeatherWorkspace() {
   ]);
 
   useEffect(() => {
+    if (!wb.projectReady || !bundle) return;
+    const loadedLayerIds = new Set(bundle.request.requestedLayerIds ?? []);
+    if (requestedLayerIds.every((id) => loadedLayerIds.has(id))) return;
+    void loadPoint(workspace.lastInspectionPoint ?? wb.mapView.center, true, requestedLayerIds);
+  }, [
+    bundle,
+    loadPoint,
+    requestedLayerIds,
+    wb.mapView.center,
+    wb.projectReady,
+    workspace.lastInspectionPoint,
+  ]);
+
+  useEffect(() => {
     if (!wb.projectReady || workspaceView !== "storm-chaser") return;
     const timer = window.setInterval(() => {
       void loadPoint(workspace.lastInspectionPoint ?? wb.mapView.center, true);
