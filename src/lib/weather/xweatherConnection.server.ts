@@ -246,6 +246,18 @@ function validCredentialPart(value: unknown) {
   );
 }
 
+export function parseXweatherApiKey(value: unknown): XweatherUserCredentials | null {
+  if (typeof value !== "string") return null;
+  const apiKey = value.trim();
+  const separator = apiKey.indexOf("_");
+  if (separator <= 0 || separator === apiKey.length - 1) return null;
+  const clientId = apiKey.slice(0, separator);
+  const clientSecret = apiKey.slice(separator + 1);
+  return validCredentialPart(clientId) && validCredentialPart(clientSecret)
+    ? { clientId, clientSecret }
+    : null;
+}
+
 function clientIdHint(clientId: string) {
   return clientId.length <= 6
     ? `${clientId.slice(0, 2)}••••`
@@ -270,12 +282,11 @@ async function testXweatherCredentials(
     return { valid: true };
   if (response.status === 429)
     return { valid: true, error: "Connected, but this Xweather account has reached a usage limit" };
-  if (response.status === 401)
-    return { valid: false, error: "Xweather rejected the client ID or secret" };
+  if (response.status === 401) return { valid: false, error: "Xweather rejected this API key" };
   if (response.status === 403)
     return {
       valid: false,
-      error: `Xweather rejected this application. Add ${new URL(origin).hostname} to the application's namespace and confirm Raster Maps access.`,
+      error: "This Xweather API key is disabled or does not have Raster Maps access",
     };
   if (response.status >= 500)
     throw new Error("Xweather is temporarily unavailable; no credentials were saved");
@@ -362,9 +373,13 @@ export async function handleXweatherConnection(request: Request, bindings?: unkn
       const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
       const clientId = body?.["clientId"];
       const clientSecret = body?.["clientSecret"];
-      if (!validCredentialPart(clientId) || !validCredentialPart(clientSecret))
-        return jsonResponse({ error: "Enter a valid Xweather client ID and secret" }, 400);
-      const credentials = { clientId: clientId as string, clientSecret: clientSecret as string };
+      const credentials =
+        parseXweatherApiKey(body?.["apiKey"]) ??
+        (validCredentialPart(clientId) && validCredentialPart(clientSecret)
+          ? { clientId: clientId as string, clientSecret: clientSecret as string }
+          : null);
+      if (!credentials)
+        return jsonResponse({ error: "Paste a valid complete Xweather API key" }, 400);
       const test = await testXweatherCredentials(credentials, url.origin);
       if (!test.valid) return jsonResponse({ error: test.error }, 400);
       const encrypted = await encryptXweatherCredentials(

@@ -77,7 +77,7 @@ Read first:
 - The Xweather Raster Maps adapter is implemented for global radar, GeoColor/infrared/water-vapor
   satellite and a 76-product weather-relevant catalog spanning conditions, wind, forecasts, severe,
   lightning, air quality, fire, maritime, tropical and outlooks. Each user connects their own
-  Xweather application; its client ID/secret is encrypted server-side and never embedded in a browser
+  Xweather API key; its client ID/secret components are encrypted server-side and never embedded in a browser
   URL or frontend bundle. The Worker needs `XWEATHER_CREDENTIAL_ENCRYPTION_KEY`, and deployments
   sharing Supabase must share that encryption key. NOAA remains primary for U.S. radar.
 - Individual raw lightning strikes, additional professional radar moments (including storm-relative

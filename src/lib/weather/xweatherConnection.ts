@@ -45,10 +45,10 @@ export const loadingXweatherConnection = (): XweatherConnectionStatus => ({
 
 export const getXweatherConnection = () => connectionRequest();
 
-export const connectXweather = (clientId: string, clientSecret: string) =>
+export const connectXweather = (apiKey: string) =>
   connectionRequest({
     method: "POST",
-    body: JSON.stringify({ clientId: clientId.trim(), clientSecret: clientSecret.trim() }),
+    body: JSON.stringify({ apiKey: apiKey.trim() }),
   });
 
 export const disconnectXweather = () => connectionRequest({ method: "DELETE" });

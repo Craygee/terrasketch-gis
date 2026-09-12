@@ -39,38 +39,29 @@ export function XweatherConnectionDialog({
   onOpenChange: (open: boolean) => void;
   onStatus: (status: XweatherConnectionStatus) => void;
 }) {
-  const [clientId, setClientId] = useState("");
-  const [clientSecret, setClientSecret] = useState("");
+  const [apiKey, setApiKey] = useState("");
   const [editing, setEditing] = useState(!status.connected);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [previewHostname, setPreviewHostname] = useState<string | null>(null);
-
-  useEffect(() => {
-    const hostname = window.location.hostname;
-    setPreviewHostname(hostname.endsWith(".workers.dev") ? hostname : null);
-  }, []);
 
   useEffect(() => {
     if (!open) return;
     setEditing(!status.connected);
     setError(null);
-    setClientId("");
-    setClientSecret("");
+    setApiKey("");
   }, [open, status.connected]);
 
   const connect = async () => {
-    if (!clientId.trim() || !clientSecret.trim()) {
-      setError("Enter the client ID and secret from your Xweather application.");
+    if (!apiKey.trim()) {
+      setError("Enter the API key from your Xweather dashboard.");
       return;
     }
     setBusy(true);
     setError(null);
     try {
-      const next = await connectXweather(clientId, clientSecret);
+      const next = await connectXweather(apiKey);
       onStatus(next);
-      setClientId("");
-      setClientSecret("");
+      setApiKey("");
       setEditing(false);
       toast.success("Xweather connected", {
         description: "Premium weather usage now belongs to this Xweather account.",
@@ -120,7 +111,7 @@ export function XweatherConnectionDialog({
               <div className="flex items-center gap-2 text-sm font-semibold">
                 <CheckCircle2 className="size-4" /> Connected
               </div>
-              <p className="mt-1 text-xs">Client ID {status.clientIdHint ?? "saved securely"}</p>
+              <p className="mt-1 text-xs">API key {status.clientIdHint ?? "saved securely"}</p>
               {status.lastTestedAt && (
                 <p className="mt-1 text-[10px] opacity-75">
                   Tested {new Date(status.lastTestedAt).toLocaleString()}
@@ -154,24 +145,15 @@ export function XweatherConnectionDialog({
                 LandDraft uses its <strong>Raster Maps</strong> products.
               </li>
               <li>
-                <strong>2.</strong> Under <strong>Apps</strong>, create an application named
-                <strong> LandDraft</strong> with Raster Maps access.
+                <strong>2.</strong> In the left menu, select <strong>API Keys</strong>. Copy the key
+                shown, or choose <strong>Manage your API keys</strong> to create a dedicated key
+                named <strong>LandDraft</strong>.
               </li>
               <li>
-                <strong>3.</strong> Add <code>landdraft.net</code> to its allowed namespaces.
-              </li>
-              <li>
-                <strong>4.</strong> Paste that application’s client ID and secret below.
+                <strong>3.</strong> Paste the complete API key below. LandDraft securely separates
+                its client ID and secret for Xweather requests.
               </li>
             </ol>
-
-            {previewHostname && (
-              <p className="px-1 text-[10px] leading-relaxed text-muted-foreground">
-                Preview testing only: developers testing the connection here must also allow
-                <code className="ml-1">{previewHostname}</code>. Live LandDraft users do not need
-                this preview hostname.
-              </p>
-            )}
 
             <div className="flex flex-wrap gap-2">
               <a
@@ -193,27 +175,19 @@ export function XweatherConnectionDialog({
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="xweather-client-id">Xweather client ID</Label>
+              <Label htmlFor="xweather-api-key">Xweather API key</Label>
               <Input
-                id="xweather-client-id"
-                value={clientId}
-                onChange={(event) => setClientId(event.target.value)}
-                autoComplete="off"
-                spellCheck={false}
-                placeholder="Client ID"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="xweather-client-secret">Xweather client secret</Label>
-              <Input
-                id="xweather-client-secret"
+                id="xweather-api-key"
                 type="password"
-                value={clientSecret}
-                onChange={(event) => setClientSecret(event.target.value)}
+                value={apiKey}
+                onChange={(event) => setApiKey(event.target.value)}
                 autoComplete="new-password"
                 spellCheck={false}
-                placeholder="Client secret"
+                placeholder="Paste the complete API key"
               />
+              <p className="text-[10px] text-muted-foreground">
+                The key normally contains an underscore separating the client ID and secret.
+              </p>
             </div>
 
             <p className="flex gap-2 rounded-xl bg-amber-50 p-3 text-[10px] leading-relaxed text-amber-950">

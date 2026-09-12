@@ -71,7 +71,7 @@ original timestamp and becomes `STALE`; it never becomes `LIVE` because a cache 
 ### User-owned Xweather connection
 
 Optional Xweather products use a bring-your-own-account boundary rather than a shared LandDraft
-provider credential. The browser sends the client ID and secret once over HTTPS to the same-origin
+provider credential. The browser sends the combined API key once over HTTPS to the same-origin
 Worker. The Worker authenticates the Supabase session, validates the credential with Xweather,
 encrypts the pair with AES-GCM and user-bound authenticated data, and writes only ciphertext plus a
 masked hint/status to `weather_provider_connections` under per-user RLS.

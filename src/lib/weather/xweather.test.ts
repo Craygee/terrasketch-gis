@@ -5,6 +5,7 @@ import { XWEATHER_ADDITIONAL_LAYERS } from "./xweatherCatalog.ts";
 import {
   decryptXweatherCredentials,
   encryptXweatherCredentials,
+  parseXweatherApiKey,
 } from "./xweatherConnection.server.ts";
 
 test("returns commercial frames only after the user's connection is confirmed", () => {
@@ -27,6 +28,15 @@ test("encrypts Xweather credentials for one user and rejects a different user", 
     credentials,
   );
   await assert.rejects(decryptXweatherCredentials(encrypted, "user-b", "test-master-key"));
+});
+
+test("parses the combined API key issued by the current Xweather dashboard", () => {
+  assert.deepEqual(parseXweatherApiKey("client-part_secret-part_with-characters"), {
+    clientId: "client-part",
+    clientSecret: "secret-part_with-characters",
+  });
+  assert.equal(parseXweatherApiKey("missing-separator"), null);
+  assert.equal(parseXweatherApiKey("_missing-client"), null);
 });
 
 test("browser tile templates remain same-origin and contain no provider credential", () => {

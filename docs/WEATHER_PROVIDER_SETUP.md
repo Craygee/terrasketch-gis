@@ -63,8 +63,8 @@ already supplies those as ordinary GIS layers. Browser clients receive only a sa
 tile URL. Each signed-in user connects an Xweather application and its allowance/charges remain on
 that Xweather account. LandDraft never requests the user's Xweather password.
 
-The client ID and secret travel once over HTTPS to the LandDraft Worker, are tested against Xweather,
-and are AES-GCM encrypted before storage in `weather_provider_connections`. The ciphertext is bound
+The combined API key travels once over HTTPS to the LandDraft Worker, is tested against Xweather,
+and its components are AES-GCM encrypted before storage in `weather_provider_connections`. The ciphertext is bound
 to the LandDraft user ID. MapLibre adds the user's existing Supabase access token to same-origin
 Xweather tile requests; the Worker verifies that session, decrypts only that user's credentials and
 proxies the upstream tile. Provider credentials are never returned to the browser, committed to Git,
@@ -82,10 +82,12 @@ must be backed up in the approved secret manager before production. Apply
 `202609110001_user_weather_connections.sql` before enabling the connection UI. The legacy shared
 `XWEATHER_CLIENT_ID` and `XWEATHER_CLIENT_SECRET` bindings are no longer read by the Weather runtime.
 
-Users create an Xweather application and add `landdraft.net` to its namespace list. The customer
-instructions always show the live domain; the preview hostname appears separately as a small
-developer-only note when the dialog is opened from the preview deployment. They can test, replace and disconnect credentials from
-**Weather → Data sources**. Disconnect invalidates the UI immediately;
+Users select **API Keys** in the current Xweather dashboard and copy the combined API key shown
+there, or use **Manage your API keys** to create a dedicated key named LandDraft. LandDraft accepts
+that complete key and separates its client ID and secret server-side for Raster Maps requests.
+Legacy client-ID/secret connection requests remain accepted for backward compatibility. Users can
+test, replace and disconnect credentials from **Weather → Data sources**. Disconnect invalidates
+the UI immediately;
 already-authorized Worker isolates may retain the encrypted credential in memory for at most 30
 seconds. Revoking the application in Xweather is the immediate provider-side kill switch.
 
