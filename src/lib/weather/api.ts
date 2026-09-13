@@ -18,12 +18,19 @@ function validatePoint(input: unknown): WeatherPointRequest {
         )
         .slice(0, 30)
     : undefined;
-  const xweatherConnected = value["xweatherConnected"] === true;
+
   return {
+    ...(typeof value["radarSiteId"] === "string" && /^[A-Z0-9]{4}$/.test(value["radarSiteId"])
+      ? { radarSiteId: value["radarSiteId"] }
+      : {}),
+    ...(Number.isInteger(value["radarTilt"]) &&
+    Number(value["radarTilt"]) >= 0 &&
+    Number(value["radarTilt"]) <= 3
+      ? { radarTilt: Number(value["radarTilt"]) }
+      : {}),
     latitude,
     longitude,
     ...(requestedLayerIds?.length ? { requestedLayerIds } : {}),
-    ...(xweatherConnected ? { xweatherConnected: true } : {}),
   };
 }
 
@@ -32,17 +39,6 @@ function validatePoint(input: unknown): WeatherPointRequest {
 export const getWeatherAtPoint = createServerFn({ method: "POST" })
   .validator(validatePoint)
   .handler(async ({ data }) => {
-    const { currentWeatherContext } = await import("./runtimeContext.server");
-    const context = currentWeatherContext();
-    if (data.xweatherConnected && context) {
-      const { resolveUserXweatherCredentials } = await import("./xweatherConnection.server");
-      const credentials = await resolveUserXweatherCredentials(
-        context.request,
-        context.bindings,
-      ).catch(() => null);
-      if (credentials) context.authenticatedUserId = credentials.userId;
-      else data.xweatherConnected = false;
-    } else data.xweatherConnected = false;
     const { loadWeatherBundle } = await import("./gateway.server");
     return loadWeatherBundle(data);
   });

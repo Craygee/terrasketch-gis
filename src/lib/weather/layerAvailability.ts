@@ -2,6 +2,7 @@ import type { WeatherBundle } from "./types.ts";
 import { weatherProduct } from "./productRegistry.ts";
 import { publicProviderPermitted } from "./providerRegistry.ts";
 import { spcCurrent } from "./spc.ts";
+import { nativeProduct } from "./nativeRadar.ts";
 
 export interface LayerAvailability {
   ready: boolean;
@@ -63,7 +64,9 @@ export function layerAvailability(
   }
   const disabled = bundle?.providerControls?.disabledFeatures ?? [];
   if (
-    (id === "weather.radar.simple" && disabled.includes("mrms")) ||
+    (product.providerId === "mrms" &&
+      id !== "weather.severe.intelligence" &&
+      disabled.includes("mrms")) ||
     (product.providerId === "goes" && disabled.includes("goes_satellite")) ||
     (id === "weather.severe.intelligence" && disabled.includes("storm_objects"))
   )
@@ -88,6 +91,17 @@ export function layerAvailability(
     now - Date.parse(bundle.generatedAt) > product.staleAfterSeconds * 1000
   )
     return no("stale", "Data is stale — refresh", true);
+  if (
+    nativeProduct(id) &&
+    !bundle.nativeRadarFrames?.some(
+      (frame) =>
+        frame.layerId === id &&
+        Number.isFinite(Date.parse(frame.timestamp)) &&
+        Date.parse(frame.timestamp) <= now + 60000 &&
+        now - Date.parse(frame.timestamp) <= product.staleAfterSeconds * 1000,
+    )
+  )
+    return no("stale", "Radar scan is stale — refresh", true);
   const sources =
     id === "weather.current"
       ? [bundle.current?.source]
@@ -119,6 +133,12 @@ export function layerHasUsableData(bundle: WeatherBundle | null, id: string): bo
     bundle.providerHealth.some(
       (provider) => provider.providerId === providerId && provider.status === "up",
     );
+  if (
+    bundle.nativeRadarFrames?.some(
+      (frame) => frame.layerId === id && Number.isFinite(Date.parse(frame.timestamp)),
+    )
+  )
+    return true;
   if (id === "weather.current") return !!bundle.current;
   if (id === "weather.radar.simple") return bundle.radarFrames.length > 0;
   if (id === "weather.severe.alerts")

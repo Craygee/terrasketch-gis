@@ -75,7 +75,8 @@ await writeFile(
       builtAt: new Date().toISOString(),
       branch,
       revision: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
-      scope: "Weather foundation and public SPC outlook beta; full roadmap incomplete",
+      scope:
+        "LandDraft native NOAA Level III radar (six fields, four elevation products) and seven public rainfall accumulations; test beta",
       commercialProvidersEnabled: false,
     },
     null,

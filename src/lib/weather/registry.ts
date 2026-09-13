@@ -1,5 +1,6 @@
 import type { WeatherLayerDefinition } from "./types";
-import { XWEATHER_ADDITIONAL_LAYERS } from "./xweatherCatalog.ts";
+import { NATIVE_RADAR_PRODUCTS, RADAR_SCALES, type NativeRadarLayer } from "./nativeRadar.ts";
+import { rainfallLayers } from "./publicRainfall.ts";
 import { SPC_PRODUCTS } from "./spcCatalog.ts";
 
 export const WEATHER_LAYER_GROUPS = [
@@ -82,21 +83,6 @@ export const STORM_CHASER_PRO_RADAR_LAYERS = [
   "weather.radar.pro.hydrometeor",
 ] as const;
 
-export const STORM_CHASER_RADAR_COMPANIONS = [
-  {
-    id: "radarscope",
-    name: "RadarScope",
-    href: "https://www.radarscope.app/",
-    description: "Open the official professional radar app and product information.",
-  },
-  {
-    id: "radaromega",
-    name: "RadarOmega",
-    href: "https://www.radaromega.com/",
-    description: "Open the official multi-platform radar app and product information.",
-  },
-] as const;
-
 export const weatherLayerRegistry: WeatherLayerDefinition[] = [
   ...SPC_PRODUCTS.map((product): WeatherLayerDefinition => ({
     id: product.layerId,
@@ -137,34 +123,13 @@ export const weatherLayerRegistry: WeatherLayerDefinition[] = [
     mobileVisibility: "primary",
     audience: "basic",
   },
-  ...XWEATHER_ADDITIONAL_LAYERS.map((item): WeatherLayerDefinition => ({
-    id: item.id,
-    name: item.name,
-    group: item.group,
-    description: item.description,
-    capability: item.capability,
-    dataType: "raster",
-    providerProducts: [`xweather:${item.providerLayer}`],
-    ...(item.units ? { units: item.units } : {}),
-    defaultOpacity: 0.68,
-    minZoom: item.minZoom ?? 0,
-    maxZoom: item.maxZoom ?? 18,
-    animationSupport: item.animationSupport ?? true,
-    timeSupport: true,
-    inspectSupport: item.inspectSupport ?? false,
-    mobileVisibility: "professional",
-    audience: "professional",
-    attribution: "Weather data and imagery © Vaisala Xweather",
-    providerName: "Vaisala Xweather Raster Maps",
-    providerCostMultiplier: item.costMultiplier,
-    coverage: item.coverage,
-  })),
+  ...rainfallLayers,
   {
     id: "weather.radar.simple",
     name: "Radar",
     group: "Radar",
     description:
-      "Official U.S. composite reflectivity with configured global Xweather fallback outside coverage or during an outage.",
+      "Public NOAA U.S. composite reflectivity. Source time and coverage are retained; outages are reported.",
     capability: "weather.radar",
     dataType: "raster",
     providerProducts: ["radar-reflectivity"],
@@ -188,23 +153,27 @@ export const weatherLayerRegistry: WeatherLayerDefinition[] = [
   },
   ...[
     ["reflectivity", "Base reflectivity", "dBZ"],
-    ["velocity", "Base velocity", "kt"],
+    ["velocity", "Radial velocity", "m/s"],
     ["storm-velocity", "Storm-relative velocity", "kt"],
-    ["correlation", "Correlation coefficient", "%"],
+    ["correlation", "Correlation coefficient", "ratio"],
     ["differential-reflectivity", "Differential reflectivity", "dB"],
+    ["specific-phase", "Specific differential phase", "°/km"],
     ["hydrometeor", "Hydrometeor classification", "class"],
   ].map(([id, name, units]): WeatherLayerDefinition => ({
     id: `weather.radar.pro.${id}`,
     name: name!,
     group: "Radar",
     description:
-      id === "reflectivity"
-        ? "Official NOAA single-site super-resolution base reflectivity from the nearest available NEXRAD site."
-        : id === "velocity"
-          ? "Official NOAA single-site base radial velocity from the nearest available NEXRAD site."
-          : id === "hydrometeor"
-            ? "Official NOAA single-site digital hydrometeor classification from the nearest available NEXRAD site."
-            : "Professional radar product; availability depends on a reviewed radar-site provider.",
+      id === "storm-velocity"
+        ? "Storm-relative velocity requires verified storm-motion input; not enabled."
+        : "LandDraft native rendering and gate inspection from public NOAA Level III scans. Select a site and elevation product; data gaps and range folding remain explicit.",
+    ...(NATIVE_RADAR_PRODUCTS[`weather.radar.pro.${id}` as NativeRadarLayer]
+      ? {
+          legend: RADAR_SCALES[`weather.radar.pro.${id}` as NativeRadarLayer].map(
+            ([value, color]) => ({ color, label: `${value} ${units}` }),
+          ),
+        }
+      : {}),
     capability: "weather.meteorology",
     dataType: "raster",
     providerProducts: [`radar-${id}`],
@@ -222,8 +191,7 @@ export const weatherLayerRegistry: WeatherLayerDefinition[] = [
     id: "weather.satellite.clouds",
     name: "Clouds",
     group: "Satellite & clouds",
-    description:
-      "Configured global Xweather color-infrared cloud imagery with NOAA satellite fallback when commercial access is unavailable.",
+    description: "Public NOAA GOES infrared cloud imagery with source time and coverage retained.",
     capability: "weather.satellite",
     dataType: "raster",
     providerProducts: ["satellite-clouds"],
@@ -288,7 +256,7 @@ export const weatherLayerRegistry: WeatherLayerDefinition[] = [
     name: "Lightning activity",
     group: "Lightning",
     description:
-      "Configured Xweather global flash imagery with NOAA 15-minute regional strike-density fallback.",
+      "Lightning layer awaiting a commercially reusable GOES GLM adapter. Third-party strike feeds are not included.",
     capability: "weather.lightning",
     dataType: "raster",
     providerProducts: ["lightning-density"],

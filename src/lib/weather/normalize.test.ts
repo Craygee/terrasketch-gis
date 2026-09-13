@@ -9,7 +9,6 @@ import {
 import { hasWeatherCapability } from "./entitlements.ts";
 import {
   STORM_CHASER_PRO_RADAR_LAYERS,
-  STORM_CHASER_RADAR_COMPANIONS,
   STORM_CHASER_RECOMMENDED_LAYERS,
   weatherLayerRegistry,
 } from "./registry.ts";
@@ -66,14 +65,10 @@ test("storm chaser recommendations keep ProbSevere first and reference registere
   );
 });
 
-test("storm chaser professional radar tools reference registered layers and official HTTPS sites", () => {
+test("storm chaser professional radar tools reference registered public layers", () => {
   const registeredIds = new Set(weatherLayerRegistry.map((layer) => layer.id));
   assert.equal(
     STORM_CHASER_PRO_RADAR_LAYERS.every((id) => registeredIds.has(id)),
-    true,
-  );
-  assert.equal(
-    STORM_CHASER_RADAR_COMPANIONS.every((app) => new URL(app.href).protocol === "https:"),
     true,
   );
 });

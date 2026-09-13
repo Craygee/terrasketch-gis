@@ -217,6 +217,7 @@ export interface RadarFrame {
 }
 
 export interface WeatherRasterFrame {
+  pointSample?: { longitude: number; latitude: number; value: number | null; units: string };
   id: string;
   layerId: string;
   timestamp: string;
@@ -384,6 +385,8 @@ export interface WeatherPreset {
 }
 
 export interface WeatherWorkspaceState {
+  radarSiteId?: string | undefined;
+  radarTilt?: number | undefined;
   version: 1;
   enabled: boolean;
   introductoryChooserSeen: boolean;
@@ -399,6 +402,8 @@ export interface WeatherWorkspaceState {
 }
 
 export interface WeatherPointRequest {
+  radarSiteId?: string;
+  radarTilt?: number;
   latitude: number;
   longitude: number;
   requestedLayerIds?: string[] | undefined;
@@ -411,6 +416,8 @@ export interface WeatherPointRequest {
 }
 
 export interface WeatherBundle {
+  nativeRadarFrames?: import("./nativeRadar.ts").NativeRadarFrame[];
+  radarSites?: import("./radar.ts").WeatherRadarSite[];
   spcOutlooks?: SpcOutlook[];
   request: WeatherPointRequest;
   providerControls?: {

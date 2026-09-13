@@ -1,3 +1,12 @@
+import { NativeRadarOverlay } from "./NativeRadarOverlay";
+import {
+  nativeProduct,
+  nativeMapLayerId,
+  type NativeRadarReading,
+  type NativeRadarFrame,
+} from "@/lib/weather/nativeRadar";
+const EMPTY_NATIVE_FRAMES: NativeRadarFrame[] = [];
+import { rainfallVisible } from "@/lib/weather/publicRainfall";
 import { useEffect, useMemo } from "react";
 import { Popup } from "maplibre-gl";
 import type { GeoJSONSource, Map as MlMap, MapMouseEvent, RasterTileSource } from "maplibre-gl";
@@ -1095,6 +1104,7 @@ function ensureRasterProducts(
 }
 
 function renderedLayerIds(weatherLayerId: string) {
+  if (nativeProduct(weatherLayerId)) return [nativeMapLayerId(weatherLayerId)];
   const spc = SPC_PRODUCTS.find((product) => product.layerId === weatherLayerId);
   if (spc) return [`landdraft-spc-${spc.productId}-fill`, `landdraft-spc-${spc.productId}-line`];
   if (weatherLayerId === "weather.current") return [CURRENT_CIRCLE, CURRENT_VALUE, CURRENT_LABEL];
@@ -1140,6 +1150,7 @@ function renderedLayerIds(weatherLayerId: string) {
 }
 
 export function WeatherMapOverlay({
+  onNativeReading,
   bundle,
   workspace,
   onSelectAlert,
@@ -1152,6 +1163,7 @@ export function WeatherMapOverlay({
   chaserLocation,
   navigationTarget,
 }: {
+  onNativeReading: (reading: NativeRadarReading) => void;
   bundle: WeatherBundle | null;
   workspace: WeatherWorkspaceState;
   onSelectAlert: (alert: WeatherAlert) => void;
@@ -1189,9 +1201,14 @@ export function WeatherMapOverlay({
       const selected = setting?.visible
         ? nearestRasterFrame(frames, workspace.timeline.selectedTime)
         : undefined;
+      if (
+        selected?.layerId.startsWith("weather.rainfall.") &&
+        !rainfallVisible(selected, workspace.timeline)
+      )
+        return [];
       return selected ? [{ frame: selected, opacity: setting?.opacity ?? 0.7 }] : [];
     });
-  }, [bundle?.rasterFrames, workspace.layerSettings, workspace.timeline.selectedTime]);
+  }, [bundle?.rasterFrames, workspace.layerSettings, workspace.timeline]);
 
   useEffect(() => {
     if (!map) return;
@@ -1577,5 +1594,11 @@ export function WeatherMapOverlay({
     onSelectStormReport,
   ]);
 
-  return null;
+  return (
+    <NativeRadarOverlay
+      frames={bundle?.nativeRadarFrames ?? EMPTY_NATIVE_FRAMES}
+      workspace={workspace}
+      onReading={onNativeReading}
+    />
+  );
 }

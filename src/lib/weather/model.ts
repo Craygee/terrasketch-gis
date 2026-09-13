@@ -86,6 +86,14 @@ export function normalizeWeatherWorkspace(
     version: 1,
     layerSettings,
     layerOrder,
+    radarSiteId:
+      typeof stored.radarSiteId === "string" && /^[A-Z0-9]{4}$/.test(stored.radarSiteId)
+        ? stored.radarSiteId
+        : undefined,
+    radarTilt:
+      Number.isInteger(stored.radarTilt) && stored.radarTilt! >= 0 && stored.radarTilt! <= 3
+        ? stored.radarTilt
+        : 0,
     timeline: { ...defaults.timeline, ...stored.timeline, playing: false },
     presets: Array.isArray(stored.presets) ? stored.presets.slice(0, 25) : [],
   };

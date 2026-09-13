@@ -16,6 +16,7 @@ export default tseslint.config(
       ".release",
       ".local-backups",
       ".wrangler",
+      ".weather-validation",
     ],
   },
   {

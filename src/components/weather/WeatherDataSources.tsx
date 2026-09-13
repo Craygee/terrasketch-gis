@@ -7,8 +7,6 @@ import type { XweatherConnectionStatus } from "@/lib/weather/xweatherConnection"
 
 export function WeatherDataSources({
   bundle,
-  xweatherConnection,
-  onManageXweather,
 }: {
   bundle: WeatherBundle | null;
   xweatherConnection: XweatherConnectionStatus;
@@ -22,14 +20,6 @@ export function WeatherDataSources({
         weatherProviderRegistry.find((item) => item.provider_id === id)?.commercial_use_status ===
         "permitted",
     },
-    { name: "User connected / BYOK", test: (id: string) => id === "xweather" },
-    {
-      name: "Optional providers / License review",
-      test: (id: string) =>
-        id !== "xweather" &&
-        weatherProviderRegistry.find((item) => item.provider_id === id)?.commercial_use_status !==
-          "permitted",
-    },
   ];
   return (
     <section aria-label="Weather Data Sources" className="space-y-4 p-4">
@@ -38,7 +28,8 @@ export function WeatherDataSources({
         Settings · Data Sources
       </h2>
       <p className="text-xs text-muted-foreground">
-        Manage provider access and review source, licensing and connection status.
+        LandDraft layers use public data approved for commercial reuse. No weather-provider account
+        is needed. Review source attribution, coverage and freshness below.
       </p>
       {bundle?.providerControls?.configurationValid === false && (
         <p role="alert" className="rounded-xl bg-destructive/10 p-3 text-xs">
@@ -73,16 +64,14 @@ export function WeatherDataSources({
                 const disabled = bundle?.providerControls?.disabledProviders.includes(
                   provider.provider_id,
                 );
-                const isXweather = provider.provider_id === "xweather";
+
                 const status = disabled
                   ? "Disabled by administrator"
                   : provider.provider_id === "landdraft"
                     ? "Private workspace / explicit sharing"
-                    : isXweather && xweatherConnection.approvedProducts?.length
-                      ? "Product-specific license approval recorded"
-                      : provider.commercial_use_status === "permitted"
-                        ? "Included · availability varies by product"
-                        : "LICENSE REVIEW REQUIRED";
+                    : provider.commercial_use_status === "permitted"
+                      ? "Included · availability varies by product"
+                      : "LICENSE REVIEW REQUIRED";
                 return (
                   <details
                     key={provider.provider_id}
@@ -101,53 +90,13 @@ export function WeatherDataSources({
                         Review: {provider.last_license_reviewed_at ?? "Pending"} · Registered
                         products: {products.length}
                       </p>
-                      <p>
-                        Managed access:{" "}
-                        {provider.LandDraft_managed_credentials_allowed === true
-                          ? "Permitted under recorded terms"
-                          : "Requires an approved agreement and server configuration"}
-                      </p>
+                      <p>Access: public data; no API key required.</p>
                       <p>
                         Cache permission: {String(provider.caching_allowed)} ·{" "}
                         {provider.maximum_cache_duration === null
                           ? "No retention limit verified"
                           : `${provider.maximum_cache_duration} seconds`}
                       </p>
-                      {isXweather && (
-                        <div className="space-y-2 border-t border-border pt-2">
-                          <p>
-                            Connection:{" "}
-                            {xweatherConnection.connected
-                              ? "Credentials saved"
-                              : xweatherConnection.state === "loading"
-                                ? "Checking…"
-                                : "Not connected"}
-                          </p>
-                          <p>
-                            Product entitlements:{" "}
-                            {xweatherConnection.verifiedProducts?.join(", ") ||
-                              "Not verified in this session"}
-                          </p>
-                          {xweatherConnection.lastSuccessfulRequest && (
-                            <p>
-                              Last successful request:{" "}
-                              {new Date(xweatherConnection.lastSuccessfulRequest).toLocaleString()}
-                            </p>
-                          )}
-                          {xweatherConnection.error && (
-                            <p role="status">{xweatherConnection.error}</p>
-                          )}
-                          <button
-                            type="button"
-                            onClick={onManageXweather}
-                            className="min-h-11 rounded-xl bg-primary px-4 py-2 font-semibold text-primary-foreground"
-                          >
-                            {xweatherConnection.connected
-                              ? "Manage / Test / Disconnect"
-                              : "Connect Xweather"}
-                          </button>
-                        </div>
-                      )}
                       <div className="flex flex-wrap gap-3 text-primary">
                         <a
                           href={provider.official_documentation_url}

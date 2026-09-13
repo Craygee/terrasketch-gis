@@ -7,6 +7,7 @@
 import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 
 type PackageMetadata = { version?: string };
 
@@ -60,7 +61,13 @@ const numberedVersion = deploymentReleaseVersion
     : baseVersion;
 const appVersion = commitHash ? `${numberedVersion}+${commitHash}` : numberedVersion;
 
+// Nitro's default buffer/index.js alias targets Node; radar workers need the browser package.
+const nativeRadarBuild = {
+  cloudflare: { nodeCompat: true },
+  alias: { "buffer/index.js": createRequire(import.meta.url).resolve("buffer/index.js") },
+};
 export default defineConfig({
+  nitro: nativeRadarBuild,
   tanstackStart: {
     // Redirect TanStack Start's bundled server entry to src/server.ts (our SSR error wrapper).
     // nitro/vite builds from this
