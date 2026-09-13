@@ -54,6 +54,15 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
         <div className="mt-6 flex flex-wrap justify-center gap-2">
           <button
             onClick={() => {
+              // A rejected lazy import is cached; resetting the boundary cannot fetch the new deployment.
+              if (
+                /Failed to fetch dynamically imported module|Importing a module script failed|Loading chunk .* failed/i.test(
+                  error.message,
+                )
+              ) {
+                window.location.reload();
+                return;
+              }
               router.invalidate();
               reset();
             }}

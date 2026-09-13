@@ -59,3 +59,22 @@ test("public composite refresh respects a historical selection", () => {
   state.timeline.selectedTime = "2026-09-13T20:10:00Z";
   assert.equal(followsLatestScan(state, previous), true);
 });
+
+test("future forecast overlays cannot freeze live radar and rainfall refresh", () => {
+  const state = defaultWeatherWorkspace();
+  state.timeline.selectedTime = "2026-09-13T20:10:00Z";
+  state.layerSettings["weather.forecast.precipitation"]!.visible = true;
+  const previous = {
+    radarFrames: [{ timestamp: "2026-09-13T20:10:00Z" }],
+    rasterFrames: [
+      {
+        layerId: "weather.forecast.precipitation",
+        timestamp: "2026-09-14T20:10:00Z",
+        source: { temporalKind: "forecast" },
+      },
+    ],
+  } as unknown as WeatherBundle;
+  assert.equal(followsLatestScan(state, previous), true);
+  state.timeline.selectedTime = "2026-09-13T20:00:00Z";
+  assert.equal(followsLatestScan(state, previous), false);
+});

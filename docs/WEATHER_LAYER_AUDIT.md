@@ -85,3 +85,13 @@ Hosted UI verified the initially collapsed rainfall section, expansion to all se
 The hosted chaser check exposed missing `public.weather_chaser_presence` and `public.list_active_weather_chasers(...)`. Confirmed both absent with `to_regclass` / `to_regprocedure` in the authenticated **Landdraft Test / GLAB Test** SQL editor, project `unuxnecqjvmtztxxqudb`; `extensions.gen_random_uuid()` existed. Applied the existing `202609120001_weather_chaser_presence.sql` migration in one transaction using equivalent whitespace, followed by a PostgREST schema reload notification. Confirmed `relrowsecurity=true`. No existing data was removed, no real locations were submitted, and production/recovery were untouched.
 
 The isolated `tools/weather-db/chaser.test.mjs` check passed authenticated upsert/list/stop, direct-table denial and anonymous denial. Hosted chaser activation subsequently returned Available, 0 paused, and cleared the missing-function error. Zero nearby chasers is a valid empty result.
+
+## Layer recheck — 2026-09-13
+
+- Re-ran `tools/weather-layer-audit.mjs` with the test environment: all 54 catalog entries checked, zero unexpected public-source failures. Planned adapters and restricted lightning remain explicitly unavailable.
+- Independently fetched all six native radar scan routes from the hosted test Worker: HTTP 200, binary payloads. Source tiles and decoding are covered by the audit; this does not establish every overlay renders correctly in every browser.
+- Fixed full-catalog requests being silently truncated at 30 layers, forecast timestamps freezing observed refresh, and invalid point opacity (>1) reported by the hosted map renderer.
+- A stale open browser requested removed JavaScript chunks after deployment. The error page's retry now reloads the document for chunk errors instead of resetting a cached rejected lazy import.
+- Added LandDraft tools as an additional category for the six native radar fields, seven rainfall durations, predictive model, photography and opt-in chasers; original categories and shared settings are retained.
+- Added a 45-second client request timeout so an interrupted transport does not leave the module indefinitely loading.
+- Automated weather tests: 96 passing. Public-source and proxy success must not be represented as complete interactive browser verification.

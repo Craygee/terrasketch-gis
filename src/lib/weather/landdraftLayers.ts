@@ -7,7 +7,7 @@ export function followsLatestScan(
   if (workspace.timeline.mode !== "observed" || workspace.timeline.playing) return false;
   const times = [
     ...(previous?.nativeRadarFrames ?? []),
-    ...(previous?.rasterFrames ?? []),
+    ...(previous?.rasterFrames ?? []).filter((frame) => frame.source.temporalKind !== "forecast"),
     ...(previous?.radarFrames ?? []).map((frame) => ({
       ...frame,
       layerId: "weather.radar.simple",

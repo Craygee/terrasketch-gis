@@ -4,6 +4,7 @@ import { rainfallLayers } from "./publicRainfall.ts";
 import { SPC_PRODUCTS } from "./spcCatalog.ts";
 
 export const WEATHER_LAYER_GROUPS = [
+  "LandDraft tools",
   "Current",
   "Radar",
   "Satellite & clouds",
@@ -438,6 +439,17 @@ export function weatherLayer(id: string) {
   return weatherLayerRegistry.find((layer) => layer.id === id);
 }
 
+/** Additional navigation membership; tools retain their original category and state. */
+export function isLandDraftTool(id: string) {
+  return (
+    Object.hasOwn(NATIVE_RADAR_PRODUCTS, id) ||
+    rainfallLayers.some((layer) => layer.id === id) ||
+    ["weather.severe.intelligence", "weather.photo", "weather.storm_chaser.spotters"].includes(id)
+  );
+}
+export function weatherLayerInGroup(layer: WeatherLayerDefinition, group: string) {
+  return group === "LandDraft tools" ? isLandDraftTool(layer.id) : layer.group === group;
+}
 export function weatherLayersInGroup(group: string) {
-  return weatherLayerRegistry.filter((layer) => layer.group === group);
+  return weatherLayerRegistry.filter((layer) => weatherLayerInGroup(layer, group));
 }

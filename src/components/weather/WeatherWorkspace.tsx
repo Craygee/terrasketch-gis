@@ -73,6 +73,7 @@ import {
   STORM_CHASER_PRO_RADAR_LAYERS,
   STORM_CHASER_RECOMMENDED_LAYERS,
   WEATHER_LAYER_GROUPS,
+  weatherLayerInGroup,
   weatherLayerRegistry,
 } from "@/lib/weather/registry";
 import {
@@ -291,6 +292,13 @@ export function WeatherWorkspace() {
       activePointRequest.current?.abort();
       const controller = new AbortController();
       activePointRequest.current = controller;
+      const requestTimeout = window.setTimeout(
+        () =>
+          controller.abort(
+            new Error("Weather request timed out. Use Refresh weather to try again."),
+          ),
+        45000,
+      );
       if (!quietly) setLoading(true);
       setError(null);
       try {
@@ -328,6 +336,7 @@ export function WeatherWorkspace() {
         }
         return null;
       } finally {
+        window.clearTimeout(requestTimeout);
         if (requestId === latestWeatherRequest.current) setLoading(false);
       }
     },
@@ -608,7 +617,7 @@ export function WeatherWorkspace() {
     const candidates = weatherLayerRegistry
       .filter(
         (layer) =>
-          layer.group === selectedCategory &&
+          weatherLayerInGroup(layer, selectedCategory) &&
           weatherProduct(layer.id)?.adapterStatus === "implemented" &&
           weatherProduct(layer.id)?.connectionType === "INCLUDED_PUBLIC",
       )
@@ -617,7 +626,7 @@ export function WeatherWorkspace() {
       void loadPoint(
         workspace.lastInspectionPoint ?? wb.mapView.center,
         true,
-        Array.from(new Set([...requestedLayerIds, ...candidates])).slice(0, 30),
+        Array.from(new Set([...requestedLayerIds, ...candidates])).slice(0, 100),
       );
   };
 
@@ -885,7 +894,7 @@ export function WeatherWorkspace() {
   const visibleGroups = useMemo(
     () =>
       WEATHER_LAYER_GROUPS.filter((group) => {
-        const layers = weatherLayerRegistry.filter((layer) => layer.group === group);
+        const layers = weatherLayerRegistry.filter((layer) => weatherLayerInGroup(layer, group));
         return layers.some((layer) => advancedLayers || layer.audience === "basic");
       }),
     [advancedLayers],
@@ -1403,12 +1412,13 @@ function WeatherLayerPanel({
       if (
         !showUnavailable &&
         !advanced &&
+        workspace.selectedCategory !== "LandDraft tools" &&
         !normalizedSearch &&
         layer.audience !== "basic" &&
         !nativeProduct(layer.id)
       )
         return false;
-      if (!normalizedSearch) return layer.group === workspace.selectedCategory;
+      if (!normalizedSearch) return weatherLayerInGroup(layer, workspace.selectedCategory);
       return [
         layer.name,
         layer.description,
@@ -1449,7 +1459,7 @@ function WeatherLayerPanel({
   const menuGroups = (showUnavailable ? WEATHER_LAYER_GROUPS : groups).filter((group) =>
     weatherLayerRegistry.some(
       (layer) =>
-        layer.group === group &&
+        weatherLayerInGroup(layer, group) &&
         (showUnavailable || workspace.layerSettings[layer.id]?.menuVisible !== false) &&
         hasWeatherCapability(layer.capability),
     ),
@@ -2036,7 +2046,7 @@ function WeatherLayerPanel({
         ))}
       </div>
 
-      {workspace.selectedCategory === "Radar" && (
+      {["Radar", "LandDraft tools"].includes(workspace.selectedCategory) && (
         <NativeRadarControls
           workspace={workspace}
           bundle={bundle}

@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
-import { WEATHER_LAYER_ID_PATTERN, type WeatherPointRequest } from "./types";
+import type { WeatherPointRequest } from "./types";
+import { normalizeRequestedLayers } from "./layerRequests";
 
 function validatePoint(input: unknown): WeatherPointRequest {
   if (!input || typeof input !== "object") throw new Error("A map point is required");
@@ -10,14 +11,7 @@ function validatePoint(input: unknown): WeatherPointRequest {
     throw new Error("Latitude must be between -90 and 90");
   if (!Number.isFinite(longitude) || longitude < -180 || longitude > 180)
     throw new Error("Longitude must be between -180 and 180");
-  const requestedLayerIds = Array.isArray(value["requestedLayerIds"])
-    ? value["requestedLayerIds"]
-        .filter(
-          (id): id is string =>
-            typeof id === "string" && WEATHER_LAYER_ID_PATTERN.test(id) && id.length <= 100,
-        )
-        .slice(0, 30)
-    : undefined;
+  const requestedLayerIds = normalizeRequestedLayers(value["requestedLayerIds"]);
 
   return {
     ...(typeof value["radarSiteId"] === "string" && /^[A-Z0-9]{4}$/.test(value["radarSiteId"])
