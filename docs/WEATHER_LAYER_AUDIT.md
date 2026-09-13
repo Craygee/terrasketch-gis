@@ -75,3 +75,13 @@ All 21 raster/composite image requests returned HTTP 200 PNG; the 20 raster vari
 The raw-gateway chaser result above is expected: this layer uses LandDraft's authenticated presence service separately. Photography may have no candidate zones when no severe target exists. Transparent tropical/winter/fire images are valid responses where the sampled area has no matching feature. Lightning is restricted by the existing commercial-use policy; upper-air, convection, historical, and storm-relative velocity have no implemented adapter. No provider accounts or commercial grants were added.
 
 Repeat the public checks with `node --experimental-strip-types tools/weather-layer-audit.mjs`. Detailed JSON is written to ignored .weather-validation.
+
+## Hosted verification and chaser schema repair
+
+Deployed application commit `4519fb8` to `landdraft-test`, Worker version `74c70d38-195c-470a-9413-25192e1f475c`. Build, TypeScript, targeted lint and 90 weather tests passed.
+
+Hosted UI verified the initially collapsed rainfall section, expansion to all seven hour options, 24-hour activation and sample, NASA cloud-top activation, and NOAA ProbSevere / storm-report loading.
+
+The hosted chaser check exposed missing `public.weather_chaser_presence` and `public.list_active_weather_chasers(...)`. Confirmed both absent with `to_regclass` / `to_regprocedure` in the authenticated **Landdraft Test / GLAB Test** SQL editor, project `unuxnecqjvmtztxxqudb`; `extensions.gen_random_uuid()` existed. Applied the existing `202609120001_weather_chaser_presence.sql` migration in one transaction using equivalent whitespace, followed by a PostgREST schema reload notification. Confirmed `relrowsecurity=true`. No existing data was removed, no real locations were submitted, and production/recovery were untouched.
+
+The isolated `tools/weather-db/chaser.test.mjs` check passed authenticated upsert/list/stop, direct-table denial and anonymous denial. Hosted chaser activation subsequently returned Available, 0 paused, and cleared the missing-function error. Zero nearby chasers is a valid empty result.
