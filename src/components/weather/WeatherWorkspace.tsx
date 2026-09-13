@@ -1555,6 +1555,8 @@ function WeatherLayerPanel({
         </p>
       </div>
 
+      {!compact && <WeatherLegends workspace={workspace} workspaceView={workspaceView} embedded />}
+
       {workspaceView === "storm-chaser" && (
         <details className="group rounded-2xl border border-primary/30 bg-primary/5">
           <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 text-xs font-semibold [&::-webkit-details-marker]:hidden">
@@ -2284,7 +2286,7 @@ function StormChaserPanel({
   const isGuidance = activeStorm?.basis === "provider-guidance";
   const [potentialFilter, setPotentialFilter] = useState<StormPotentialFilter>("all");
   const [sortMode, setSortMode] = useState<StormSortMode>("selected-potential");
-  const [stormBrowserExpanded, setStormBrowserExpanded] = useState(true);
+  const [stormBrowserExpanded, setStormBrowserExpanded] = useState(false);
   const [expandedStormDetails, setExpandedStormDetails] = useState<string | null>(
     activeStorm?.id ?? null,
   );
@@ -3404,9 +3406,11 @@ function WeatherStatusPill({
 function WeatherLegends({
   workspace,
   workspaceView,
+  embedded = false,
 }: {
   workspace: WeatherWorkspaceState;
   workspaceView: WorkspaceView;
+  embedded?: boolean;
 }) {
   const activeLayers = weatherLayerRegistry.filter(
     (layer) => workspace.layerSettings[layer.id]?.visible,
@@ -3415,9 +3419,17 @@ function WeatherLegends({
   if (!activeLayers.length && workspaceView !== "storm-chaser") return null;
 
   return (
-    <details className="pointer-events-auto absolute right-2 top-28 z-30 text-[9px] lg:right-3 lg:top-16">
+    <details
+      className={cn(
+        "text-[9px]",
+        embedded ? "relative" : "pointer-events-auto absolute right-2 top-28 z-30 lg:hidden",
+      )}
+    >
       <summary
-        className="ml-auto flex min-h-10 w-fit cursor-pointer list-none items-center gap-1.5 rounded-full border border-border bg-card/95 px-3 font-semibold shadow-float backdrop-blur transition-colors hover:bg-accent [&::-webkit-details-marker]:hidden"
+        className={cn(
+          "flex min-h-10 cursor-pointer list-none items-center gap-1.5 border border-border bg-card/95 px-3 font-semibold backdrop-blur transition-colors hover:bg-accent [&::-webkit-details-marker]:hidden",
+          embedded ? "w-full rounded-2xl" : "ml-auto w-fit rounded-full shadow-float",
+        )}
         title="Open weather icon and layer legend"
         aria-label="Open weather icon and layer legend"
       >
@@ -3427,7 +3439,14 @@ function WeatherLegends({
           {activeLayers.length + (workspaceView === "storm-chaser" ? 1 : 0)}
         </span>
       </summary>
-      <div className="absolute right-14 top-0 max-h-[45dvh] w-64 max-w-[calc(100vw-5rem)] space-y-3 overflow-y-auto rounded-2xl border border-border bg-card/95 p-3 shadow-float backdrop-blur lg:right-0 lg:top-12 lg:max-h-[calc(100dvh-8rem)] lg:max-w-[calc(100vw-1rem)]">
+      <div
+        className={cn(
+          "max-h-[45dvh] space-y-3 overflow-y-auto rounded-2xl border border-border bg-card/95 p-3 backdrop-blur",
+          embedded
+            ? "relative mt-2 w-full"
+            : "absolute right-14 top-0 w-64 max-w-[calc(100vw-5rem)] shadow-float",
+        )}
+      >
         {workspaceView === "storm-chaser" && (
           <div>
             <strong className="block text-[9px]">Severe-event symbols</strong>
