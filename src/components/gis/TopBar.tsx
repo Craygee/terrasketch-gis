@@ -375,6 +375,12 @@ export function TopBar({
             />
           )}
           <MenuAction
+            icon={<Droplets className="size-4" />}
+            label="Water & Hydrogeology"
+            help="Explore aquifers, wells, water observations, and sources"
+            onClick={() => window.location.assign("/water")}
+          />
+          <MenuAction
             icon={<CloudSun className="size-4" />}
             label="Weather & meteorology"
             help="Radar, warnings, forecasts, weather inspection, and professional layers"
@@ -484,6 +490,10 @@ export function TopBar({
             />
           )}
           <div className="my-1 border-t border-border" />
+          <div className="px-2 py-2">
+            <div className="text-[10px] text-muted-foreground">Signed in as</div>
+            <div className="break-words text-xs font-semibold">{auth.user?.email}</div>
+          </div>
           <MenuAction
             icon={<LogOut className="size-4" />}
             label="Log out"
@@ -593,15 +603,18 @@ export function TopBar({
                 <UserRound className="size-4" />
               </span>
               <div className="min-w-0 flex-1">
-                <div className="truncate font-semibold">{auth.user?.name}</div>
-                <div className="truncate text-[10px] text-muted-foreground">{auth.user?.email}</div>
+                <div className="text-[10px] text-muted-foreground">Signed in as</div>
+                <div className="break-words font-semibold">{auth.user?.name}</div>
+                <div className="break-words text-[10px] text-muted-foreground">
+                  {auth.user?.email}
+                </div>
               </div>
               <button
                 onClick={() => {
                   setShowAbout(false);
                   void auth.signOut();
                 }}
-                className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 py-2 font-semibold text-destructive hover:bg-accent"
+                className="flex shrink-0 items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 py-2 font-semibold text-destructive hover:bg-accent"
                 title="Log out of LandDraft"
               >
                 <LogOut className="size-3.5" /> Log out

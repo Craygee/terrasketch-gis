@@ -490,8 +490,11 @@ function MobileTourMenu({ onDone }: { onDone: () => void }) {
       </div>
       <div className="mt-3 border-t border-border pt-3">
         <div className="mb-2 flex items-center gap-2 text-muted-foreground">
-          <UserRound className="size-4" />
-          <span className="min-w-0 flex-1 truncate">{auth.user?.email}</span>
+          <UserRound className="size-4 shrink-0" />
+          <div className="min-w-0 flex-1">
+            <div className="text-[10px]">Signed in as</div>
+            <div className="break-words font-semibold text-foreground">{auth.user?.email}</div>
+          </div>
         </div>
         <button
           onClick={() => {
