@@ -57,14 +57,12 @@ The durable distinction is:
   labeled as another probability or as a chase recommendation.
 - Selecting a storm opens a collapsible detailed-potential section with classification quality,
   analysis basis, source age, each available hazard value and the preserved provider probability.
-- A cluster-aware community-spotter layer is connected through a provider adapter for authorized
-  test/evaluation use. It discards identity/contact text, excludes positions over 30 minutes old and
-  exposes provider permission status rather than silently enabling a non-commercial feed in
-  production.
-- A second privacy-safe Spotter Network feed highlights active members with recent acceptable
-  reporting history in gold with a star. Hover and click cards show available classification,
-  freshness, movement, coordinates and provenance; identity remains unavailable under the current
-  no-name evaluation feed.
+- A cluster-aware production chaser layer uses LandDraft's own explicit opt-in presence service.
+  Device GPS remains private until the user separately elects to share; only one current point is
+  stored, authenticated users can read active points, and points expire after ten minutes.
+- A separate Recent NWS Storm Reports layer uses the Iowa Environmental Mesonet's five-minute
+  GeoJSON feed. It shows observed event locations with type, time, magnitude, place, remarks and
+  provenance; it never portrays a report location as the current location of a person.
 - Desktop Storm Chaser settings can persistently hide unwanted catalog layers without disabling
   active map layers. NOAA ProbSevere remains pinned as the visible analysis foundation.
 - RadarScope and RadarOmega are presented as external professional companion applications alongside
@@ -133,9 +131,9 @@ algorithm, interface or database is copied.
   demand.
 - Individual lightning, global radar, model grids, road closures, push/SMS and commercial SLA feeds
   may require paid licenses and redistribution agreements.
-- Community spotter feeds may require written application/commercial permission. The current
-  Spotter Network feed page marks its published feeds non-commercial; production cost and terms are
-  not yet determined.
+- External people-location feeds may require written application/commercial permission. The
+  Spotter Network feed page marks its published feeds non-commercial, so it remains disconnected
+  from production unless written rights are obtained.
 - Generative explanations are not enabled. A future AI explanation service would add inference cost
   and may only verbalize structured evidence produced by deterministic analysis.
 
@@ -172,6 +170,6 @@ permissions, production infrastructure or backups.
 - No raw velocity, correlation coefficient, individual lightning strike, road closure or full model
   grid is yet ingested into the LandDraft analysis engine.
 - Flood probability remains unavailable in the connected ProbSevere product.
-- Continuous GPS is ephemeral and works only while Chase mode is active; no location history is
-  persisted.
+- Chase GPS is ephemeral unless the user explicitly shares one live presence point. Shared presence
+  overwrites the prior point and expires ten minutes after updates stop; no route history is kept.
 - No route is represented as safe or recommended toward a storm.

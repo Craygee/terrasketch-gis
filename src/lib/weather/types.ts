@@ -243,12 +243,7 @@ export interface WeatherStationObservation {
   source: WeatherSourceMetadata;
 }
 
-/**
- * Privacy-minimized position supplied by an approved community spotter feed.
- * Identity fields stay optional so a future licensed provider can supply them;
- * the current Spotter Network evaluation adapter does not retain identity or
- * contact data and does not store continuous position history.
- */
+/** A current chaser/spotter position with explicit source and privacy provenance. */
 export interface WeatherChaserPosition {
   id: string;
   location: Feature<Point>;
@@ -261,6 +256,26 @@ export interface WeatherChaserPosition {
   organization?: string | undefined;
   headingDeg?: number | undefined;
   speedMS?: number | undefined;
+  source: WeatherSourceMetadata;
+}
+
+export type WeatherStormReportKind =
+  "tornado" | "hail" | "wind" | "flood" | "lightning" | "winter" | "other";
+
+/** A time-stamped NWS Local Storm Report location, never a live person location. */
+export interface WeatherStormReport {
+  id: string;
+  event: string;
+  kind: WeatherStormReportKind;
+  location: Feature<Point>;
+  observedAt: string;
+  city?: string | undefined;
+  county?: string | undefined;
+  state?: string | undefined;
+  magnitude?: number | undefined;
+  office?: string | undefined;
+  reportedBy?: string | undefined;
+  remarks?: string | undefined;
   source: WeatherSourceMetadata;
 }
 
@@ -405,6 +420,7 @@ export interface WeatherBundle {
   rasterFrames: WeatherRasterFrame[];
   stationObservations: WeatherStationObservation[];
   chaserPositions: WeatherChaserPosition[];
+  stormReports: WeatherStormReport[];
   photography: WeatherPhotographyAssessment | null;
   providerHealth: WeatherProviderHealth[];
   warnings: string[];

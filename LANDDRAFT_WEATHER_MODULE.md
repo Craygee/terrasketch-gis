@@ -125,7 +125,22 @@ warnings instead of fabricated values.
   navigation and capped bottom sheet. The prior permanent Storm Chaser decision-support map bubble
   was removed; safety/provenance remains in the contextual Storm Intelligence panel.
 
-This increment adds no paid data provider, runtime dependency, database migration or production
-configuration. External navigation providers, GPS, NOAA/CIMSS data and basemap services retain their
-own terms and operating limits. Future authoritative road-closure, flood and individual-lightning
-feeds may add provider and infrastructure costs; pricing remains undecided.
+## Production storm reports and chaser presence
+
+- The restricted Spotter Network feed is not used on the live site. Its published feed terms are
+  non-commercial and remain subject to separate written authorization.
+- `weather.severe.reports` loads the Iowa Environmental Mesonet's five-minute GeoJSON of NWS Local
+  Storm Reports. These are observed event locations, not live people, and retain event time, type,
+  place, magnitude, remarks and source provenance.
+- `weather.storm_chaser.spotters` now represents voluntary LandDraft chaser presence. Enabling GPS
+  does not publish a location; the user must separately opt in. The table has one replaceable row per
+  user, authenticated read access through a bounded RPC and automatic ten-minute expiry. No travel
+  history is stored.
+- Apply `supabase/migrations/202609120001_weather_chaser_presence.sql` in test and production before
+  enabling the live sharing control. The module otherwise degrades without exposing a location.
+
+This increment adds no paid provider or runtime dependency. It adds one small Supabase table and
+three authenticated RPCs. Expected costs are normal database calls, Worker requests and bandwidth;
+pricing remains undecided. External navigation providers, GPS, NOAA/CIMSS/IEM data and basemap
+services retain their own terms and operating limits. Future authoritative road-closure, flood and
+individual-lightning feeds may add provider and infrastructure costs.
