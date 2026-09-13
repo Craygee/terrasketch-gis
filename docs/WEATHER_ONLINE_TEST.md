@@ -2,6 +2,10 @@
 
 Target: https://landdraft-test.tight-sky-0ae1.workers.dev/weather
 
+Final verified Worker version: `03bf0a70-b518-45db-8560-f5fce21be9b7`, application revision `6fc25920c82934ad3d8985a6c408af91f27af8ca` (2026-09-13). Online observation recheck displayed 9 mph wind and Unavailable gust instead of the previous 33 mph / 0 mph. Hosted Data Sources retained LICENSE REVIEW REQUIRED for Xweather; the connection endpoint explicitly returned server-not-configured. No secret transfer took place.
+
+Post-deployment browser checks: authenticated workspace, current/radar/SPC data, source cards, historical scrub hiding/restoring SPC, mobile portrait and tablet portrait, desktop no-horizontal-overflow check, Data Sources. Browser viewport overrides were reset. These checks are not a complete physical-device, expert safety, or load certification.
+
 This is an isolated test release of the implemented Weather foundation, Photography baseline repair and public SPC outlooks. It is not completion of the full Weather/Storm Chasing roadmap. Production and recovery were not deployed or migrated.
 
 ## Deployment boundary
