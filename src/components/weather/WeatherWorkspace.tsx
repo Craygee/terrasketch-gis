@@ -88,6 +88,11 @@ import {
   loadingXweatherConnection,
   type XweatherConnectionStatus,
 } from "@/lib/weather/xweatherConnection";
+import {
+  XWEATHER_TILE_ERROR_EVENT,
+  XWEATHER_TILE_SUCCESS_EVENT,
+  type XweatherTileErrorDetail,
+} from "@/lib/weather/xweatherProtocol";
 
 type MobileSheet = "layers" | "weather" | "sources" | null;
 type WorkspaceView = "weather" | "meteorology" | "storm-chaser" | "photography";
@@ -243,6 +248,25 @@ export function WeatherWorkspace() {
   const loadedProject = useRef<string | null>(null);
   const latestWeatherRequest = useRef(0);
   const xweatherReloaded = useRef("");
+
+  useEffect(() => {
+    const onTileError = (event: Event) => {
+      const detail = (event as CustomEvent<XweatherTileErrorDetail>).detail;
+      if (!detail?.message) return;
+      setXweatherConnection((current) => ({ ...current, error: detail.message }));
+    };
+    const onTileSuccess = () => {
+      setXweatherConnection((current) =>
+        current.error ? { ...current, error: undefined } : current,
+      );
+    };
+    window.addEventListener(XWEATHER_TILE_ERROR_EVENT, onTileError);
+    window.addEventListener(XWEATHER_TILE_SUCCESS_EVENT, onTileSuccess);
+    return () => {
+      window.removeEventListener(XWEATHER_TILE_ERROR_EVENT, onTileError);
+      window.removeEventListener(XWEATHER_TILE_SUCCESS_EVENT, onTileSuccess);
+    };
+  }, []);
   const synchronizedLayerRequest = useRef("");
   const geolocationWatch = useRef<number | null>(null);
   const chaseFollowRef = useRef(true);
@@ -1295,6 +1319,8 @@ function WeatherLayerPanel({
     );
     if (hasConnectedProvider && !xweatherConnection.connected)
       return { ready: false, label: "CONNECT XWEATHER" };
+    if (hasConnectedProvider && xweatherConnection.error)
+      return { ready: false, label: "PROVIDER ERROR" };
     if (!CONNECTED_LAYERS.has(id) && !hasConnectedProvider)
       return { ready: false, label: "SETUP REQUIRED" };
     return { ready: false, label: requested ? "NO DATA HERE" : "TURN ON TO LOAD" };
@@ -1572,6 +1598,11 @@ function WeatherLayerPanel({
               {xweatherConnection.state === "loading"
                 ? "Checking connection…"
                 : "Use your own Xweather account and allowance"}
+            </p>
+          )}
+          {xweatherConnection.connected && xweatherConnection.error && (
+            <p className="truncate text-[8px] text-destructive" title={xweatherConnection.error}>
+              {xweatherConnection.error}
             </p>
           )}
         </div>
