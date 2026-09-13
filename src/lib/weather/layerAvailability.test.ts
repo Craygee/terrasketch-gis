@@ -186,3 +186,67 @@ test("healthy empty warning feeds are usable; failed warning requests are not", 
   });
   assert.equal(layerHasUsableData(bundle, "weather.severe.alerts"), false);
 });
+
+test("a completed photography assessment with no target is not a connection failure", () => {
+  const bundle: WeatherBundle = {
+    ...empty,
+    photography: {
+      status: "no-severe-target",
+      validTime: empty.generatedAt,
+      zones: [],
+      targetDescription: "No target",
+      methodology: "Official alert geometry",
+      limitations: [],
+    },
+  };
+  const result = layerAvailability(
+    "weather.photo",
+    bundle,
+    { connected: false },
+    Date.parse(empty.generatedAt),
+  );
+  assert.equal(result.ready, true);
+  assert.match(result.label, /no storm target/);
+});
+test("reviewed latest-image fallback remains usable with its missing timestamp disclosed", () => {
+  const bundle: WeatherBundle = {
+    ...empty,
+    rasterFrames: [
+      {
+        id: "latest",
+        layerId: "weather.satellite.clouds",
+        timestamp: empty.generatedAt,
+        tileUrlTemplate: "https://example.invalid/tile",
+        coverage: "US",
+        source: {
+          providerId: "goes",
+          providerName: "NOAA",
+          product: "infrared",
+          temporalKind: "observed",
+          receivedTimestamp: empty.generatedAt,
+          quality: "moderate",
+          qualityFlags: ["LATEST_FRAME_TIME_UNVERIFIED"],
+          attribution: "NOAA",
+        },
+      },
+    ],
+  };
+  const result = layerAvailability(
+    "weather.satellite.clouds",
+    bundle,
+    { connected: false },
+    Date.parse(empty.generatedAt),
+  );
+  assert.equal(result.ready, true);
+  assert.match(result.label, /source time unavailable/);
+  bundle.rasterFrames[0]!.source.qualityFlags = [];
+  assert.equal(
+    layerAvailability(
+      "weather.satellite.clouds",
+      bundle,
+      { connected: false },
+      Date.parse(empty.generatedAt),
+    ).ready,
+    false,
+  );
+});

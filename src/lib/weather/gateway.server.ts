@@ -1,3 +1,4 @@
+import { wmsTimes, selectWmsTimes, wmsTimeParameter } from "./wms.ts";
 import type { Feature, MultiPolygon, Point, Polygon } from "geojson";
 import {
   cardinalDirectionDegrees,
@@ -124,6 +125,7 @@ type WmsRasterSpec = {
   capabilitiesUrl: string;
   layerNames: string[];
   styles?: string | undefined;
+  daily?: boolean;
   coverage: string;
   resolution?: string | undefined;
   temporalKind: "observed" | "forecast" | "model";
@@ -148,6 +150,7 @@ const WMS_LAYER_SPECS: Record<string, WmsRasterSpec> = {
     providerId: "nasa-gibs-modis",
     providerName: "NASA Earthdata GIBS",
     product: "MODIS daily cloud-top temperature",
+    daily: true,
     capabilitiesUrl:
       "https://gibs.earthdata.nasa.gov/wms/epsg3857/best/wms.cgi?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetCapabilities",
     layerNames: [
@@ -271,31 +274,6 @@ function escapeRegex(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function wmsTimes(xml: string, layerName: string) {
-  const nameMatch = new RegExp(`<Name>\\s*${escapeRegex(layerName)}\\s*</Name>`, "i").exec(xml);
-  const scoped = nameMatch
-    ? xml.slice(nameMatch.index, xml.indexOf("</Layer>", nameMatch.index))
-    : xml;
-  const dimension = /<Dimension[^>]*name=["']time["'][^>]*>([\s\S]*?)<\/Dimension>/i.exec(scoped);
-  if (!dimension) return [];
-  const raw = dimension[1]?.trim() ?? "";
-  if (raw.includes("/")) {
-    // Some NASA layers advertise multiple disjoint availability intervals.
-    // Selecting the end of the first interval can make current imagery appear
-    // decades stale, so retain the newest valid interval end instead.
-    const ends = raw
-      .split(",")
-      .map((interval) => validIso(interval.trim().split("/")[1]))
-      .filter((value): value is string => Boolean(value))
-      .sort((left, right) => new Date(left).getTime() - new Date(right).getTime());
-    return ends.slice(-1);
-  }
-  return raw
-    .split(",")
-    .map((value) => validIso(value.trim()))
-    .filter((value): value is string => Boolean(value));
-}
-
 async function loadWmsRasterFrames(spec: WmsRasterSpec, signal: AbortSignal) {
   return withCache(
     `wms:${spec.layerId}:${spec.layerNames.join(",")}`,
@@ -325,10 +303,8 @@ async function loadWmsRasterFrames(spec: WmsRasterSpec, signal: AbortSignal) {
         : spec.layerNames;
       if (!advertised.length) throw new Error("Expected WMS layer is no longer advertised");
       const firstLayer = advertised[0]!;
-      const times = capabilities ? wmsTimes(capabilities, firstLayer) : [];
-      const frameTimes = (times.length ? times : [new Date().toISOString()]).slice(
-        -(spec.maxFrames ?? 1),
-      );
+      const times = capabilities ? wmsTimes(capabilities, firstLayer, spec.daily) : [];
+      const frameTimes = selectWmsTimes(times, spec.temporalKind, spec.maxFrames ?? 1);
       const endpoint = spec.capabilitiesUrl.split("?")[0]!;
       const base =
         `${endpoint}?SERVICE=WMS&REQUEST=GetMap&VERSION=1.1.1` +
@@ -339,7 +315,9 @@ async function loadWmsRasterFrames(spec: WmsRasterSpec, signal: AbortSignal) {
         id: `${spec.providerId}-${spec.layerId}-${timestamp}`,
         layerId: spec.layerId,
         timestamp,
-        tileUrlTemplate: times.length ? `${base}&TIME=${encodeURIComponent(timestamp)}` : base,
+        tileUrlTemplate: times.length
+          ? `${base}&TIME=${encodeURIComponent(wmsTimeParameter(timestamp, spec.daily))}`
+          : base,
         coverage: spec.coverage,
         legendUrl: `${endpoint}?service=WMS&version=1.3.0&request=GetLegendGraphic&format=image/png&layer=${encodeURIComponent(firstLayer)}`,
         source: sourceMetadata({
@@ -1554,7 +1532,7 @@ export async function loadWeatherBundle(request: WeatherPointRequest): Promise<W
 
     if (requestedLayers.has("weather.metar")) {
       try {
-        stationObservations = await loadAviationStations(request, controller.signal);
+        stationObservations = await loadAviationStations(request, AbortSignal.timeout(12_000));
         providerHealth.push(
           health({
             providerId: "nws-awc",
@@ -1605,7 +1583,7 @@ export async function loadWeatherBundle(request: WeatherPointRequest): Promise<W
 
     if (requestedLayers.has("weather.severe.intelligence")) {
       try {
-        probSevereObjects = await loadProbSevereStormObjects(request, controller.signal);
+        probSevereObjects = await loadProbSevereStormObjects(request, AbortSignal.timeout(12_000));
         const latest = probSevereObjects[0]?.source;
         providerHealth.push(
           health({
@@ -1645,7 +1623,7 @@ export async function loadWeatherBundle(request: WeatherPointRequest): Promise<W
           `iem-lsr:${roundCoordinate(request.latitude)},${roundCoordinate(request.longitude)}`,
           5 * 60_000,
           { providerId: "iem-nws-lsr", product: "NWS Local Storm Reports" },
-          () => loadIemStormReports(request, controller.signal),
+          () => loadIemStormReports(request, AbortSignal.timeout(12_000)),
         );
         providerHealth.push(
           health({

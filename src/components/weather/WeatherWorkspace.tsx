@@ -357,12 +357,14 @@ export function WeatherWorkspace() {
       setCommunityChasers(positions);
       setPresenceLastSuccess(new Date().toISOString());
       setPresenceError(null);
+      return true;
     } catch (nextError) {
       setPresenceError(
         nextError instanceof Error
           ? nextError.message
           : "Live LandDraft chaser locations are temporarily unavailable",
       );
+      return false;
     }
   }, [chaserLocation, wb.mapView.center, workspace.lastInspectionPoint]);
 
@@ -556,7 +558,10 @@ export function WeatherWorkspace() {
       const revision = ++layerActivationRevision.current;
       const initial = latestWorkspace.current.layerSettings[id];
       if (!initial) return;
-      if (change.visible && !initial.visible) {
+      if (change.visible && !initial.visible && id === "weather.storm_chaser.spotters") {
+        if (!(await loadCommunityChasers()) || revision !== layerActivationRevision.current) return;
+      }
+      if (change.visible && !initial.visible && id !== "weather.storm_chaser.spotters") {
         let availability = layerAvailability(id, bundle, publicAccess);
         if (!availability.ready) {
           if (!availability.canCheck) {
@@ -592,7 +597,7 @@ export function WeatherWorkspace() {
         },
       });
     },
-    [bundle, loadPoint, requestedLayerIds, wb, publicAccess],
+    [bundle, loadPoint, requestedLayerIds, wb, publicAccess, loadCommunityChasers],
   );
   const selectLayerCategory = (selectedCategory: string) => {
     updateWorkspace({ selectedCategory });
@@ -1466,6 +1471,131 @@ function WeatherLayerPanel({
     toast.success("Weather preset saved");
   };
 
+  const renderLayer = (layer: (typeof weatherLayerRegistry)[number]) => {
+    const setting = workspace.layerSettings[layer.id];
+    if (!setting || !hasWeatherCapability(layer.capability)) return null;
+    const status = layerStatus(layer.id);
+    return (
+      <div
+        key={layer.id}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          onLayer(layer.id, { favorite: !setting.favorite });
+        }}
+        className={cn(
+          "rounded-2xl border border-border bg-background p-3",
+          !status.ready && "border-dashed bg-secondary/40",
+        )}
+      >
+        <div className="flex items-start gap-2">
+          <button
+            onClick={() =>
+              setting.visible || status.ready || status.canCheck
+                ? onLayer(layer.id, { visible: !setting.visible })
+                : setRequirementLayer(requirementLayer === layer.id ? null : layer.id)
+            }
+            className={cn(
+              "mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-xl",
+              setting.visible ? "bg-primary text-primary-foreground" : "bg-secondary",
+            )}
+            aria-label={`${setting.visible ? "Hide" : "Show"} ${layer.name}`}
+          >
+            <Eye className="size-4" />
+          </button>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1">
+              <strong className="truncate text-xs">{layer.name}</strong>
+              <button
+                onClick={() => onLayer(layer.id, { favorite: !setting.favorite })}
+                className={cn(
+                  "ml-auto rounded-lg p-1",
+                  setting.favorite ? "text-primary" : "text-muted-foreground",
+                )}
+                aria-label={`${setting.favorite ? "Remove" : "Add"} favorite`}
+              >
+                <Heart className={cn("size-3.5", setting.favorite && "fill-current")} />
+              </button>
+            </div>
+            <p className="mt-0.5 text-[9px] leading-relaxed text-muted-foreground">
+              {layer.description}
+            </p>
+            <span
+              className={cn(
+                "mt-1 inline-flex rounded-full px-1.5 py-0.5 text-[8px] font-semibold",
+                status.ready ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800",
+              )}
+            >
+              {status.label}
+            </span>
+            {requirementLayer === layer.id && !status.ready && (
+              <div className="mt-2 rounded-xl border border-border p-2 text-[10px]">
+                <p>
+                  Provider:{" "}
+                  {weatherProviderRegistry.find(
+                    (provider) => provider.provider_id === weatherProduct(layer.id)?.providerId,
+                  )?.provider_name ?? "Not selected"}
+                </p>
+                <p>Product: {weatherProduct(layer.id)?.providerProduct}</p>
+                <p>
+                  Update interval:{" "}
+                  {weatherProduct(layer.id)?.updateIntervalSeconds ??
+                    "Product-dependent; not verified"}
+                </p>
+                <p>
+                  {layer.coverage ?? "Coverage and upstream product availability must be verified."}
+                </p>
+                <p className="mt-1">
+                  {status.label}. Review the provider and connection requirements in Data Sources.
+                </p>
+                {status.canCheck && (
+                  <button
+                    className="mt-2 font-semibold text-primary"
+                    onClick={() => onLayer(layer.id, { visible: true })}
+                  >
+                    Check availability
+                  </button>
+                )}
+              </div>
+            )}
+            {layer.providerName && (
+              <div className="mt-1 flex flex-wrap gap-1 text-[8px] text-muted-foreground">
+                <span className="rounded-full bg-secondary px-1.5 py-0.5">
+                  {layer.providerName}
+                </span>
+                {layer.providerCostMultiplier && (
+                  <span className="rounded-full bg-secondary px-1.5 py-0.5">
+                    {layer.providerCostMultiplier}× provider access
+                  </span>
+                )}
+                {layer.coverage && (
+                  <span className="rounded-full bg-secondary px-1.5 py-0.5">{layer.coverage}</span>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+        {setting.visible && layer.dataType !== "point" && (
+          <label className="mt-2 flex items-center gap-2 text-[9px] text-muted-foreground">
+            Opacity
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.05}
+              value={setting.opacity}
+              onChange={(event) => onLayer(layer.id, { opacity: Number(event.target.value) })}
+              className="min-w-0 flex-1 accent-primary"
+            />
+            {Math.round(setting.opacity * 100)}%
+          </label>
+        )}
+      </div>
+    );
+  };
+  const listedLayers = selectedLayers.filter(
+    (layer) => showUnavailable || layerStatus(layer.id).ready || layerStatus(layer.id).canCheck,
+  );
+  const rainfallOptions = listedLayers.filter((layer) => layer.id.startsWith("weather.rainfall."));
   return (
     <div className={cn("space-y-4", compact ? "p-3" : "p-4")}>
       <div>
@@ -1898,141 +2028,29 @@ function WeatherLayerPanel({
               : "No verified products in this category. Show unavailable & optional layers to inspect requirements."}
           </div>
         )}
-        {selectedLayers
-          .filter(
-            (layer) =>
-              showUnavailable || layerStatus(layer.id).ready || layerStatus(layer.id).canCheck,
-          )
-          .map((layer) => {
-            const setting = workspace.layerSettings[layer.id];
-            if (!setting || !hasWeatherCapability(layer.capability)) return null;
-            const status = layerStatus(layer.id);
-            return (
-              <div
-                key={layer.id}
-                onContextMenu={(event) => {
-                  event.preventDefault();
-                  onLayer(layer.id, { favorite: !setting.favorite });
-                }}
-                className={cn(
-                  "rounded-2xl border border-border bg-background p-3",
-                  !status.ready && "border-dashed bg-secondary/40",
-                )}
-              >
-                <div className="flex items-start gap-2">
-                  <button
-                    onClick={() =>
-                      setting.visible || status.ready || status.canCheck
-                        ? onLayer(layer.id, { visible: !setting.visible })
-                        : setRequirementLayer(requirementLayer === layer.id ? null : layer.id)
-                    }
-                    className={cn(
-                      "mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-xl",
-                      setting.visible ? "bg-primary text-primary-foreground" : "bg-secondary",
-                    )}
-                    aria-label={`${setting.visible ? "Hide" : "Show"} ${layer.name}`}
-                  >
-                    <Eye className="size-4" />
-                  </button>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-1">
-                      <strong className="truncate text-xs">{layer.name}</strong>
-                      <button
-                        onClick={() => onLayer(layer.id, { favorite: !setting.favorite })}
-                        className={cn(
-                          "ml-auto rounded-lg p-1",
-                          setting.favorite ? "text-primary" : "text-muted-foreground",
-                        )}
-                        aria-label={`${setting.favorite ? "Remove" : "Add"} favorite`}
-                      >
-                        <Heart className={cn("size-3.5", setting.favorite && "fill-current")} />
-                      </button>
-                    </div>
-                    <p className="mt-0.5 text-[9px] leading-relaxed text-muted-foreground">
-                      {layer.description}
-                    </p>
-                    <span
-                      className={cn(
-                        "mt-1 inline-flex rounded-full px-1.5 py-0.5 text-[8px] font-semibold",
-                        status.ready
-                          ? "bg-emerald-100 text-emerald-800"
-                          : "bg-amber-100 text-amber-800",
-                      )}
-                    >
-                      {status.label}
-                    </span>
-                    {requirementLayer === layer.id && !status.ready && (
-                      <div className="mt-2 rounded-xl border border-border p-2 text-[10px]">
-                        <p>
-                          Provider:{" "}
-                          {weatherProviderRegistry.find(
-                            (provider) =>
-                              provider.provider_id === weatherProduct(layer.id)?.providerId,
-                          )?.provider_name ?? "Not selected"}
-                        </p>
-                        <p>Product: {weatherProduct(layer.id)?.providerProduct}</p>
-                        <p>
-                          Update interval:{" "}
-                          {weatherProduct(layer.id)?.updateIntervalSeconds ??
-                            "Product-dependent; not verified"}
-                        </p>
-                        <p>
-                          {layer.coverage ??
-                            "Coverage and upstream product availability must be verified."}
-                        </p>
-                        <p className="mt-1">
-                          {status.label}. Review the provider and connection requirements in Data
-                          Sources.
-                        </p>
-                        {status.canCheck && (
-                          <button
-                            className="mt-2 font-semibold text-primary"
-                            onClick={() => onLayer(layer.id, { visible: true })}
-                          >
-                            Check availability
-                          </button>
-                        )}
-                      </div>
-                    )}
-                    {layer.providerName && (
-                      <div className="mt-1 flex flex-wrap gap-1 text-[8px] text-muted-foreground">
-                        <span className="rounded-full bg-secondary px-1.5 py-0.5">
-                          {layer.providerName}
-                        </span>
-                        {layer.providerCostMultiplier && (
-                          <span className="rounded-full bg-secondary px-1.5 py-0.5">
-                            {layer.providerCostMultiplier}× provider access
-                          </span>
-                        )}
-                        {layer.coverage && (
-                          <span className="rounded-full bg-secondary px-1.5 py-0.5">
-                            {layer.coverage}
-                          </span>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </div>
-                {setting.visible && layer.dataType !== "point" && (
-                  <label className="mt-2 flex items-center gap-2 text-[9px] text-muted-foreground">
-                    Opacity
-                    <input
-                      type="range"
-                      min={0}
-                      max={1}
-                      step={0.05}
-                      value={setting.opacity}
-                      onChange={(event) =>
-                        onLayer(layer.id, { opacity: Number(event.target.value) })
-                      }
-                      className="min-w-0 flex-1 accent-primary"
-                    />
-                    {Math.round(setting.opacity * 100)}%
-                  </label>
-                )}
-              </div>
-            );
-          })}
+        {rainfallOptions.length > 0 && (
+          <details className="rounded-2xl border border-border bg-background">
+            <summary className="cursor-pointer p-3 text-xs font-semibold">
+              LandDraft rainfall{" "}
+              <span className="text-muted-foreground">
+                ·{" "}
+                {rainfallOptions
+                  .filter((layer) => workspace.layerSettings[layer.id]?.visible)
+                  .map((layer) => layer.id.split(".").at(-1))
+                  .join(", ") || "Choose hours"}
+              </span>
+            </summary>
+            <div className="space-y-2 border-t border-border p-2">
+              <p className="px-1 text-[10px] text-muted-foreground">
+                Choose rainfall accumulation: 1, 3, 6, 12, 24, 48 or 72 hours.
+              </p>
+              {rainfallOptions.map(renderLayer)}
+            </div>
+          </details>
+        )}
+        {listedLayers
+          .filter((layer) => !layer.id.startsWith("weather.rainfall."))
+          .map(renderLayer)}{" "}
       </div>
 
       <button

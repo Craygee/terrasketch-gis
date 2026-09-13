@@ -116,6 +116,7 @@ export function layerAvailability(
         source.quality === "stale" ||
         source.quality === "unavailable" ||
         (source.temporalKind === "observed" &&
+          !source.qualityFlags.includes("LATEST_FRAME_TIME_UNVERIFIED") &&
           (!source.sourceTimestamp ||
             !Number.isFinite(Date.parse(source.sourceTimestamp)) ||
             Date.parse(source.sourceTimestamp) > now + 60_000 ||
@@ -123,7 +124,16 @@ export function layerAvailability(
     )
   )
     return no("stale", "Source time is stale or unavailable", true);
-  return { ready: true, state: "available", label: "Available", canCheck: true };
+  return {
+    ready: true,
+    state: "available",
+    label: sources.some((source) => source?.qualityFlags.includes("LATEST_FRAME_TIME_UNVERIFIED"))
+      ? "Latest image · source time unavailable"
+      : id === "weather.photo" && bundle.photography?.status === "no-severe-target"
+        ? "Connected · no storm target here"
+        : "Available",
+    canCheck: true,
+  };
 }
 
 /** Data evidence only: credentials or a registered layer are not proof of data. */
@@ -152,7 +162,7 @@ export function layerHasUsableData(bundle: WeatherBundle | null, id: string): bo
   if (id === "weather.severe.reports") return healthy("iem-nws-lsr");
   if (id === "weather.storm_chaser.spotters") return healthy("landdraft-chaser-presence");
   if (id === "weather.metar") return bundle.stationObservations.length > 0;
-  if (id === "weather.photo") return !!bundle.photography?.zones.length;
+  if (id === "weather.photo") return !!bundle.photography;
   if (id.startsWith("weather.spc."))
     return !!bundle.spcOutlooks?.some((outlook) => outlook.layerId === id);
   return bundle.rasterFrames.some((frame) => frame.layerId === id);
