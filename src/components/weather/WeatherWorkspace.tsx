@@ -39,6 +39,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { LandDraftMark } from "@/components/brand/LandDraftMark";
+import { useAuth } from "@/lib/auth";
 import { BasemapControl } from "@/components/gis/BasemapControl";
 import { MapCanvas } from "@/components/gis/MapCanvas";
 import { SearchBox } from "@/components/gis/SearchBox";
@@ -47,6 +48,11 @@ import { useWorkbench } from "@/lib/gis/store";
 import { directionsUrl } from "@/lib/gis/directions";
 import { cn } from "@/lib/utils";
 import { getWeatherAtPoint } from "@/lib/weather/api";
+import {
+  listActiveChaserPresences,
+  publishChaserPresence,
+  stopChaserPresence,
+} from "@/lib/weather/chaserPresence";
 import { hasWeatherCapability } from "@/lib/weather/entitlements";
 import {
   formatPressure,
@@ -77,6 +83,7 @@ import type {
   WeatherBundle,
   WeatherChaserPosition,
   WeatherLayerSetting,
+  WeatherStormReport,
   WeatherTimelineState,
   WeatherWorkspaceState,
 } from "@/lib/weather/types";
@@ -137,6 +144,7 @@ const CONNECTED_LAYERS = new Set([
   "weather.lightning.recent",
   "weather.severe.alerts",
   "weather.severe.intelligence",
+  "weather.severe.reports",
   "weather.storm_chaser.spotters",
   "weather.forecast.precipitation",
   "weather.surface",
@@ -200,6 +208,7 @@ function stormTrackBounds(
 }
 
 export function WeatherWorkspace() {
+  const auth = useAuth();
   const wb = useWorkbench();
   const { map } = useMapRef();
   const workspace = useMemo(
@@ -230,6 +239,11 @@ export function WeatherWorkspace() {
   const [selectedStormId, setSelectedStormId] = useState<string | null>(null);
   const [selectedCommunityChaser, setSelectedCommunityChaser] =
     useState<WeatherChaserPosition | null>(null);
+  const [selectedStormReport, setSelectedStormReport] = useState<WeatherStormReport | null>(null);
+  const [communityChasers, setCommunityChasers] = useState<WeatherChaserPosition[]>([]);
+  const [presenceSharing, setPresenceSharing] = useState(false);
+  const [presenceBusy, setPresenceBusy] = useState(false);
+  const [presenceError, setPresenceError] = useState<string | null>(null);
   const [workspaceView, setWorkspaceView] = useState<WorkspaceView>(initialWorkspaceView);
   const [chaseActive, setChaseActive] = useState(false);
   const [chaseFollow, setChaseFollow] = useState(true);
@@ -269,6 +283,12 @@ export function WeatherWorkspace() {
   }, []);
   const synchronizedLayerRequest = useRef("");
   const geolocationWatch = useRef<number | null>(null);
+  const latestChaserPosition = useRef<{
+    location: [number, number];
+    accuracyM?: number | undefined;
+    headingDeg?: number | undefined;
+    speedMS?: number | undefined;
+  } | null>(null);
   const chaseFollowRef = useRef(true);
   const stormAutoCenterPending = useRef(false);
   const initialWorkspaceApplied = useRef(false);
@@ -357,6 +377,37 @@ export function WeatherWorkspace() {
     [requestedLayerIds, xweatherConnection.connected],
   );
 
+  const loadCommunityChasers = useCallback(async () => {
+    const point = chaserLocation ?? workspace.lastInspectionPoint ?? wb.mapView.center;
+    try {
+      const positions = await listActiveChaserPresences({
+        longitude: point[0],
+        latitude: point[1],
+      });
+      setCommunityChasers(positions);
+      setPresenceError(null);
+    } catch (nextError) {
+      setPresenceError(
+        nextError instanceof Error
+          ? nextError.message
+          : "Live LandDraft chaser locations are temporarily unavailable",
+      );
+    }
+  }, [chaserLocation, wb.mapView.center, workspace.lastInspectionPoint]);
+
+  const publishLatestChaserPosition = useCallback(async () => {
+    const latest = latestChaserPosition.current;
+    if (!latest) return;
+    await publishChaserPresence({
+      displayName: auth.user?.name || "LandDraft chaser",
+      longitude: latest.location[0],
+      latitude: latest.location[1],
+      ...(latest.headingDeg === undefined ? {} : { headingDeg: latest.headingDeg }),
+      ...(latest.speedMS === undefined ? {} : { speedMS: latest.speedMS }),
+      ...(latest.accuracyM === undefined ? {} : { accuracyM: latest.accuracyM }),
+    });
+  }, [auth.user?.name]);
+
   useEffect(() => {
     if (!wb.projectReady || loadedProject.current === wb.projectId) return;
     loadedProject.current = wb.projectId;
@@ -412,12 +463,48 @@ export function WeatherWorkspace() {
 
   useEffect(() => {
     if (
+      !wb.projectReady ||
+      (workspaceView !== "storm-chaser" &&
+        !workspace.layerSettings["weather.storm_chaser.spotters"]?.visible)
+    )
+      return;
+    void loadCommunityChasers();
+    const timer = window.setInterval(() => void loadCommunityChasers(), 30_000);
+    return () => window.clearInterval(timer);
+  }, [loadCommunityChasers, wb.projectReady, workspace.layerSettings, workspaceView]);
+
+  useEffect(() => {
+    if (!presenceSharing) return;
+    void publishLatestChaserPosition()
+      .then(loadCommunityChasers)
+      .catch((nextError) => {
+        setPresenceSharing(false);
+        setPresenceError(
+          nextError instanceof Error ? nextError.message : "Your location could not be shared",
+        );
+      });
+    const timer = window.setInterval(
+      () =>
+        void publishLatestChaserPosition().catch((nextError) =>
+          setPresenceError(
+            nextError instanceof Error ? nextError.message : "Your location could not be updated",
+          ),
+        ),
+      30_000,
+    );
+    return () => {
+      window.clearInterval(timer);
+      void stopChaserPresence().catch(() => undefined);
+    };
+  }, [loadCommunityChasers, presenceSharing, publishLatestChaserPosition]);
+
+  useEffect(() => {
+    if (
       selectedCommunityChaser &&
-      bundle &&
-      !bundle.chaserPositions.some((position) => position.id === selectedCommunityChaser.id)
+      !communityChasers.some((position) => position.id === selectedCommunityChaser.id)
     )
       setSelectedCommunityChaser(null);
-  }, [bundle, selectedCommunityChaser]);
+  }, [communityChasers, selectedCommunityChaser]);
 
   useEffect(() => {
     if (!map || (!workspace.inspectorEnabled && !navigationTargetMode)) return;
@@ -566,7 +653,11 @@ export function WeatherWorkspace() {
         view === "photography"
           ? ["weather.photo"]
           : view === "storm-chaser"
-            ? ["weather.severe.intelligence", "weather.storm_chaser.spotters"]
+            ? [
+                "weather.severe.intelligence",
+                "weather.severe.reports",
+                "weather.storm_chaser.spotters",
+              ]
             : [];
       const layerSettings = { ...workspace.layerSettings };
       for (const workspaceLayerId of workspaceLayerIds) {
@@ -602,6 +693,32 @@ export function WeatherWorkspace() {
   const activeLayerCount = Object.values(workspace.layerSettings).filter(
     (setting) => setting.visible,
   ).length;
+  const displayBundle = useMemo(
+    () =>
+      bundle
+        ? {
+            ...bundle,
+            chaserPositions: communityChasers,
+            providerHealth: [
+              ...bundle.providerHealth.filter(
+                (provider) => provider.providerId !== "landdraft-chaser-presence",
+              ),
+              {
+                providerId: "landdraft-chaser-presence",
+                providerName: "LandDraft opt-in chaser presence",
+                status: presenceError ? ("down" as const) : ("up" as const),
+                products: ["ephemeral opt-in chaser locations"],
+                coverage: "Signed-in LandDraft users within 800 km of the inspected point",
+                lastSuccessfulRequest: presenceError ? undefined : new Date().toISOString(),
+                lastUpdate: communityChasers[0]?.observedAt,
+                error: presenceError ?? undefined,
+                costClass: "self-hosted" as const,
+              },
+            ],
+          }
+        : null,
+    [bundle, communityChasers, presenceError],
+  );
   const current = bundle?.current;
   const activeStorm = useMemo(
     () =>
@@ -633,6 +750,8 @@ export function WeatherWorkspace() {
     if (geolocationWatch.current !== null) {
       navigator.geolocation.clearWatch(geolocationWatch.current);
       geolocationWatch.current = null;
+      latestChaserPosition.current = null;
+      setPresenceSharing(false);
       setChaseActive(false);
       setChaserLocation(undefined);
       setChaserAccuracy(undefined);
@@ -651,6 +770,12 @@ export function WeatherWorkspace() {
           position.coords.longitude,
           position.coords.latitude,
         ];
+        latestChaserPosition.current = {
+          location: nextLocation,
+          accuracyM: position.coords.accuracy,
+          ...(position.coords.heading === null ? {} : { headingDeg: position.coords.heading }),
+          ...(position.coords.speed === null ? {} : { speedMS: position.coords.speed }),
+        };
         setChaserLocation(nextLocation);
         setChaserAccuracy(position.coords.accuracy);
         setChaseActive(true);
@@ -666,6 +791,8 @@ export function WeatherWorkspace() {
         }
       },
       (nextError) => {
+        latestChaserPosition.current = null;
+        setPresenceSharing(false);
         setChaseActive(false);
         setChaseError(
           nextError.code === nextError.PERMISSION_DENIED
@@ -675,6 +802,49 @@ export function WeatherWorkspace() {
       },
       { enableHighAccuracy: true, maximumAge: 5_000, timeout: 15_000 },
     );
+  };
+
+  const togglePresenceSharing = async () => {
+    if (presenceSharing) {
+      setPresenceBusy(true);
+      try {
+        await stopChaserPresence();
+        setPresenceSharing(false);
+        setPresenceError(null);
+        await loadCommunityChasers();
+        toast.success("Live chaser location sharing stopped");
+      } catch (nextError) {
+        setPresenceError(
+          nextError instanceof Error ? nextError.message : "Location sharing could not be stopped",
+        );
+      } finally {
+        setPresenceBusy(false);
+      }
+      return;
+    }
+    if (!latestChaserPosition.current) {
+      toast.info("Enable GPS first", {
+        description: "LandDraft will ask separately before sharing your location with other users.",
+      });
+      return;
+    }
+    setPresenceBusy(true);
+    try {
+      await publishLatestChaserPosition();
+      setPresenceSharing(true);
+      setPresenceError(null);
+      await loadCommunityChasers();
+      toast.success("Live chaser location is now shared", {
+        description:
+          "Sharing stops when you turn it off and expires 10 minutes after updates stop.",
+      });
+    } catch (nextError) {
+      setPresenceError(
+        nextError instanceof Error ? nextError.message : "Your location could not be shared",
+      );
+    } finally {
+      setPresenceBusy(false);
+    }
   };
 
   const toggleChaseFollow = () => {
@@ -829,7 +999,7 @@ export function WeatherWorkspace() {
           <aside className="hidden w-72 shrink-0 overflow-y-auto border-r border-border bg-card lg:block">
             <WeatherLayerPanel
               workspace={workspace}
-              bundle={bundle}
+              bundle={displayBundle}
               groups={visibleGroups}
               workspaceView={workspaceView}
               advanced={advancedLayers}
@@ -850,7 +1020,7 @@ export function WeatherWorkspace() {
           <div className="relative min-h-0 flex-1">
             <MapCanvas />
             <WeatherMapOverlay
-              bundle={bundle}
+              bundle={displayBundle}
               workspace={workspace}
               onSelectAlert={(alert) => {
                 setSelectedAlert(alert);
@@ -872,6 +1042,15 @@ export function WeatherWorkspace() {
                     }`,
                   },
                 );
+                if (window.innerWidth < 1024) setMobileSheet("weather");
+              }}
+              onSelectStormReport={(report) => {
+                setSelectedStormReport(report);
+                toast.info(report.event, {
+                  description: `${[report.city, report.county, report.state]
+                    .filter(Boolean)
+                    .join(" · ")} · observed ${new Date(report.observedAt).toLocaleString()}`,
+                });
                 if (window.innerWidth < 1024) setMobileSheet("weather");
               }}
               stormObjectsVisible={
@@ -997,7 +1176,7 @@ export function WeatherWorkspace() {
                   {mobileSheet === "layers" ? (
                     <WeatherLayerPanel
                       workspace={workspace}
-                      bundle={bundle}
+                      bundle={displayBundle}
                       groups={visibleGroups}
                       workspaceView={workspaceView}
                       advanced={advancedLayers}
@@ -1021,8 +1200,13 @@ export function WeatherWorkspace() {
                   ) : workspaceView === "storm-chaser" ? (
                     <StormChaserPanel
                       storms={bundle?.stormObjects ?? []}
-                      communityChasers={bundle?.chaserPositions ?? []}
+                      stormReports={bundle?.stormReports ?? []}
+                      selectedStormReport={selectedStormReport}
+                      communityChasers={communityChasers}
                       selectedCommunityChaser={selectedCommunityChaser}
+                      presenceSharing={presenceSharing}
+                      presenceBusy={presenceBusy}
+                      presenceError={presenceError}
                       activeStorm={activeStorm}
                       activeAlert={activeAlert}
                       forecastTiming={activeStormForecast}
@@ -1036,6 +1220,7 @@ export function WeatherWorkspace() {
                       onSelect={selectStorm}
                       onCenterTrack={() => activeStorm && selectStorm(activeStorm)}
                       onToggleChase={toggleChaseLocation}
+                      onTogglePresence={() => void togglePresenceSharing()}
                       onToggleFollow={toggleChaseFollow}
                       onChooseNavigationTarget={() => {
                         setNavigationTargetMode((active) => !active);
@@ -1088,8 +1273,13 @@ export function WeatherWorkspace() {
             {workspaceView === "storm-chaser" ? (
               <StormChaserPanel
                 storms={bundle?.stormObjects ?? []}
-                communityChasers={bundle?.chaserPositions ?? []}
+                stormReports={bundle?.stormReports ?? []}
+                selectedStormReport={selectedStormReport}
+                communityChasers={communityChasers}
                 selectedCommunityChaser={selectedCommunityChaser}
+                presenceSharing={presenceSharing}
+                presenceBusy={presenceBusy}
+                presenceError={presenceError}
                 activeStorm={activeStorm}
                 activeAlert={activeAlert}
                 forecastTiming={activeStormForecast}
@@ -1103,6 +1293,7 @@ export function WeatherWorkspace() {
                 onSelect={selectStorm}
                 onCenterTrack={() => activeStorm && selectStorm(activeStorm)}
                 onToggleChase={toggleChaseLocation}
+                onTogglePresence={() => void togglePresenceSharing()}
                 onToggleFollow={toggleChaseFollow}
                 onChooseNavigationTarget={() => setNavigationTargetMode((active) => !active)}
                 onNavigate={openNavigationTarget}
@@ -1282,7 +1473,7 @@ function WeatherLayerPanel({
     const hasRaster = bundle?.rasterFrames.some((frame) => frame.layerId === id) ?? false;
     const available =
       id === "weather.current"
-        ? Boolean(bundle?.current || bundle?.forecast.length)
+        ? Boolean(bundle?.current)
         : id === "weather.radar.simple"
           ? Boolean(bundle?.radarFrames.length)
           : id === "weather.severe.alerts"
@@ -1300,17 +1491,33 @@ function WeatherLayerPanel({
                 : id === "weather.metar"
                   ? Boolean(bundle?.stationObservations.length)
                   : id === "weather.storm_chaser.spotters"
-                    ? Boolean(bundle?.chaserPositions.length)
-                    : id === "weather.photo"
-                      ? Boolean(bundle?.photography)
-                      : hasRaster;
+                    ? Boolean(
+                        bundle?.providerHealth.some(
+                          (provider) =>
+                            provider.providerId === "landdraft-chaser-presence" &&
+                            provider.status === "up",
+                        ),
+                      )
+                    : id === "weather.severe.reports"
+                      ? Boolean(
+                          bundle?.providerHealth.some(
+                            (provider) =>
+                              provider.providerId === "iem-nws-lsr" &&
+                              (provider.status === "up" || provider.status === "degraded"),
+                          ),
+                        )
+                      : id === "weather.photo"
+                        ? Boolean(bundle?.photography)
+                        : hasRaster;
     if (available) return { ready: true, label: "AVAILABLE" };
     if (id === "weather.storm_chaser.spotters") {
       const provider = bundle?.providerHealth.find(
-        (item) => item.providerId === "spotter-network-evaluation",
+        (item) => item.providerId === "landdraft-chaser-presence",
       );
-      if (provider?.status === "not-configured")
-        return { ready: false, label: "PROVIDER PERMISSION REQUIRED" };
+      if (provider?.status === "down") return { ready: false, label: "CONNECTION ERROR" };
+    }
+    if (id === "weather.severe.reports") {
+      const provider = bundle?.providerHealth.find((item) => item.providerId === "iem-nws-lsr");
       if (provider?.status === "down") return { ready: false, label: "CONNECTION ERROR" };
     }
     const registered = weatherLayerRegistry.find((layer) => layer.id === id);
@@ -1347,6 +1554,8 @@ function WeatherLayerPanel({
           unavailable.
         </p>
       </div>
+
+      {!compact && <WeatherLegends workspace={workspace} workspaceView={workspaceView} embedded />}
 
       {workspaceView === "storm-chaser" && (
         <details className="group rounded-2xl border border-primary/30 bg-primary/5">
@@ -2021,8 +2230,13 @@ function StormHistorySignal({
 
 function StormChaserPanel({
   storms,
+  stormReports,
+  selectedStormReport,
   communityChasers,
   selectedCommunityChaser,
+  presenceSharing,
+  presenceBusy,
+  presenceError,
   activeStorm,
   activeAlert,
   forecastTiming,
@@ -2036,14 +2250,20 @@ function StormChaserPanel({
   onSelect,
   onCenterTrack,
   onToggleChase,
+  onTogglePresence,
   onToggleFollow,
   onChooseNavigationTarget,
   onNavigate,
   onClearNavigationTarget,
 }: {
   storms: StormObject[];
+  stormReports: WeatherStormReport[];
+  selectedStormReport: WeatherStormReport | null;
   communityChasers: WeatherChaserPosition[];
   selectedCommunityChaser: WeatherChaserPosition | null;
+  presenceSharing: boolean;
+  presenceBusy: boolean;
+  presenceError: string | null;
   activeStorm: StormObject | null;
   activeAlert: WeatherAlert | null;
   forecastTiming: TimeAdjustedStormForecast | null;
@@ -2057,6 +2277,7 @@ function StormChaserPanel({
   onSelect: (storm: StormObject) => void;
   onCenterTrack: () => void;
   onToggleChase: () => void;
+  onTogglePresence: () => void;
   onToggleFollow: () => void;
   onChooseNavigationTarget: () => void;
   onNavigate: () => void;
@@ -2065,11 +2286,21 @@ function StormChaserPanel({
   const isGuidance = activeStorm?.basis === "provider-guidance";
   const [potentialFilter, setPotentialFilter] = useState<StormPotentialFilter>("all");
   const [sortMode, setSortMode] = useState<StormSortMode>("selected-potential");
+  const [stormBrowserExpanded, setStormBrowserExpanded] = useState(false);
   const [expandedStormDetails, setExpandedStormDetails] = useState<string | null>(
     activeStorm?.id ?? null,
   );
+  const previousActiveStormId = useRef(activeStorm?.id ?? null);
   useEffect(() => {
-    if (activeStorm?.id) setExpandedStormDetails(activeStorm.id);
+    const nextStormId = activeStorm?.id ?? null;
+    if (nextStormId) setExpandedStormDetails(nextStormId);
+    if (
+      nextStormId &&
+      previousActiveStormId.current &&
+      nextStormId !== previousActiveStormId.current
+    )
+      setStormBrowserExpanded(false);
+    previousActiveStormId.current = nextStormId;
   }, [activeStorm?.id]);
   const displayedStorms = useMemo(() => {
     const filtered =
@@ -2097,9 +2328,9 @@ function StormChaserPanel({
           <strong className="text-xs">Storm Chaser / Severe Intelligence</strong>
         </div>
         <p className="mt-1 text-[9px] leading-relaxed text-muted-foreground">
-          LandDraft automatically combines NOAA tracked-storm guidance with official alerts.
-          Provider probabilities, LandDraft motion projections, and official warnings remain visibly
-          separate.
+          LandDraft combines NOAA tracked-storm guidance, official alerts, recent NWS storm reports,
+          and voluntary LandDraft chaser locations. Derived motion and official products remain
+          visibly separate.
         </p>
       </div>
 
@@ -2138,6 +2369,39 @@ function StormChaserPanel({
           <Route className="size-4" />
           Full track
         </button>
+      </div>
+
+      <div className="rounded-2xl border border-blue-200 bg-blue-50 p-3 text-blue-950">
+        <div className="flex items-center gap-2">
+          <LocateFixed className="size-4" />
+          <strong className="text-[10px]">Live LandDraft chaser presence</strong>
+        </div>
+        <p className="mt-1 text-[8px] leading-relaxed">
+          GPS stays private unless you explicitly share it. One current point is kept—never a travel
+          history—and disappears from other users 10 minutes after updates stop.
+        </p>
+        <button
+          type="button"
+          onClick={onTogglePresence}
+          disabled={!chaseActive || presenceBusy}
+          className={cn(
+            "mt-2 flex w-full items-center justify-center gap-2 rounded-xl px-3 py-2 text-[9px] font-semibold disabled:cursor-not-allowed disabled:opacity-45",
+            presenceSharing ? "border border-blue-300 bg-white" : "bg-blue-700 text-white",
+          )}
+        >
+          {presenceBusy ? (
+            <LoaderCircle className="size-3.5 animate-spin" />
+          ) : (
+            <Navigation className="size-3.5" />
+          )}
+          {presenceSharing ? "Stop sharing my location" : "Share my live chaser location"}
+        </button>
+        {!chaseActive && (
+          <span className="mt-1 block text-[7px] opacity-75">Enable GPS before sharing.</span>
+        )}
+        {presenceError && (
+          <span className="mt-1 block text-[7px] text-red-800">{presenceError}</span>
+        )}
       </div>
 
       <details className="rounded-2xl border border-emerald-200 bg-emerald-50 p-3 text-[9px] leading-relaxed text-emerald-950">
@@ -2181,13 +2445,11 @@ function StormChaserPanel({
         open={selectedCommunityChaser ? true : undefined}
       >
         <summary className="cursor-pointer text-[10px] font-semibold">
-          Community spotters · {communityChasers.length} nearby ·{" "}
-          {communityChasers.filter((chaser) => chaser.featured).length} featured
+          Opt-in LandDraft chasers · {communityChasers.length} nearby
         </summary>
         <p className="mt-1 text-[8px] leading-relaxed">
-          Recent trained spotters appear in blue. Gold star markers come from Spotter Network’s
-          experienced-reporter feed. “Featured” reflects recent acceptable reporting history, not a
-          safety or skill endorsement.
+          Blue markers are signed-in LandDraft users who voluntarily shared a current GPS point.
+          They are not provider-verified spotters and their location does not indicate a safe route.
         </p>
         {selectedCommunityChaser && (
           <div className="mt-2 rounded-xl bg-white/80 p-2 text-[8px]">
@@ -2203,11 +2465,6 @@ function StormChaserPanel({
                 </span>
               )}
             </div>
-            {!selectedCommunityChaser.displayName && !selectedCommunityChaser.callsign && (
-              <span className="mt-1 block text-muted-foreground">
-                Name unavailable in the current privacy feed
-              </span>
-            )}
             {(selectedCommunityChaser.callsign || selectedCommunityChaser.organization) && (
               <span className="mt-1 block text-muted-foreground">
                 {[selectedCommunityChaser.callsign, selectedCommunityChaser.organization]
@@ -2220,9 +2477,7 @@ function StormChaserPanel({
               {selectedCommunityChaser.motionStatus}
             </span>
             <span className="mt-1 block">
-              {selectedCommunityChaser.memberClass === "experienced-reporter"
-                ? "Experienced reporter classification"
-                : "Trained community spotter"}
+              Voluntary LandDraft location · not a certification or endorsement
             </span>
             <span className="mt-1 block font-mono">
               {selectedCommunityChaser.location.geometry.coordinates[1]?.toFixed(4)},{" "}
@@ -2235,105 +2490,178 @@ function StormChaserPanel({
           </div>
         )}
         <p className="mt-2 text-[7px] leading-relaxed opacity-80">
-          Spotter locations do not indicate that a storm is safe to approach and are not an official
-          warning product. The current no-name evaluation feed intentionally withholds identities;
-          production use and any named feed require separate provider authorization.
+          Sharing is off by default. Leaving this screen or losing service can delay the final stop
+          request, so every point automatically expires after 10 minutes without an update.
         </p>
       </details>
 
-      <div>
-        <div className="flex items-center gap-2 text-[10px] font-semibold">
-          Active storm intelligence
-          <span className="ml-auto rounded-full bg-secondary px-2 py-0.5 text-[8px]">
+      <details
+        className="rounded-2xl border border-border p-3"
+        open={selectedStormReport ? true : undefined}
+      >
+        <summary className="cursor-pointer text-[10px] font-semibold">
+          Recent NWS storm reports · {stormReports.length} nearby
+        </summary>
+        <p className="mt-1 text-[8px] leading-relaxed text-muted-foreground">
+          Observed event locations from NWS Local Storm Reports via Iowa Environmental Mesonet.
+          These are report locations—not live chaser or reporter positions—and may arrive after the
+          event.
+        </p>
+        {selectedStormReport && (
+          <div className="mt-2 rounded-xl bg-secondary p-2 text-[8px]">
+            <strong className="block">{selectedStormReport.event}</strong>
+            <span className="mt-1 block text-muted-foreground">
+              {[selectedStormReport.city, selectedStormReport.county, selectedStormReport.state]
+                .filter(Boolean)
+                .join(" · ")}
+            </span>
+            {selectedStormReport.magnitude !== undefined && (
+              <span className="mt-1 block">
+                Reported magnitude: {selectedStormReport.magnitude}
+              </span>
+            )}
+            {selectedStormReport.remarks && (
+              <span className="mt-1 block leading-relaxed">{selectedStormReport.remarks}</span>
+            )}
+            <span className="mt-1 block text-muted-foreground">
+              Observed {new Date(selectedStormReport.observedAt).toLocaleString()} · Source:{" "}
+              {selectedStormReport.source.providerName}
+            </span>
+          </div>
+        )}
+      </details>
+
+      <section className="overflow-hidden rounded-2xl border border-border">
+        <button
+          type="button"
+          onClick={() => setStormBrowserExpanded((expanded) => !expanded)}
+          className="flex w-full items-center gap-2 px-3 py-2.5 text-left transition-colors hover:bg-accent"
+          aria-expanded={stormBrowserExpanded}
+          title={stormBrowserExpanded ? "Collapse active storm intelligence" : "Show storm list"}
+        >
+          {stormBrowserExpanded ? (
+            <ChevronDown className="size-3.5 shrink-0 text-primary" />
+          ) : (
+            <ChevronRight className="size-3.5 shrink-0 text-primary" />
+          )}
+          <span className="min-w-0 flex-1">
+            <strong className="block text-[10px]">Active storm intelligence</strong>
+            {!stormBrowserExpanded && activeStorm && (
+              <span className="block truncate text-[8px] text-muted-foreground">
+                Showing {activeStorm.title}
+              </span>
+            )}
+          </span>
+          <span className="shrink-0 rounded-full bg-secondary px-2 py-0.5 text-[8px] font-semibold">
             {displayedStorms.length}/{storms.length}
           </span>
-        </div>
-        <div className="mt-2 grid grid-cols-2 gap-1.5">
-          <label className="min-w-0 text-[8px] font-semibold text-muted-foreground">
-            Potential type
-            <select
-              value={potentialFilter}
-              onChange={(event) => setPotentialFilter(event.target.value as StormPotentialFilter)}
-              className="mt-1 w-full rounded-xl border border-border bg-background px-2 py-2 text-[9px] text-foreground"
-            >
-              {stormPotentialOptions.map((option) => (
-                <option key={option.id} value={option.id}>
-                  {option.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="min-w-0 text-[8px] font-semibold text-muted-foreground">
-            Sort by
-            <select
-              value={sortMode}
-              onChange={(event) => setSortMode(event.target.value as StormSortMode)}
-              className="mt-1 w-full rounded-xl border border-border bg-background px-2 py-2 text-[9px] text-foreground"
-            >
-              <option value="selected-potential">Selected potential</option>
-              <option value="overall-potential">Overall potential</option>
-              <option value="newest">Newest analysis</option>
-            </select>
-          </label>
-        </div>
-        <p className="mt-1 text-[7px] leading-relaxed text-muted-foreground">
-          Priority is a LandDraft ordering index based on available provider guidance, confidence,
-          and trend. It is not an additional weather probability or a chase recommendation.
-        </p>
-        {displayedStorms.length ? (
-          <div className="mt-2 space-y-1">
-            {displayedStorms.slice(0, 40).map((storm) => {
-              const potential = stormPrimaryPotential(storm, potentialFilter);
-              const priority = stormPriorityIndex(storm, potentialFilter);
-              return (
-                <button
-                  key={storm.id}
-                  type="button"
-                  onClick={() => {
-                    setExpandedStormDetails(storm.id);
-                    onSelect(storm);
-                  }}
-                  className={cn(
-                    "w-full rounded-xl border p-2 text-left",
-                    activeStorm?.id === storm.id
-                      ? "border-primary bg-primary/10"
-                      : "border-border bg-secondary hover:bg-accent",
-                  )}
+        </button>
+
+        {stormBrowserExpanded ? (
+          <div className="border-t border-border p-3">
+            <div className="grid grid-cols-2 gap-1.5">
+              <label className="min-w-0 text-[8px] font-semibold text-muted-foreground">
+                Potential type
+                <select
+                  value={potentialFilter}
+                  onChange={(event) =>
+                    setPotentialFilter(event.target.value as StormPotentialFilter)
+                  }
+                  className="mt-1 w-full rounded-xl border border-border bg-background px-2 py-2 text-[9px] text-foreground"
                 >
-                  <span className="block truncate text-[10px] font-semibold">{storm.title}</span>
-                  <span className="mt-0.5 flex items-center gap-1 text-[8px] text-muted-foreground">
-                    <span className="truncate">
-                      {storm.basis === "provider-guidance" ? "NOAA guidance" : "Official context"} ·{" "}
-                      {weatherAgeLabel(storm.source)}
-                    </span>
-                    {storm.basis === "provider-guidance" && (
-                      <span className="ml-auto shrink-0 rounded-full bg-orange-100 px-1.5 py-0.5 font-semibold text-orange-900">
-                        {priority === null ? "No index" : `Priority ${priority}`}
+                  {stormPotentialOptions.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="min-w-0 text-[8px] font-semibold text-muted-foreground">
+                Sort by
+                <select
+                  value={sortMode}
+                  onChange={(event) => setSortMode(event.target.value as StormSortMode)}
+                  className="mt-1 w-full rounded-xl border border-border bg-background px-2 py-2 text-[9px] text-foreground"
+                >
+                  <option value="selected-potential">Selected potential</option>
+                  <option value="overall-potential">Overall potential</option>
+                  <option value="newest">Newest analysis</option>
+                </select>
+              </label>
+            </div>
+            <p className="mt-1 text-[7px] leading-relaxed text-muted-foreground">
+              Priority is a LandDraft ordering index based on available provider guidance,
+              confidence, and trend. It is not an additional weather probability or a chase
+              recommendation.
+            </p>
+            {displayedStorms.length ? (
+              <div className="mt-2 space-y-1">
+                {displayedStorms.slice(0, 40).map((storm) => {
+                  const potential = stormPrimaryPotential(storm, potentialFilter);
+                  const priority = stormPriorityIndex(storm, potentialFilter);
+                  return (
+                    <button
+                      key={storm.id}
+                      type="button"
+                      onClick={() => {
+                        setExpandedStormDetails(storm.id);
+                        setStormBrowserExpanded(false);
+                        onSelect(storm);
+                      }}
+                      className={cn(
+                        "w-full rounded-xl border p-2 text-left",
+                        activeStorm?.id === storm.id
+                          ? "border-primary bg-primary/10"
+                          : "border-border bg-secondary hover:bg-accent",
+                      )}
+                    >
+                      <span className="block truncate text-[10px] font-semibold">
+                        {storm.title}
                       </span>
-                    )}
-                  </span>
-                  <span className="mt-1 block text-[7px] font-semibold text-muted-foreground">
-                    {stormHazardNames[potential.kind]}:{" "}
-                    {potential.probabilityPct === null
-                      ? potential.status
-                      : `${Math.round(potential.probabilityPct)}% provider guidance`}
-                  </span>
-                </button>
-              );
-            })}
-            {displayedStorms.length > 40 && (
-              <p className="px-2 pt-1 text-[8px] text-muted-foreground">
-                Showing the 40 highest-ranked/relevant objects of {displayedStorms.length}.
+                      <span className="mt-0.5 flex items-center gap-1 text-[8px] text-muted-foreground">
+                        <span className="truncate">
+                          {storm.basis === "provider-guidance"
+                            ? "NOAA guidance"
+                            : "Official context"}
+                          {" · "}
+                          {weatherAgeLabel(storm.source)}
+                        </span>
+                        {storm.basis === "provider-guidance" && (
+                          <span className="ml-auto shrink-0 rounded-full bg-orange-100 px-1.5 py-0.5 font-semibold text-orange-900">
+                            {priority === null ? "No index" : `Priority ${priority}`}
+                          </span>
+                        )}
+                      </span>
+                      <span className="mt-1 block text-[7px] font-semibold text-muted-foreground">
+                        {stormHazardNames[potential.kind]}:{" "}
+                        {potential.probabilityPct === null
+                          ? potential.status
+                          : `${Math.round(potential.probabilityPct)}% provider guidance`}
+                      </span>
+                    </button>
+                  );
+                })}
+                {displayedStorms.length > 40 && (
+                  <p className="px-2 pt-1 text-[8px] text-muted-foreground">
+                    Showing the 40 highest-ranked/relevant objects of {displayedStorms.length}.
+                  </p>
+                )}
+              </div>
+            ) : (
+              <p className="mt-2 rounded-2xl bg-secondary p-3 text-[10px] text-muted-foreground">
+                No current tracked storm object or official alert context was returned. This is not
+                an all-clear; unavailable data is never replaced with an invented storm.
               </p>
             )}
           </div>
         ) : (
-          <p className="mt-2 rounded-2xl bg-secondary p-3 text-[10px] text-muted-foreground">
-            No current tracked storm object or official alert context was returned. This is not an
-            all-clear; unavailable data is never replaced with an invented storm.
+          <p className="border-t border-border px-3 py-2 text-[8px] text-muted-foreground">
+            {activeStorm
+              ? "Only the selected storm is shown below. Expand this section to choose another."
+              : "Storm list collapsed. Expand this section to review active storms."}
           </p>
         )}
-      </div>
+      </section>
 
       {activeStorm && (
         <>
@@ -3078,9 +3406,11 @@ function WeatherStatusPill({
 function WeatherLegends({
   workspace,
   workspaceView,
+  embedded = false,
 }: {
   workspace: WeatherWorkspaceState;
   workspaceView: WorkspaceView;
+  embedded?: boolean;
 }) {
   const activeLayers = weatherLayerRegistry.filter(
     (layer) => workspace.layerSettings[layer.id]?.visible,
@@ -3089,9 +3419,17 @@ function WeatherLegends({
   if (!activeLayers.length && workspaceView !== "storm-chaser") return null;
 
   return (
-    <details className="pointer-events-auto absolute right-2 top-28 z-30 text-[9px] lg:bottom-24 lg:right-3 lg:top-auto">
+    <details
+      className={cn(
+        "text-[9px]",
+        embedded ? "relative" : "pointer-events-auto absolute right-2 top-28 z-30 lg:hidden",
+      )}
+    >
       <summary
-        className="ml-auto flex min-h-10 w-fit cursor-pointer list-none items-center gap-1.5 rounded-full border border-border bg-card/95 px-3 font-semibold shadow-float backdrop-blur transition-colors hover:bg-accent [&::-webkit-details-marker]:hidden"
+        className={cn(
+          "flex min-h-10 cursor-pointer list-none items-center gap-1.5 border border-border bg-card/95 px-3 font-semibold backdrop-blur transition-colors hover:bg-accent [&::-webkit-details-marker]:hidden",
+          embedded ? "w-full rounded-2xl" : "ml-auto w-fit rounded-full shadow-float",
+        )}
         title="Open weather icon and layer legend"
         aria-label="Open weather icon and layer legend"
       >
@@ -3101,7 +3439,14 @@ function WeatherLegends({
           {activeLayers.length + (workspaceView === "storm-chaser" ? 1 : 0)}
         </span>
       </summary>
-      <div className="absolute right-14 top-0 max-h-[45dvh] w-64 max-w-[calc(100vw-5rem)] space-y-3 overflow-y-auto rounded-2xl border border-border bg-card/95 p-3 shadow-float backdrop-blur lg:bottom-12 lg:right-0 lg:top-auto lg:max-h-[55dvh] lg:max-w-[calc(100vw-1rem)]">
+      <div
+        className={cn(
+          "max-h-[45dvh] space-y-3 overflow-y-auto rounded-2xl border border-border bg-card/95 p-3 backdrop-blur",
+          embedded
+            ? "relative mt-2 w-full"
+            : "absolute right-14 top-0 w-64 max-w-[calc(100vw-5rem)] shadow-float",
+        )}
+      >
         {workspaceView === "storm-chaser" && (
           <div>
             <strong className="block text-[9px]">Severe-event symbols</strong>

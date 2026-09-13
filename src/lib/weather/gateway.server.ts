@@ -20,6 +20,7 @@ import type {
   WeatherProviderHealth,
   WeatherRasterFrame,
   WeatherStationObservation,
+  WeatherStormReport,
 } from "./types";
 import { recordWeatherUsage } from "./telemetry.server";
 import { loadMetNorwayPoint } from "./metNorway.server";
@@ -27,12 +28,7 @@ import { buildPhotographyAssessment } from "./photography.server";
 import { nearestWeatherRadarSite, type WeatherRadarSite } from "./radar";
 import { buildStormObjectsFromAlerts } from "./stormIntelligence";
 import { loadProbSevereStormObjects } from "./probSevere.server";
-import {
-  loadSpotterNetworkPositionFeed,
-  mergeSpotterNetworkPositions,
-  nearbySpotterNetworkPositions,
-  SPOTTER_NETWORK_FEATURED_NO_NAME_FEED,
-} from "./spotterNetwork.server";
+import { loadIemStormReports } from "./iemStormReports.server";
 import {
   xweatherProviderHealth,
   xweatherRadarFrames,
@@ -1157,7 +1153,8 @@ export async function loadWeatherBundle(request: WeatherPointRequest): Promise<W
   let radarFrames: RadarFrame[] = [];
   const rasterFrames: WeatherRasterFrame[] = [];
   let stationObservations: WeatherStationObservation[] = [];
-  let chaserPositions: WeatherChaserPosition[] = [];
+  const chaserPositions: WeatherChaserPosition[] = [];
+  let stormReports: WeatherStormReport[] = [];
   let probSevereObjects: StormObject[] = [];
   let photography: WeatherBundle["photography"] = null;
   let nwsCovered = false;
@@ -1541,91 +1538,42 @@ export async function loadWeatherBundle(request: WeatherPointRequest): Promise<W
       }
     }
 
-    if (requestedLayers.has("weather.storm_chaser.spotters")) {
-      const enabled = env?.["SPOTTER_NETWORK_NONCOMMERCIAL_FEED_ENABLED"] === "true";
-      if (!enabled) {
+    if (requestedLayers.has("weather.severe.reports")) {
+      try {
+        stormReports = await withCache(
+          `iem-lsr:${roundCoordinate(request.latitude)},${roundCoordinate(request.longitude)}`,
+          5 * 60_000,
+          { providerId: "iem-nws-lsr", product: "NWS Local Storm Reports" },
+          () => loadIemStormReports(request, controller.signal),
+        );
         providerHealth.push(
           health({
-            providerId: "spotter-network-evaluation",
-            providerName: "Spotter Network",
-            status: "not-configured",
-            products: ["privacy-minimized trained spotter positions"],
-            coverage: "Primarily United States",
-            error:
-              "Developer permission and the server-side non-commercial evaluation flag are required",
-            costClass: "evaluation",
+            providerId: "iem-nws-lsr",
+            providerName: "Iowa Environmental Mesonet / NWS",
+            status: "up",
+            products: ["NWS Local Storm Reports"],
+            coverage: "United States; reports within 1,200 km of the inspected point",
+            lastSuccessfulRequest: generatedAt,
+            lastUpdate: stormReports[0]?.observedAt,
+            error: stormReports.length
+              ? undefined
+              : "No Local Storm Reports were present near this point in the past 24 hours",
+            costClass: "public",
           }),
         );
-      } else {
-        try {
-          const allPositions = await withCache(
-            "spotter-network-evaluation:positions",
-            60_000,
-            { providerId: "spotter-network-evaluation", product: "spotter positions" },
-            () =>
-              loadSpotterNetworkPositionFeed(
-                controller.signal,
-                env?.["SPOTTER_NETWORK_POSITION_FEED_URL"],
-              ),
-          );
-          let featuredPositions: WeatherChaserPosition[] = [];
-          try {
-            featuredPositions = await withCache(
-              "spotter-network-evaluation:featured-positions",
-              60_000,
-              {
-                providerId: "spotter-network-evaluation",
-                product: "experienced reporter positions",
-              },
-              () =>
-                loadSpotterNetworkPositionFeed(
-                  controller.signal,
-                  env?.["SPOTTER_NETWORK_FEATURED_POSITION_FEED_URL"] ??
-                    SPOTTER_NETWORK_FEATURED_NO_NAME_FEED,
-                  { featured: true },
-                ),
-            );
-          } catch {
-            warnings.push(
-              "Experienced-reporter highlights are temporarily unavailable; trained spotter positions remain visible.",
-            );
-          }
-          chaserPositions = nearbySpotterNetworkPositions(
-            mergeSpotterNetworkPositions(allPositions, featuredPositions),
-            request,
-          );
-          providerHealth.push(
-            health({
-              providerId: "spotter-network-evaluation",
-              providerName: "Spotter Network",
-              status: chaserPositions.length ? "up" : "degraded",
-              products: [
-                "privacy-minimized trained spotter positions",
-                "experienced reporter highlights",
-              ],
-              coverage: "Positions within 800 km of the inspected point",
-              lastSuccessfulRequest: generatedAt,
-              lastUpdate: chaserPositions[0]?.observedAt,
-              error: chaserPositions.length
-                ? undefined
-                : "The feed responded but no recent positions were near this point",
-              costClass: "evaluation",
-            }),
-          );
-        } catch (error) {
-          warnings.push("Community spotter positions are temporarily unavailable.");
-          providerHealth.push(
-            health({
-              providerId: "spotter-network-evaluation",
-              providerName: "Spotter Network",
-              status: "down",
-              products: ["privacy-minimized trained spotter positions"],
-              coverage: "Primarily United States",
-              error: error instanceof Error ? error.message : "Position feed request failed",
-              costClass: "evaluation",
-            }),
-          );
-        }
+      } catch (error) {
+        warnings.push("Recent NWS storm report locations are temporarily unavailable.");
+        providerHealth.push(
+          health({
+            providerId: "iem-nws-lsr",
+            providerName: "Iowa Environmental Mesonet / NWS",
+            status: "down",
+            products: ["NWS Local Storm Reports"],
+            coverage: "United States",
+            error: error instanceof Error ? error.message : "Storm report request failed",
+            costClass: "public",
+          }),
+        );
       }
     }
 
@@ -1654,6 +1602,7 @@ export async function loadWeatherBundle(request: WeatherPointRequest): Promise<W
     rasterFrames,
     stationObservations,
     chaserPositions,
+    stormReports,
     photography,
     providerHealth,
     warnings,

@@ -121,6 +121,6 @@ safe chase routing, soundings or certified operational risk.
 - **Connect Xweather** in the layer/source panels supports test-and-save, masked status, credential
   replacement and disconnect. Public NOAA layers remain available without an Xweather account.
 - Rollback: `landdraft-stable-2026-09-10`.
-- Production release intentionally leaves the noncommercial Spotter Network position feed disabled.
-  Enabling community spotter positions outside the isolated preview still requires written provider
-  permission and a separate production configuration review.
+- Production leaves the noncommercial Spotter Network position feed disconnected because it requires
+  written provider permission. The live Storm Chaser Map instead uses explicit, expiring LandDraft
+  user sharing, while observed event locations use IEM-hosted NWS Local Storm Reports.

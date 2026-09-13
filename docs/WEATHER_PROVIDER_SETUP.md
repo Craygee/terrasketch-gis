@@ -125,7 +125,23 @@ Before a provider changes from `SETUP REQUIRED` to available:
 7. Simulate primary-provider failure and verify that stale data cannot say `LIVE`.
 8. Test desktop, tablet and narrow mobile layouts before promoting.
 
-## Spotter Network evaluation adapter
+## Production storm reports and chaser locations
+
+The live Storm Chaser workspace does not depend on a restricted third-party people feed:
+
+- **Recent NWS storm reports** load from Iowa Environmental Mesonet's five-minute Local Storm
+  Report GeoJSON. IEM explicitly permits lawful commercial use. These points show observed event
+  locations and remain clearly separate from live people.
+- **LandDraft chaser locations** are first-party, explicit opt-in positions. Enabling GPS alone does
+  not publish a location. A signed-in user must press **Share my live chaser location**. LandDraft
+  stores one replaceable current point, not a path/history; authenticated users can read only active
+  points, and a point expires ten minutes after updates stop.
+
+Apply `supabase/migrations/202609120001_weather_chaser_presence.sql` to every environment that will
+offer live chaser sharing. No provider key or paid account is required. Expected operating cost is
+normal Supabase database/RPC traffic plus application refresh traffic; pricing remains undecided.
+
+## Spotter Network evaluation adapter (not used on the live site)
 
 LandDraft includes a server-side, privacy-minimized adapter for Spotter Network's trained-member
 position feed. The official feed page marks the feed **non-commercial use only** and tells
@@ -133,7 +149,7 @@ application developers to contact Spotter Network. Therefore this integration mu
 in a commercial or production deployment until written provider permission and any attribution,
 caching, redistribution and cost terms are recorded.
 
-Test/evaluation configuration:
+Historical test/evaluation configuration:
 
 ```text
 SPOTTER_NETWORK_NONCOMMERCIAL_FEED_ENABLED=true

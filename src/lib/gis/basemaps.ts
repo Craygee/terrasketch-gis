@@ -14,6 +14,8 @@ export interface Basemap {
   fallbackHealthUrl?: string;
 }
 
+export const DEFAULT_BASEMAP_ID = "osm";
+
 const raster = (
   tiles: string[],
   attribution: string,
@@ -100,7 +102,9 @@ export const basemaps: Basemap[] = [
 ];
 
 export const getBasemap = (id: string): Basemap =>
-  basemaps.find((b) => b.id === id) ?? basemaps[0]!;
+  basemaps.find((b) => b.id === id) ??
+  basemaps.find((b) => b.id === DEFAULT_BASEMAP_ID) ??
+  basemaps[0]!;
 
 const BASEMAP_FALLBACKS_KEY = "landdraft.basemap-fallbacks.v1";
 const BASEMAP_OVERRIDES_KEY = "landdraft.basemap-url-overrides.v1";

@@ -39,6 +39,7 @@ import {
 import { useAuth } from "@/lib/auth";
 import { LANDDRAFT_APP_VERSION, projectVersionLabel } from "@/lib/appVersion";
 import { downloadSharedState, shareStore, type MapShare, type ShareRole } from "./sharing";
+import { DEFAULT_BASEMAP_ID } from "./basemaps";
 
 export type DrawMode =
   | "none"
@@ -112,7 +113,7 @@ const initialState = (): WorkbenchState => ({
     { id: "public", name: "Public data", collapsed: false },
   ],
   layers: [],
-  basemapId: "street",
+  basemapId: DEFAULT_BASEMAP_ID,
   mapView: { center: [-98.5, 31.3], zoom: 6, bearing: 0, pitch: 0 },
   projectArea: undefined,
   accessRole: "owner",
@@ -150,7 +151,7 @@ const blankProjectState = (name: string): ProjectState => ({
     { id: "public", name: "Public data", collapsed: false },
   ],
   layers: [],
-  basemapId: "street",
+  basemapId: DEFAULT_BASEMAP_ID,
   mapView: { center: [-98.5, 31.3], zoom: 6, bearing: 0, pitch: 0 },
   units: { area: "acres", length: "miles" },
   selectedStates: ["TX"],
