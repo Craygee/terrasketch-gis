@@ -294,6 +294,17 @@ function MobileShell() {
                 </span>
               </button>
               <button
+                onClick={() => window.location.assign("/water")}
+                className="flex items-center gap-3 rounded-2xl bg-secondary p-4 text-left"
+              >
+                <span>
+                  <strong className="block text-sm">Water & Hydrogeology</strong>
+                  <span className="text-[10px] text-muted-foreground">
+                    Optional source-backed water research.
+                  </span>
+                </span>
+              </button>
+              <button
                 onClick={() => window.location.assign("/weather")}
                 className="flex items-center gap-3 rounded-2xl bg-secondary p-4 text-left"
               >

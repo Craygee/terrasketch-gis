@@ -19,6 +19,7 @@ import {
   ChevronDown,
   Waypoints,
   CloudSun,
+  Droplets,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -161,6 +162,12 @@ export function TopBar({
             tourId="top-public-data"
           />
         )}
+        <BarBtn
+          icon={<Droplets className="size-4" />}
+          label="Water"
+          help="Open optional Water & Hydrogeology"
+          onClick={() => window.location.assign("/water")}
+        />
         <BarBtn
           icon={<CloudSun className="size-4" />}
           label="Weather"
