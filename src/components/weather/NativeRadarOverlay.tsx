@@ -94,8 +94,23 @@ export function NativeRadarOverlay({
     };
   }, []);
 
+  // Parent workspace updates (menus, forecast clocks, chaser presence) must not
+  // cancel a radar decode. Restart only when the radar's actual inputs change.
+  const renderInput = useRef({ frames, workspace });
+  renderInput.current = { frames, workspace };
+  const renderKey = JSON.stringify({
+    frames,
+    mode: workspace.timeline.mode,
+    time: workspace.timeline.selectedTime,
+    point: workspace.lastInspectionPoint,
+    layers: Object.entries(workspace.layerSettings).filter(([id]) =>
+      id.startsWith("weather.radar.pro."),
+    ),
+    order: workspace.layerOrder,
+  });
   useEffect(() => {
     if (!map) return;
+    const { frames, workspace } = renderInput.current;
     let cancelled = false;
     const remove = (layerId: string) => {
       const id = nativeMapLayerId(layerId);
@@ -180,7 +195,7 @@ export function NativeRadarOverlay({
       map.off("style.load", update);
       map.off("idle", update);
     };
-  }, [map, frames, workspace]);
+  }, [map, renderKey]);
   useEffect(() => {
     const current = active.current;
     return () => {
