@@ -20,6 +20,51 @@ export const WEATHER_LAYER_GROUPS = [
   "Historical",
 ] as const;
 
+export const STORM_CHASER_RECOMMENDED_LAYERS = [
+  {
+    id: "weather.severe.intelligence",
+    label: "NOAA ProbSevere",
+    reason: "Core tracked-storm analysis, hazard guidance, trends, and projected motion.",
+    core: true,
+  },
+  {
+    id: "weather.radar.simple",
+    label: "Radar",
+    reason: "Precipitation structure and movement around the selected storm.",
+    core: false,
+  },
+  {
+    id: "weather.severe.alerts",
+    label: "Official alerts",
+    reason: "Authoritative warning and watch polygons; these supersede LandDraft guidance.",
+    core: false,
+  },
+  {
+    id: "weather.lightning.recent",
+    label: "Lightning activity",
+    reason: "Recent lightning density and trends where a validated feed covers the map.",
+    core: false,
+  },
+  {
+    id: "weather.storm_chaser.spotters",
+    label: "Storm chaser map",
+    reason: "Recent privacy-minimized trained spotter locations where separately authorized.",
+    core: false,
+  },
+  {
+    id: "weather.wind.surface",
+    label: "Surface wind",
+    reason: "Current wind direction, speed, and gust context near the storm.",
+    core: false,
+  },
+  {
+    id: "weather.satellite.clouds",
+    label: "Clouds & satellite",
+    reason: "Cloud cover and satellite context for storm structure and visibility.",
+    core: false,
+  },
+] as const;
+
 export const weatherLayerRegistry: WeatherLayerDefinition[] = [
   {
     id: "weather.current",

@@ -7,7 +7,7 @@ import {
   normalizeAlertSeverity,
 } from "./normalize.ts";
 import { hasWeatherCapability } from "./entitlements.ts";
-import { weatherLayerRegistry } from "./registry.ts";
+import { STORM_CHASER_RECOMMENDED_LAYERS, weatherLayerRegistry } from "./registry.ts";
 import { defaultWeatherWorkspace, normalizeWeatherWorkspace } from "./model.ts";
 import { WEATHER_LAYER_ID_PATTERN } from "./types.ts";
 
@@ -49,6 +49,15 @@ test("weather layer registry ids are unique and all layers declare providers", (
     weatherLayerRegistry.every((layer) => WEATHER_LAYER_ID_PATTERN.test(layer.id)),
     true,
     "every registered layer id must survive the server request validator",
+  );
+});
+
+test("storm chaser recommendations keep ProbSevere first and reference registered layers", () => {
+  assert.equal(STORM_CHASER_RECOMMENDED_LAYERS[0]?.id, "weather.severe.intelligence");
+  const registeredIds = new Set(weatherLayerRegistry.map((layer) => layer.id));
+  assert.equal(
+    STORM_CHASER_RECOMMENDED_LAYERS.every((recommendation) => registeredIds.has(recommendation.id)),
+    true,
   );
 });
 

@@ -53,7 +53,11 @@ import {
   weatherAgeLabel,
 } from "@/lib/weather/format";
 import { createWeatherPreset, normalizeWeatherWorkspace } from "@/lib/weather/model";
-import { WEATHER_LAYER_GROUPS, weatherLayerRegistry } from "@/lib/weather/registry";
+import {
+  STORM_CHASER_RECOMMENDED_LAYERS,
+  WEATHER_LAYER_GROUPS,
+  weatherLayerRegistry,
+} from "@/lib/weather/registry";
 import {
   MAX_ROLLING_STORM_FORECAST_AGE_MINUTES,
   stormRelativePosition,
@@ -798,6 +802,7 @@ export function WeatherWorkspace() {
               workspace={workspace}
               bundle={bundle}
               groups={visibleGroups}
+              workspaceView={workspaceView}
               advanced={advancedLayers}
               presetName={presetName}
               onPresetName={setPresetName}
@@ -958,6 +963,7 @@ export function WeatherWorkspace() {
                       workspace={workspace}
                       bundle={bundle}
                       groups={visibleGroups}
+                      workspaceView={workspaceView}
                       advanced={advancedLayers}
                       presetName={presetName}
                       onPresetName={setPresetName}
@@ -1143,6 +1149,7 @@ function WeatherLayerPanel({
   workspace,
   bundle,
   groups,
+  workspaceView,
   advanced,
   presetName,
   compact = false,
@@ -1158,6 +1165,7 @@ function WeatherLayerPanel({
   workspace: WeatherWorkspaceState;
   bundle: WeatherBundle | null;
   groups: readonly string[];
+  workspaceView: WorkspaceView;
   advanced: boolean;
   presetName: string;
   compact?: boolean;
@@ -1194,6 +1202,15 @@ function WeatherLayerPanel({
     const layer = weatherLayerRegistry.find((candidate) => candidate.id === id);
     return layer && workspace.layerSettings[id]?.visible ? [layer] : [];
   });
+  const recommendedChaserLayers =
+    workspaceView === "storm-chaser"
+      ? STORM_CHASER_RECOMMENDED_LAYERS.flatMap((recommendation) => {
+          const layer = weatherLayerRegistry.find(
+            (candidate) => candidate.id === recommendation.id,
+          );
+          return layer && hasWeatherCapability(layer.capability) ? [{ recommendation, layer }] : [];
+        })
+      : [];
   const layerStatus = (id: string) => {
     const requested = bundle?.request.requestedLayerIds?.includes(id) ?? false;
     const hasRaster = bundle?.rasterFrames.some((frame) => frame.layerId === id) ?? false;
@@ -1204,15 +1221,23 @@ function WeatherLayerPanel({
           ? Boolean(bundle?.radarFrames.length)
           : id === "weather.severe.alerts"
             ? Boolean(bundle && requested)
-            : id === "weather.wind.surface"
-              ? hasRaster || bundle?.current?.windSpeedMS !== undefined
-              : id === "weather.metar"
-                ? Boolean(bundle?.stationObservations.length)
-                : id === "weather.storm_chaser.spotters"
-                  ? Boolean(bundle?.chaserPositions.length)
-                  : id === "weather.photo"
-                    ? Boolean(bundle?.photography)
-                    : hasRaster;
+            : id === "weather.severe.intelligence"
+              ? Boolean(
+                  bundle?.providerHealth.some(
+                    (provider) =>
+                      provider.providerId === "noaa-probsevere-v3" &&
+                      (provider.status === "up" || provider.status === "degraded"),
+                  ),
+                )
+              : id === "weather.wind.surface"
+                ? hasRaster || bundle?.current?.windSpeedMS !== undefined
+                : id === "weather.metar"
+                  ? Boolean(bundle?.stationObservations.length)
+                  : id === "weather.storm_chaser.spotters"
+                    ? Boolean(bundle?.chaserPositions.length)
+                    : id === "weather.photo"
+                      ? Boolean(bundle?.photography)
+                      : hasRaster;
     if (available) return { ready: true, label: "AVAILABLE" };
     if (id === "weather.storm_chaser.spotters") {
       const provider = bundle?.providerHealth.find(
@@ -1254,6 +1279,78 @@ function WeatherLayerPanel({
           unavailable.
         </p>
       </div>
+
+      {workspaceView === "storm-chaser" && (
+        <details className="group rounded-2xl border border-primary/30 bg-primary/5">
+          <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 text-xs font-semibold [&::-webkit-details-marker]:hidden">
+            <ChevronRight className="size-4 shrink-0 text-primary transition-transform group-open:rotate-90" />
+            <span className="min-w-0 flex-1 truncate">Recommended storm-chaser layers</span>
+            <span className="rounded-full bg-background px-2 py-0.5 text-[8px] text-muted-foreground">
+              {
+                recommendedChaserLayers.filter(
+                  ({ layer }) => workspace.layerSettings[layer.id]?.visible,
+                ).length
+              }
+              /{recommendedChaserLayers.length} on
+            </span>
+          </summary>
+          <div className="space-y-2 border-t border-primary/20 p-2.5">
+            <p className="px-1 text-[9px] leading-relaxed text-muted-foreground">
+              NOAA ProbSevere is the core analysis layer and stays first. These are quick controls;
+              every layer remains available in its normal category below.
+            </p>
+            {recommendedChaserLayers.map(({ recommendation, layer }) => {
+              const setting = workspace.layerSettings[layer.id];
+              if (!setting) return null;
+              const status = layerStatus(layer.id);
+              return (
+                <div
+                  key={layer.id}
+                  className={cn(
+                    "flex items-start gap-2 rounded-xl border bg-background p-2",
+                    recommendation.core ? "border-primary/40" : "border-border",
+                  )}
+                >
+                  <button
+                    type="button"
+                    onClick={() => onLayer(layer.id, { visible: !setting.visible })}
+                    className={cn(
+                      "flex size-8 shrink-0 items-center justify-center rounded-xl",
+                      setting.visible ? "bg-primary text-primary-foreground" : "bg-secondary",
+                    )}
+                    aria-label={`${setting.visible ? "Hide" : "Show"} ${recommendation.label}`}
+                  >
+                    <Eye className="size-4" />
+                  </button>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-1">
+                      <strong className="text-[10px]">{recommendation.label}</strong>
+                      {recommendation.core && (
+                        <span className="rounded-full bg-primary px-1.5 py-0.5 text-[7px] font-bold text-primary-foreground">
+                          CORE ANALYSIS
+                        </span>
+                      )}
+                      <span
+                        className={cn(
+                          "ml-auto rounded-full px-1.5 py-0.5 text-[7px] font-semibold",
+                          status.ready
+                            ? "bg-emerald-100 text-emerald-800"
+                            : "bg-amber-100 text-amber-800",
+                        )}
+                      >
+                        {status.label}
+                      </span>
+                    </div>
+                    <p className="mt-0.5 text-[8px] leading-relaxed text-muted-foreground">
+                      {recommendation.reason}
+                    </p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </details>
+      )}
 
       <div
         className={cn(
