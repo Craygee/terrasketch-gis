@@ -97,7 +97,7 @@ export const weatherProviderRegistry: WeatherProviderLicense[] = [
   ),
   government(
     "nexrad",
-    "NOAA NEXRAD Level II",
+    "NOAA NEXRAD Level II / III",
     "https://www.ncei.noaa.gov/products/radar/next-generation-weather-radar",
   ),
   government("mrms", "NOAA operational MRMS", "https://www.nssl.noaa.gov/projects/mrms/"),

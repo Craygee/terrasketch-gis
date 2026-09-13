@@ -10,6 +10,20 @@ import {
   type NativeRadarLayer,
 } from "./nativeRadar.ts";
 import { renderNativeRadarTile } from "./nativeRadarRender.ts";
+import { nativeRadarSites } from "./nativeRadar.server.ts";
+
+test("native selection excludes airport radars without WSR-88D dual polarization products", () => {
+  const sites = ["KTLX", "TOKC", "TJUA", "PHKI", "KCRI"].map((id) => ({
+    id,
+    name: id,
+    latitude: 35,
+    longitude: -97,
+  }));
+  assert.deepEqual(
+    nativeRadarSites(sites).map((site) => site.id),
+    ["KTLX", "TJUA", "PHKI"],
+  );
+});
 
 const reflectivity = "weather.radar.pro.reflectivity";
 // Independently constructed packet-16 fixture: one north-facing ray, four gates.

@@ -19,6 +19,7 @@ export async function discoverNativeRadar(
   sites: WeatherRadarSite[],
   signal: AbortSignal,
 ): Promise<NativeRadarFrame[]> {
+  sites = nativeRadarSites(sites);
   const nearest = nearestWeatherRadarSite(sites, request);
   const site = request.radarSiteId
     ? sites.find((s) => s.id === request.radarSiteId)
@@ -78,6 +79,13 @@ export async function discoverNativeRadar(
     }),
   );
   return results.flatMap((result) => (result.status === "fulfilled" ? result.value : []));
+}
+
+/** TDWR airport radars do not distribute these WSR-88D dual-polarization products. */
+export function nativeRadarSites(sites: WeatherRadarSite[]) {
+  return sites.filter(
+    (site) => /^(?:[KP][A-Z0-9]{3}|TJUA)$/.test(site.id) && !["KCRI", "KBIX"].includes(site.id),
+  );
 }
 
 export async function handleNativeRadarProxy(

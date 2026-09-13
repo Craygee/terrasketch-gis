@@ -104,7 +104,11 @@ export function NativeRadarOverlay({
       active.current.delete(layerId);
     };
     const update = async () => {
-      if (!map.isStyleLoaded()) return;
+      if (cancelled) return;
+      if (!map.isStyleLoaded()) {
+        map.once("idle", update);
+        return;
+      }
       const grouped = new Map<string, NativeRadarFrame[]>();
       for (const frame of frames)
         if (workspace.layerSettings[frame.layerId]?.visible)
@@ -129,8 +133,12 @@ export function NativeRadarOverlay({
             frame,
             point: workspace.lastInspectionPoint ?? [frame.site.longitude, frame.site.latitude],
           })) as NativeRadarReading;
-          if (cancelled || !map.isStyleLoaded()) return;
+          if (cancelled) return;
           onReadingRef.current(reading);
+          if (!map.isStyleLoaded()) {
+            map.once("idle", update);
+            return;
+          }
           if (!map.getSource(id)) {
             map.addSource(id, {
               type: "raster",
@@ -175,6 +183,7 @@ export function NativeRadarOverlay({
     return () => {
       cancelled = true;
       map.off("style.load", update);
+      map.off("idle", update);
     };
   }, [map, frames, workspace]);
   useEffect(() => {

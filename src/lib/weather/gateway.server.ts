@@ -39,7 +39,7 @@ import { nearestWeatherRadarSite, type WeatherRadarSite } from "./radar";
 import { buildStormObjectsFromAlerts } from "./stormIntelligence";
 import { loadProbSevereStormObjects } from "./probSevere.server";
 import { loadIemStormReports } from "./iemStormReports.server";
-import { discoverNativeRadar } from "./nativeRadar.server.ts";
+import { discoverNativeRadar, nativeRadarSites } from "./nativeRadar.server.ts";
 import { nativeProduct } from "./nativeRadar.ts";
 import { loadPublicRainfall } from "./publicRainfall.server.ts";
 
@@ -1224,7 +1224,7 @@ export async function loadWeatherBundle(request: WeatherPointRequest): Promise<W
   // which could leave valid NOAA layers with no time to load in an edge worker.
   const nativeRadarTask = (async () => {
     if (!weatherProviderEnabled("nexrad")) return { frames: [], sites: [] };
-    const sites = await loadRadarSites(rasterController.signal);
+    const sites = nativeRadarSites(await loadRadarSites(rasterController.signal));
     const frames = await discoverNativeRadar(
       { ...request, requestedLayerIds: [...requestedLayers] },
       sites,
