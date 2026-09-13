@@ -34,6 +34,10 @@ const environmentRevision =
   process.env["COMMIT_SHA"];
 const commitHash =
   environmentRevision?.slice(0, 8) ?? readGitValue(["rev-parse", "--short=8", "HEAD"]);
+const releaseCommitMessage = readGitValue(["log", "-1", "--pretty=%s"]);
+const deploymentReleaseVersion = /^Publish LandDraft (\d+\.\d+\.\d+)(?:\s|$)/.exec(
+  releaseCommitMessage,
+)?.[1];
 const branchName =
   process.env["VITE_LANDDRAFT_BRANCH"] ??
   process.env["WORKERS_CI_BRANCH"] ??
@@ -41,9 +45,19 @@ const branchName =
   process.env["VERCEL_GIT_COMMIT_REF"] ??
   process.env["GITHUB_REF_NAME"] ??
   (readGitValue(["branch", "--show-current"]) || "release");
-const releaseBranch = ["main", "master", "production", "release"].includes(branchName);
+// Lovable checks out the deployment repository as a shallow detached revision. Its Git commit
+// count is therefore usually 1 and it has no reliable branch name. The forward-only deployment
+// sync commit carries the authoritative release number in its subject so both repositories show
+// the same production channel/version without relying on hosting-specific environment variables.
+const releaseBranch =
+  Boolean(deploymentReleaseVersion) ||
+  ["main", "master", "production", "release"].includes(branchName);
 const channel = releaseBranch ? "" : "-test";
-const numberedVersion = commitCount ? `${major}.${minor}.${commitCount}${channel}` : baseVersion;
+const numberedVersion = deploymentReleaseVersion
+  ? deploymentReleaseVersion
+  : commitCount
+    ? `${major}.${minor}.${commitCount}${channel}`
+    : baseVersion;
 const appVersion = commitHash ? `${numberedVersion}+${commitHash}` : numberedVersion;
 
 export default defineConfig({
