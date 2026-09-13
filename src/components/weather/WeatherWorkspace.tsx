@@ -2284,11 +2284,21 @@ function StormChaserPanel({
   const isGuidance = activeStorm?.basis === "provider-guidance";
   const [potentialFilter, setPotentialFilter] = useState<StormPotentialFilter>("all");
   const [sortMode, setSortMode] = useState<StormSortMode>("selected-potential");
+  const [stormBrowserExpanded, setStormBrowserExpanded] = useState(true);
   const [expandedStormDetails, setExpandedStormDetails] = useState<string | null>(
     activeStorm?.id ?? null,
   );
+  const previousActiveStormId = useRef(activeStorm?.id ?? null);
   useEffect(() => {
-    if (activeStorm?.id) setExpandedStormDetails(activeStorm.id);
+    const nextStormId = activeStorm?.id ?? null;
+    if (nextStormId) setExpandedStormDetails(nextStormId);
+    if (
+      nextStormId &&
+      previousActiveStormId.current &&
+      nextStormId !== previousActiveStormId.current
+    )
+      setStormBrowserExpanded(false);
+    previousActiveStormId.current = nextStormId;
   }, [activeStorm?.id]);
   const displayedStorms = useMemo(() => {
     const filtered =
@@ -2519,99 +2529,137 @@ function StormChaserPanel({
         )}
       </details>
 
-      <div>
-        <div className="flex items-center gap-2 text-[10px] font-semibold">
-          Active storm intelligence
-          <span className="ml-auto rounded-full bg-secondary px-2 py-0.5 text-[8px]">
+      <section className="overflow-hidden rounded-2xl border border-border">
+        <button
+          type="button"
+          onClick={() => setStormBrowserExpanded((expanded) => !expanded)}
+          className="flex w-full items-center gap-2 px-3 py-2.5 text-left transition-colors hover:bg-accent"
+          aria-expanded={stormBrowserExpanded}
+          title={stormBrowserExpanded ? "Collapse active storm intelligence" : "Show storm list"}
+        >
+          {stormBrowserExpanded ? (
+            <ChevronDown className="size-3.5 shrink-0 text-primary" />
+          ) : (
+            <ChevronRight className="size-3.5 shrink-0 text-primary" />
+          )}
+          <span className="min-w-0 flex-1">
+            <strong className="block text-[10px]">Active storm intelligence</strong>
+            {!stormBrowserExpanded && activeStorm && (
+              <span className="block truncate text-[8px] text-muted-foreground">
+                Showing {activeStorm.title}
+              </span>
+            )}
+          </span>
+          <span className="shrink-0 rounded-full bg-secondary px-2 py-0.5 text-[8px] font-semibold">
             {displayedStorms.length}/{storms.length}
           </span>
-        </div>
-        <div className="mt-2 grid grid-cols-2 gap-1.5">
-          <label className="min-w-0 text-[8px] font-semibold text-muted-foreground">
-            Potential type
-            <select
-              value={potentialFilter}
-              onChange={(event) => setPotentialFilter(event.target.value as StormPotentialFilter)}
-              className="mt-1 w-full rounded-xl border border-border bg-background px-2 py-2 text-[9px] text-foreground"
-            >
-              {stormPotentialOptions.map((option) => (
-                <option key={option.id} value={option.id}>
-                  {option.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="min-w-0 text-[8px] font-semibold text-muted-foreground">
-            Sort by
-            <select
-              value={sortMode}
-              onChange={(event) => setSortMode(event.target.value as StormSortMode)}
-              className="mt-1 w-full rounded-xl border border-border bg-background px-2 py-2 text-[9px] text-foreground"
-            >
-              <option value="selected-potential">Selected potential</option>
-              <option value="overall-potential">Overall potential</option>
-              <option value="newest">Newest analysis</option>
-            </select>
-          </label>
-        </div>
-        <p className="mt-1 text-[7px] leading-relaxed text-muted-foreground">
-          Priority is a LandDraft ordering index based on available provider guidance, confidence,
-          and trend. It is not an additional weather probability or a chase recommendation.
-        </p>
-        {displayedStorms.length ? (
-          <div className="mt-2 space-y-1">
-            {displayedStorms.slice(0, 40).map((storm) => {
-              const potential = stormPrimaryPotential(storm, potentialFilter);
-              const priority = stormPriorityIndex(storm, potentialFilter);
-              return (
-                <button
-                  key={storm.id}
-                  type="button"
-                  onClick={() => {
-                    setExpandedStormDetails(storm.id);
-                    onSelect(storm);
-                  }}
-                  className={cn(
-                    "w-full rounded-xl border p-2 text-left",
-                    activeStorm?.id === storm.id
-                      ? "border-primary bg-primary/10"
-                      : "border-border bg-secondary hover:bg-accent",
-                  )}
+        </button>
+
+        {stormBrowserExpanded ? (
+          <div className="border-t border-border p-3">
+            <div className="grid grid-cols-2 gap-1.5">
+              <label className="min-w-0 text-[8px] font-semibold text-muted-foreground">
+                Potential type
+                <select
+                  value={potentialFilter}
+                  onChange={(event) =>
+                    setPotentialFilter(event.target.value as StormPotentialFilter)
+                  }
+                  className="mt-1 w-full rounded-xl border border-border bg-background px-2 py-2 text-[9px] text-foreground"
                 >
-                  <span className="block truncate text-[10px] font-semibold">{storm.title}</span>
-                  <span className="mt-0.5 flex items-center gap-1 text-[8px] text-muted-foreground">
-                    <span className="truncate">
-                      {storm.basis === "provider-guidance" ? "NOAA guidance" : "Official context"} ·{" "}
-                      {weatherAgeLabel(storm.source)}
-                    </span>
-                    {storm.basis === "provider-guidance" && (
-                      <span className="ml-auto shrink-0 rounded-full bg-orange-100 px-1.5 py-0.5 font-semibold text-orange-900">
-                        {priority === null ? "No index" : `Priority ${priority}`}
+                  {stormPotentialOptions.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="min-w-0 text-[8px] font-semibold text-muted-foreground">
+                Sort by
+                <select
+                  value={sortMode}
+                  onChange={(event) => setSortMode(event.target.value as StormSortMode)}
+                  className="mt-1 w-full rounded-xl border border-border bg-background px-2 py-2 text-[9px] text-foreground"
+                >
+                  <option value="selected-potential">Selected potential</option>
+                  <option value="overall-potential">Overall potential</option>
+                  <option value="newest">Newest analysis</option>
+                </select>
+              </label>
+            </div>
+            <p className="mt-1 text-[7px] leading-relaxed text-muted-foreground">
+              Priority is a LandDraft ordering index based on available provider guidance,
+              confidence, and trend. It is not an additional weather probability or a chase
+              recommendation.
+            </p>
+            {displayedStorms.length ? (
+              <div className="mt-2 space-y-1">
+                {displayedStorms.slice(0, 40).map((storm) => {
+                  const potential = stormPrimaryPotential(storm, potentialFilter);
+                  const priority = stormPriorityIndex(storm, potentialFilter);
+                  return (
+                    <button
+                      key={storm.id}
+                      type="button"
+                      onClick={() => {
+                        setExpandedStormDetails(storm.id);
+                        setStormBrowserExpanded(false);
+                        onSelect(storm);
+                      }}
+                      className={cn(
+                        "w-full rounded-xl border p-2 text-left",
+                        activeStorm?.id === storm.id
+                          ? "border-primary bg-primary/10"
+                          : "border-border bg-secondary hover:bg-accent",
+                      )}
+                    >
+                      <span className="block truncate text-[10px] font-semibold">
+                        {storm.title}
                       </span>
-                    )}
-                  </span>
-                  <span className="mt-1 block text-[7px] font-semibold text-muted-foreground">
-                    {stormHazardNames[potential.kind]}:{" "}
-                    {potential.probabilityPct === null
-                      ? potential.status
-                      : `${Math.round(potential.probabilityPct)}% provider guidance`}
-                  </span>
-                </button>
-              );
-            })}
-            {displayedStorms.length > 40 && (
-              <p className="px-2 pt-1 text-[8px] text-muted-foreground">
-                Showing the 40 highest-ranked/relevant objects of {displayedStorms.length}.
+                      <span className="mt-0.5 flex items-center gap-1 text-[8px] text-muted-foreground">
+                        <span className="truncate">
+                          {storm.basis === "provider-guidance"
+                            ? "NOAA guidance"
+                            : "Official context"}
+                          {" · "}
+                          {weatherAgeLabel(storm.source)}
+                        </span>
+                        {storm.basis === "provider-guidance" && (
+                          <span className="ml-auto shrink-0 rounded-full bg-orange-100 px-1.5 py-0.5 font-semibold text-orange-900">
+                            {priority === null ? "No index" : `Priority ${priority}`}
+                          </span>
+                        )}
+                      </span>
+                      <span className="mt-1 block text-[7px] font-semibold text-muted-foreground">
+                        {stormHazardNames[potential.kind]}:{" "}
+                        {potential.probabilityPct === null
+                          ? potential.status
+                          : `${Math.round(potential.probabilityPct)}% provider guidance`}
+                      </span>
+                    </button>
+                  );
+                })}
+                {displayedStorms.length > 40 && (
+                  <p className="px-2 pt-1 text-[8px] text-muted-foreground">
+                    Showing the 40 highest-ranked/relevant objects of {displayedStorms.length}.
+                  </p>
+                )}
+              </div>
+            ) : (
+              <p className="mt-2 rounded-2xl bg-secondary p-3 text-[10px] text-muted-foreground">
+                No current tracked storm object or official alert context was returned. This is not
+                an all-clear; unavailable data is never replaced with an invented storm.
               </p>
             )}
           </div>
         ) : (
-          <p className="mt-2 rounded-2xl bg-secondary p-3 text-[10px] text-muted-foreground">
-            No current tracked storm object or official alert context was returned. This is not an
-            all-clear; unavailable data is never replaced with an invented storm.
+          <p className="border-t border-border px-3 py-2 text-[8px] text-muted-foreground">
+            {activeStorm
+              ? "Only the selected storm is shown below. Expand this section to choose another."
+              : "Storm list collapsed. Expand this section to review active storms."}
           </p>
         )}
-      </div>
+      </section>
 
       {activeStorm && (
         <>
@@ -3367,7 +3415,7 @@ function WeatherLegends({
   if (!activeLayers.length && workspaceView !== "storm-chaser") return null;
 
   return (
-    <details className="pointer-events-auto absolute right-2 top-28 z-30 text-[9px] lg:bottom-24 lg:right-3 lg:top-auto">
+    <details className="pointer-events-auto absolute right-2 top-28 z-30 text-[9px] lg:right-3 lg:top-16">
       <summary
         className="ml-auto flex min-h-10 w-fit cursor-pointer list-none items-center gap-1.5 rounded-full border border-border bg-card/95 px-3 font-semibold shadow-float backdrop-blur transition-colors hover:bg-accent [&::-webkit-details-marker]:hidden"
         title="Open weather icon and layer legend"
@@ -3379,7 +3427,7 @@ function WeatherLegends({
           {activeLayers.length + (workspaceView === "storm-chaser" ? 1 : 0)}
         </span>
       </summary>
-      <div className="absolute right-14 top-0 max-h-[45dvh] w-64 max-w-[calc(100vw-5rem)] space-y-3 overflow-y-auto rounded-2xl border border-border bg-card/95 p-3 shadow-float backdrop-blur lg:bottom-12 lg:right-0 lg:top-auto lg:max-h-[55dvh] lg:max-w-[calc(100vw-1rem)]">
+      <div className="absolute right-14 top-0 max-h-[45dvh] w-64 max-w-[calc(100vw-5rem)] space-y-3 overflow-y-auto rounded-2xl border border-border bg-card/95 p-3 shadow-float backdrop-blur lg:right-0 lg:top-12 lg:max-h-[calc(100dvh-8rem)] lg:max-w-[calc(100vw-1rem)]">
         {workspaceView === "storm-chaser" && (
           <div>
             <strong className="block text-[9px]">Severe-event symbols</strong>
