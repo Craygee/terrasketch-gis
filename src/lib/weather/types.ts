@@ -403,6 +403,7 @@ export interface WeatherWorkspaceState {
 }
 
 export interface WeatherPointRequest {
+  photographyStormId?: string;
   radarSiteId?: string;
   radarTilt?: number;
   latitude: number;

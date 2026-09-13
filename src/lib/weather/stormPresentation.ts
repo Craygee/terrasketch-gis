@@ -54,18 +54,12 @@ export function stormEventIcon(storm: StormObject): WeatherEventIcon {
   const text = normalizedText(storm);
   if (/hurricane|tropical cyclone|typhoon/.test(text)) return "hurricane";
   if (/haboob|dust storm|blowing dust/.test(text)) return "haboob";
-  if (/tornado|rotation|mesocyclone/.test(text)) return "tornado";
+  if (/tornado warning|confirmed tornado|observed tornado/.test(text)) return "tornado";
   if (/lightning/.test(text)) return "lightning";
   if (/hail/.test(text)) return "hail";
 
-  const hazards = storm.hazards;
-  const candidates: Array<[WeatherEventIcon, number]> = [
-    ["tornado", hazards.tornado.probabilityPct ?? hazards.tornado.score ?? 0],
-    ["hail", hazards.hail.probabilityPct ?? hazards.hail.score ?? 0],
-    ["lightning", hazards.lightning.probabilityPct ?? hazards.lightning.score ?? 0],
-  ];
-  candidates.sort((a, b) => b[1] - a[1]);
-  return candidates[0]![1] > 0 ? candidates[0]![0] : "major-thunderstorm";
+  // A probability is not a detected event. Generic tracked cells use a thunderstorm icon.
+  return "major-thunderstorm";
 }
 
 export function stormIconImageId(icon: WeatherEventIcon) {

@@ -211,6 +211,9 @@ export function WeatherWorkspace() {
   const [mobileSheet, setMobileSheet] = useState<MobileSheet>(null);
   const [selectedAlert, setSelectedAlert] = useState<WeatherAlert | null>(null);
   const [selectedStormId, setSelectedStormId] = useState<string | null>(null);
+  const layerSidebar = useRef<HTMLElement | null>(null);
+  const photographyStormId = useRef<string | null>(null);
+  photographyStormId.current = selectedStormId;
   const [selectedCommunityChaser, setSelectedCommunityChaser] =
     useState<WeatherChaserPosition | null>(null);
   const [selectedStormReport, setSelectedStormReport] = useState<WeatherStormReport | null>(null);
@@ -297,6 +300,7 @@ export function WeatherWorkspace() {
             longitude: point[0],
             latitude: point[1],
             requestedLayerIds: layers,
+            photographyStormId: photographyStormId.current ?? undefined,
             radarSiteId: workspace.radarSiteId,
             radarTilt: workspace.radarTilt,
           },
@@ -633,6 +637,7 @@ export function WeatherWorkspace() {
     (view: WorkspaceView) => {
       if (view === "storm-chaser") stormAutoCenterPending.current = true;
       setWorkspaceView(view);
+      layerSidebar.current?.scrollTo({ top: 0 });
       if (view === "weather") return;
       setAdvancedLayers(true);
       const workspaceLayerIds =
@@ -851,6 +856,10 @@ export function WeatherWorkspace() {
   const selectStorm = useCallback(
     (storm: StormObject) => {
       setSelectedStormId(storm.id);
+      photographyStormId.current = storm.id;
+      if (latestWorkspace.current.layerSettings["weather.photo"]?.visible) {
+        void loadPoint(latestWorkspace.current.lastInspectionPoint ?? wb.mapView.center, true);
+      }
       const alert = bundle?.alerts.find((item) => storm.officialAlertIds.includes(item.id));
       setSelectedAlert(alert ?? null);
       if (window.innerWidth < 768) setMobileSheet(null);
@@ -863,7 +872,7 @@ export function WeatherWorkspace() {
         essential: true,
       });
     },
-    [bundle?.alerts, forecastReferenceTime, map],
+    [bundle?.alerts, forecastReferenceTime, map, loadPoint, wb.mapView.center],
   );
 
   useEffect(() => {
@@ -1007,7 +1016,10 @@ export function WeatherWorkspace() {
 
       <div className="relative flex min-h-0 flex-1">
         {leftOpen && (
-          <aside className="hidden w-72 shrink-0 overflow-y-auto border-r border-border bg-card lg:block">
+          <aside
+            ref={layerSidebar}
+            className="hidden w-72 shrink-0 overflow-y-auto border-r border-border bg-card lg:block"
+          >
             <WeatherLayerPanel
               nativeReadings={nativeReadings}
               workspace={workspace}
@@ -1613,6 +1625,23 @@ function WeatherLayerPanel({
         </p>
       </div>
 
+      {workspaceView === "storm-chaser" && (
+        <section
+          aria-label="LandDraft Predictive Model"
+          className="rounded-2xl border-2 border-primary/30 p-2"
+        >
+          <p className="px-2 py-1 text-[10px] font-semibold text-primary">
+            LANDDRAFT PREDICTIVE FEATURE
+          </p>
+          {renderLayer(
+            weatherLayerRegistry.find((layer) => layer.id === "weather.severe.intelligence")!,
+          )}
+          <p className="px-2 pt-2 text-[10px] text-muted-foreground">
+            Select a storm on the map to inspect its recent track and LandDraft’s projected path.
+            Powered by NOAA/CIMSS ProbSevere. Dashed paths and shaded areas are predictions.
+          </p>
+        </section>
+      )}
       {!compact && (
         <WeatherLegends workspace={legendWorkspace} workspaceView={workspaceView} embedded />
       )}
@@ -2322,7 +2351,7 @@ function StormChaserPanel({
       <div>
         <div className="flex items-center gap-2">
           <ShieldAlert className="size-4 text-primary" />
-          <strong className="text-xs">Storm Chaser / Severe Intelligence</strong>
+          <strong className="text-xs">LandDraft Predictive Model</strong>
         </div>
         <p className="mt-1 text-[9px] leading-relaxed text-muted-foreground">
           LandDraft combines NOAA tracked-storm guidance, official alerts, recent NWS storm reports,
@@ -3324,8 +3353,8 @@ function PhotographyPanel({
       </p>
       {assessment.status === "no-severe-target" ? (
         <p className="mt-2 rounded-2xl bg-secondary p-3 text-[10px] text-muted-foreground">
-          No candidate zones were generated. LandDraft requires an official warning/watch polygon
-          before it treats a storm as an analysis target.
+          Select a tracked storm on the map, then open Photography, or inspect an official warning
+          polygon. Candidate viewing locations need a current storm target.
         </p>
       ) : (
         <div className="mt-2 space-y-2">
@@ -3505,12 +3534,12 @@ function WeatherLegends({
               </span>
             </div>
             <div className="mt-2 grid grid-cols-2 gap-1.5">
-              <WeatherEventLegendItem type="tornado" label="Tornado / rotation" />
-              <WeatherEventLegendItem type="hail" label="Hail-dominant storm" />
+              <WeatherEventLegendItem type="tornado" label="Tornado warning / observed" />
+              <WeatherEventLegendItem type="hail" label="Hail event" />
               <WeatherEventLegendItem type="hurricane" label="Hurricane" />
               <WeatherEventLegendItem type="dust" label="Dust / haboob" />
               <WeatherEventLegendItem type="lightning" label="Lightning" />
-              <WeatherEventLegendItem type="storm" label="Major storm" />
+              <WeatherEventLegendItem type="storm" label="Tracked thunderstorm" />
             </div>
             <div className="mt-1 flex items-center gap-1" aria-label="Severity color scale">
               {[

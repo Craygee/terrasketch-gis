@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { Feature, Polygon } from "geojson";
-import { buildPhotographyAssessment } from "./photography.server.ts";
+import { buildPhotographyAssessment, selectPhotographyStorm } from "./photography.server.ts";
 import { sourceMetadata } from "./normalize.ts";
-import type { WeatherAlert, WeatherObservation } from "./types.ts";
+import type { StormObject, WeatherAlert, WeatherObservation } from "./types.ts";
 
 const request = { latitude: 31.997, longitude: -102.078 };
 const source = sourceMetadata({
@@ -123,4 +123,47 @@ test("exercise alerts cannot create real-world photography targets", async () =>
     },
   );
   assert.equal(result.status, "no-severe-target");
+});
+
+const tracked = (id: string, observedAt = new Date().toISOString()): StormObject =>
+  ({
+    id,
+    title: "Tracked storm " + id,
+    observedAt,
+    geometry: polygon,
+    centroid: model.location,
+    source,
+  }) as StormObject;
+test("a tracked storm supports photography candidates without inventing an official warning", async () => {
+  const result = await buildPhotographyAssessment(
+    request,
+    [],
+    new AbortController().signal,
+    async () => ({ alerts: [], current: model }),
+    tracked("one"),
+  );
+  assert.equal(result.status, "ready");
+  assert.equal(result.zones.length, 3);
+  assert.match(result.targetDescription, /NOAA-tracked storm/);
+  assert.ok(
+    result.zones.every(
+      (zone) => zone.activeAlertCount === 0 && zone.riskLevel === "unknown" && zone.score === null,
+    ),
+  );
+});
+test("photography uses the selected current storm and rejects expired or missing selections", () => {
+  const storms = [tracked("near"), tracked("selected"), tracked("old", "2020-01-01T00:00:00Z")];
+  assert.equal(
+    selectPhotographyStorm(storms, { ...request, photographyStormId: "selected" })?.id,
+    "selected",
+  );
+  assert.equal(
+    selectPhotographyStorm(storms, { ...request, photographyStormId: "old" }),
+    undefined,
+  );
+  assert.equal(
+    selectPhotographyStorm(storms, { ...request, photographyStormId: "missing" }),
+    undefined,
+  );
+  assert.equal(selectPhotographyStorm(storms, { latitude: 0, longitude: 0 }), undefined);
 });

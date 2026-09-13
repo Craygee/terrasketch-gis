@@ -295,10 +295,10 @@ export const weatherLayerRegistry: WeatherLayerDefinition[] = [
   },
   {
     id: "weather.severe.intelligence",
-    name: "NOAA ProbSevere storm objects",
+    name: "LandDraft Predictive Model",
     group: "Severe weather",
     description:
-      "NOAA/CIMSS tracked-storm next-hour hail, wind, and tornado probabilistic guidance. Not an official warning.",
+      "LandDraft predictive storm tracking and projected motion corridors, powered by NOAA/CIMSS ProbSevere observations and guidance. NOAA hazard probabilities retain their source calibration. Projections are estimates, not official warnings.",
     capability: "weather.severe_intelligence",
     dataType: "geojson",
     providerProducts: ["probsevere-v3"],
@@ -413,7 +413,7 @@ export const weatherLayerRegistry: WeatherLayerDefinition[] = [
                 : id === "air-quality"
                   ? "Official NOAA near-surface smoke guidance; broader AQI feeds remain a future integration."
                   : id === "photo"
-                    ? "Conservative lower-exposure candidate zones derived from official alert polygons and model conditions."
+                    ? "LandDraft candidate viewing areas around the selected NOAA-tracked storm or an official alert polygon, with model weather checks. Not validated safe locations."
                     : "Registered for a later validated provider or analysis increment.",
     capability: capability as WeatherLayerDefinition["capability"],
     dataType:

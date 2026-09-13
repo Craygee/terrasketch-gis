@@ -25,7 +25,7 @@ import type {
 } from "./types";
 import { recordWeatherUsage } from "./telemetry.server";
 import { loadMetNorwayPoint } from "./metNorway.server";
-import { buildPhotographyAssessment } from "./photography.server";
+import { buildPhotographyAssessment, selectPhotographyStorm } from "./photography.server";
 import {
   weatherProviderEnabled,
   weatherFeatureAvailable,
@@ -1561,27 +1561,12 @@ export async function loadWeatherBundle(request: WeatherPointRequest): Promise<W
       }
     }
 
-    if (requestedLayers.has("weather.photo")) {
-      photography = await buildPhotographyAssessment(
-        request,
-        alerts,
-        AbortSignal.timeout(12_000),
-        async (candidate, signal) => {
-          const [candidateAlerts, model] = await Promise.all([
-            loadNwsAlerts(candidate, signal),
-            withCache(
-              `met-norway:${roundCoordinate(candidate.latitude)},${roundCoordinate(candidate.longitude)}`,
-              15 * 60_000,
-              { providerId: "met-norway", product: "photography candidate" },
-              () => loadMetNorwayPoint(candidate, signal),
-            ),
-          ]);
-          return { alerts: candidateAlerts, current: model.current };
-        },
-      );
-    }
-
-    if (requestedLayers.has("weather.severe.intelligence")) {
+    if (
+      (requestedLayers.has("weather.severe.intelligence") ||
+        requestedLayers.has("weather.photo")) &&
+      weatherProviderEnabled("mrms") &&
+      weatherFeatureAvailable("storm_objects")
+    ) {
       try {
         probSevereObjects = await loadProbSevereStormObjects(request, AbortSignal.timeout(12_000));
         const latest = probSevereObjects[0]?.source;
@@ -1615,6 +1600,27 @@ export async function loadWeatherBundle(request: WeatherPointRequest): Promise<W
           }),
         );
       }
+    }
+
+    if (requestedLayers.has("weather.photo")) {
+      photography = await buildPhotographyAssessment(
+        request,
+        alerts,
+        AbortSignal.timeout(12_000),
+        async (candidate, signal) => {
+          const [candidateAlerts, model] = await Promise.all([
+            loadNwsAlerts(candidate, signal),
+            withCache(
+              `met-norway:${roundCoordinate(candidate.latitude)},${roundCoordinate(candidate.longitude)}`,
+              15 * 60_000,
+              { providerId: "met-norway", product: "photography candidate" },
+              () => loadMetNorwayPoint(candidate, signal),
+            ),
+          ]);
+          return { alerts: candidateAlerts, current: model.current };
+        },
+        selectPhotographyStorm(probSevereObjects, request),
+      );
     }
 
     if (requestedLayers.has("weather.severe.reports")) {

@@ -1,6 +1,7 @@
 import { bearing, booleanPointInPolygon, centroid, destination, distance, point } from "@turf/turf";
 import { sourceMetadata } from "./normalize.ts";
 import type {
+  StormObject,
   WeatherAlert,
   WeatherObservation,
   WeatherPhotographyAssessment,
@@ -8,6 +9,23 @@ import type {
   WeatherRiskLevel,
   WeatherViewingZone,
 } from "./types.ts";
+
+export function selectPhotographyStorm(storms: StormObject[], request: WeatherPointRequest) {
+  const fresh = storms.filter(
+    (storm) =>
+      storm.geometry &&
+      Number.isFinite(Date.parse(storm.observedAt)) &&
+      Date.parse(storm.observedAt) <= Date.now() + 60000 &&
+      Date.now() - Date.parse(storm.observedAt) <= 20 * 60000,
+  );
+  if (request.photographyStormId)
+    return fresh.find((storm) => storm.id === request.photographyStormId);
+  const location = point([request.longitude, request.latitude]);
+  return fresh
+    .map((storm) => ({ storm, km: distance(location, storm.centroid) }))
+    .filter((item) => item.km <= 300)
+    .sort((a, b) => a.km - b.km)[0]?.storm;
+}
 
 type CandidateLoader = (
   request: WeatherPointRequest,
@@ -77,8 +95,9 @@ export async function buildPhotographyAssessment(
   alerts: WeatherAlert[],
   signal: AbortSignal,
   loadCandidate: CandidateLoader,
+  trackedStorm?: StormObject,
 ): Promise<WeatherPhotographyAssessment> {
-  const target = alerts.find(
+  const officialTarget = alerts.find(
     (alert) =>
       alert.geometry &&
       alert.status === "actual" &&
@@ -86,17 +105,34 @@ export async function buildPhotographyAssessment(
         alert.severity === "severe" ||
         alert.severity === "moderate"),
   );
+  const trackedTarget =
+    trackedStorm?.geometry &&
+    Date.now() - Date.parse(trackedStorm.observedAt) <= 20 * 60_000 &&
+    Date.parse(trackedStorm.observedAt) <= Date.now() + 60_000
+      ? trackedStorm
+      : undefined;
+  const target = trackedTarget
+    ? {
+        id: trackedTarget.id,
+        geometry: trackedTarget.geometry,
+        event: "NOAA-tracked storm",
+        headline: trackedTarget.title,
+        areaDescription: undefined,
+        source: trackedTarget.source,
+      }
+    : officialTarget;
   const validTime = new Date().toISOString();
   if (!target?.geometry)
     return {
       status: "no-severe-target",
       validTime,
-      targetDescription: "No official severe-weather polygon was returned at the inspected point",
+      targetDescription:
+        "No current selected or nearby tracked storm, or official severe-weather polygon, was found",
       zones: [],
       methodology:
-        "LandDraft only generates storm-viewing candidates from an official alert polygon; it does not invent a storm target.",
+        "LandDraft uses a current NOAA-tracked storm or an official alert polygon; it does not invent a storm target.",
       limitations: [
-        "Select a location inside an official warning or watch polygon to analyze candidate lower-exposure zones.",
+        "Select a tracked storm on the map, then open Photography, or inspect an official warning polygon.",
         "No alert at one point is not an all-clear.",
       ],
     };
@@ -113,9 +149,14 @@ export async function buildPhotographyAssessment(
 
   const zones = await Promise.all(
     proposals.map(async (proposal, index): Promise<WeatherViewingZone> => {
-      const location = destination(inspected, proposal.distanceMiles, proposal.bearing, {
-        units: "miles",
-      });
+      const location = destination(
+        trackedTarget ? targetCenter : inspected,
+        proposal.distanceMiles,
+        proposal.bearing,
+        {
+          units: "miles",
+        },
+      );
       const longitude = location.geometry.coordinates[0]!;
       const latitude = location.geometry.coordinates[1]!;
       let candidateAlerts: WeatherAlert[] = [];
@@ -129,10 +170,12 @@ export async function buildPhotographyAssessment(
         lookupFailed = true;
       }
       if (
+        !trackedTarget &&
+        officialTarget &&
         !candidateAlerts.some((alert) => alert.id === target.id) &&
         booleanPointInPolygon(location, targetGeometry)
       )
-        candidateAlerts = [target, ...candidateAlerts];
+        candidateAlerts = [officialTarget, ...candidateAlerts];
       const weatherRisk = riskFor(candidateAlerts, current);
       const riskLevel = weatherRisk === "high" ? "high" : "unknown";
       // Weather-only conditions cannot establish road access, escape options,
@@ -151,6 +194,7 @@ export async function buildPhotographyAssessment(
           "NOT_A_SAFETY_DETERMINATION",
           ...(lookupFailed ? ["ALERT_SCREEN_FAILED"] : ["OFFICIAL_ALERT_SCREEN"]),
           "SAFETY_INPUTS_INCOMPLETE",
+          ...(trackedTarget ? ["NOAA_TRACKED_STORM_TARGET", "NOT_AN_OFFICIAL_WARNING"] : []),
           ...(current ? ["MODEL_WEATHER_INPUT"] : []),
         ],
         rawSourceReference: target.source.rawSourceReference,
@@ -197,7 +241,7 @@ export async function buildPhotographyAssessment(
       return riskRank[a.riskLevel] - riskRank[b.riskLevel] || (b.score ?? -1) - (a.score ?? -1);
     }),
     methodology:
-      "Candidates are projected outward from an official alert polygon, then screened against official point alerts and available model conditions. High-risk candidates receive no photography score.",
+      "LandDraft projects candidate viewing locations around the identified storm or official alert polygon, then checks official point alerts and model conditions. Candidates are not validated safe locations.",
     limitations: [
       "LandDraft cannot guarantee safety; official warnings and on-scene judgment always supersede this analysis.",
       "Road access, road closures, terrain line-of-sight, flooding, and individual lightning strikes are not yet included.",

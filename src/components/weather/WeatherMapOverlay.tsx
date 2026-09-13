@@ -149,14 +149,21 @@ function drawWeatherEventIcon(context: CanvasRenderingContext2D, icon: WeatherEv
     context.lineTo(34, 27);
     context.closePath();
   } else {
-    context.arc(28, 29, 10, Math.PI, Math.PI * 2);
-    context.arc(39, 29, 8, Math.PI, Math.PI * 2);
-    context.moveTo(18, 30);
-    context.lineTo(48, 30);
-    context.moveTo(35, 34);
-    context.lineTo(29, 45);
-    context.lineTo(37, 45);
-    context.lineTo(33, 53);
+    context.moveTo(18, 34);
+    context.bezierCurveTo(7, 34, 8, 20, 20, 20);
+    context.bezierCurveTo(20, 6, 42, 6, 44, 22);
+    context.bezierCurveTo(57, 20, 59, 34, 47, 34);
+    context.lineTo(18, 34);
+    context.stroke();
+    context.beginPath();
+    context.moveTo(33, 36);
+    context.lineTo(24, 47);
+    context.lineTo(32, 47);
+    context.lineTo(29, 57);
+    context.lineTo(43, 41);
+    context.lineTo(35, 41);
+    context.closePath();
+    context.fill();
   }
   context.stroke();
   if (icon === "lightning") context.fill();

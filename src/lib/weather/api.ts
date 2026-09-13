@@ -30,6 +30,9 @@ function validatePoint(input: unknown): WeatherPointRequest {
       : {}),
     latitude,
     longitude,
+    ...(typeof value["photographyStormId"] === "string" && value["photographyStormId"].length <= 150
+      ? { photographyStormId: value["photographyStormId"] }
+      : {}),
     ...(requestedLayerIds?.length ? { requestedLayerIds } : {}),
   };
 }
