@@ -28,6 +28,10 @@ Reviewed 2026-09-13:
 
 Run `node --experimental-strip-types scripts/check-public-rainfall.mjs` for live metadata, sample and PNG checks, and `node scripts/check-native-radar.mjs` for live six-field decoding, tile rendering and corruption checks. Local evidence goes to ignored `.weather-validation/`. Offline tests cover freshness, accumulation selection, timestamp isolation, units, missing samples, playback, decoder bounds and public-only catalog routing. A separate browser harness verified the actual compiled worker for all six NOAA scans dated 2026-09-13 19:28:53 UTC, including PNG tiles and numeric inspections. This is not independent meteorological certification.
 
+## Hosted verification, 2026-09-13
+
+Deployed source revision `7bdab2c` to `https://landdraft-test.tight-sky-0ae1.workers.dev/weather`; Worker version `3c41d6c6-f074-4f92-ad04-0efcf1052f61`. The public scan proxy returned HTTP 200 with a fresh 305,771-byte NOAA reflectivity product. Browser verification confirmed the native KGRK map overlay and a clicked gate reading of -10.0 dBZ at 30.76341, -97.22559, scan time 21:16:16 UTC, elevation 0.5°, distance 15.7 km and estimated beam center 335 m MSL. Eighty-one weather tests, type checking and build passed; lint has zero errors and nine existing warnings. Production and database schema were not changed.
+
 ## Remaining work toward a superior weather tool
 
 This release does not establish superiority over professional radar applications. Native Level III discovery, decoding, georeferencing, elevation selection and raw-value inspection are implemented. Remaining substantial work includes durable ingestion and historical storage, Level II full-volume/3D inspection, storm-relative velocity with verified storm-motion inputs, and an independently operated MRMS GRIB tile pipeline. Shared public endpoints and an in-memory bounded cache are suitable for this test beta, not a guaranteed production SLA.
