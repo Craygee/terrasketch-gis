@@ -62,6 +62,7 @@ interface WorkbenchState {
   projectId: string;
   projectReady: boolean;
   projectError: string | null;
+  projectRecoveryNotice: string | null;
   projectName: string;
   projects: ProjectSummary[];
   saveHistory: ProjectVersion[];
@@ -103,6 +104,7 @@ const initialState = (): WorkbenchState => ({
   projectId: "",
   projectReady: false,
   projectError: null,
+  projectRecoveryNotice: null,
   projectName: "Untitled project",
   projects: [],
   saveHistory: [],
@@ -227,6 +229,7 @@ const normalizedProject = (
     projectReady: true,
     projectError: null,
     projectName: stored.name,
+    projectRecoveryNotice: project.recoveryNotice ?? null,
     projects,
     saveHistory: project.versions ?? [],
     autosave: project.autosave,
@@ -1318,6 +1321,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
         ...value,
         projects,
         saveHistory: project.versions,
+        projectRecoveryNotice: null,
         lastSavedAt: project.updatedAt,
       }));
       return project.versions[0];
@@ -1732,6 +1736,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       try {
         await workspaceProjectStore.migrateLocalAccount(userId, auth.user?.email ?? "");
         const projects = await workspaceProjectStore.list(userId);
+        setState((current) => ({ ...current, projects }));
         const requestedShareId = new URL(window.location.href).searchParams.get("share");
         if (requestedShareId) {
           await loadShareIntoState(userId, auth.user?.email ?? "", requestedShareId, projects);

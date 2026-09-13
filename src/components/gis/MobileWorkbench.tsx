@@ -1,3 +1,4 @@
+import { WorkspaceLoading, WorkspaceRecoveryNotice } from "./WorkspaceLoading";
 import { lazy, Suspense, useState } from "react";
 import {
   Database,
@@ -104,25 +105,7 @@ function MobileShell() {
     setSheet(null);
   };
 
-  if (!wb.projectReady)
-    return (
-      <div className="app-viewport flex items-center justify-center bg-background px-4 text-center text-sm text-muted-foreground">
-        {wb.projectError ? (
-          <div>
-            <p className="font-semibold text-foreground">Cloud workspace could not open</p>
-            <p className="mt-1 text-xs">{wb.projectError}</p>
-            <button
-              onClick={() => window.location.reload()}
-              className="mt-4 rounded-xl bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground"
-            >
-              Try again
-            </button>
-          </div>
-        ) : (
-          "Opening your latest project…"
-        )}
-      </div>
-    );
+  if (!wb.projectReady) return <WorkspaceLoading />;
 
   return (
     <div
@@ -132,6 +115,9 @@ function MobileShell() {
         wb.selectedFeatures.length > 0 && "mobile-has-selection",
       )}
     >
+      <div className="absolute inset-x-2 top-24 z-40">
+        <WorkspaceRecoveryNotice />
+      </div>
       <MapCanvas />
       {!fieldMode && <SelectionToolbar mobile />}
 
