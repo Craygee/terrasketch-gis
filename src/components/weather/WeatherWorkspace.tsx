@@ -1473,7 +1473,7 @@ function WeatherLayerPanel({
     const hasRaster = bundle?.rasterFrames.some((frame) => frame.layerId === id) ?? false;
     const available =
       id === "weather.current"
-        ? Boolean(bundle?.current || bundle?.forecast.length)
+        ? Boolean(bundle?.current)
         : id === "weather.radar.simple"
           ? Boolean(bundle?.radarFrames.length)
           : id === "weather.severe.alerts"

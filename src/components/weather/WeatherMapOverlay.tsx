@@ -9,13 +9,16 @@ import type {
   WeatherAlert,
   WeatherBundle,
   WeatherChaserPosition,
+  WeatherObservation,
   WeatherRasterFrame,
   WeatherStationObservation,
   WeatherStormReport,
+  WeatherUnitSystem,
   StormObject,
   WeatherViewingZone,
   WeatherWorkspaceState,
 } from "@/lib/weather/types";
+import { formatTemperature, formatWind } from "@/lib/weather/format";
 import {
   stormEventIcon,
   stormIconImageId,
@@ -32,6 +35,10 @@ const RADAR_SOURCE = "landdraft-weather-radar";
 const RADAR_LAYER = "landdraft-weather-radar-layer";
 const INSPECT_SOURCE = "landdraft-weather-inspect-point";
 const INSPECT_LAYER = "landdraft-weather-inspect-point-layer";
+const CURRENT_SOURCE = "landdraft-weather-current-conditions";
+const CURRENT_CIRCLE = "landdraft-weather-current-conditions-circle";
+const CURRENT_VALUE = "landdraft-weather-current-conditions-value";
+const CURRENT_LABEL = "landdraft-weather-current-conditions-label";
 const STATION_SOURCE = "landdraft-weather-stations";
 const STATION_CIRCLE = "landdraft-weather-station-circle";
 const STATION_LABEL = "landdraft-weather-station-label";
@@ -191,6 +198,35 @@ function pointCollection(point: [number, number] | undefined): FeatureCollection
           },
         ]
       : [],
+  };
+}
+
+function currentConditionsCollection(
+  observation: WeatherObservation | null | undefined,
+  unitSystem: WeatherUnitSystem,
+): FeatureCollection<Point> {
+  if (!observation) return { type: "FeatureCollection", features: [] };
+  const wind = formatWind(observation.windSpeedMS, unitSystem);
+  const details = [observation.summary, wind === "Unavailable" ? undefined : `Wind ${wind}`]
+    .filter(Boolean)
+    .join(" · ");
+  return {
+    type: "FeatureCollection",
+    features: [
+      {
+        type: "Feature",
+        properties: {
+          id: observation.id,
+          value:
+            observation.temperatureK === undefined
+              ? "WX"
+              : formatTemperature(observation.temperatureK, unitSystem),
+          label: details || "Current conditions",
+          placeName: observation.placeName ?? observation.stationId ?? "Inspected location",
+        },
+        geometry: observation.location.geometry,
+      },
+    ],
   };
 }
 
@@ -490,6 +526,55 @@ function ensureVectorLayers(map: MlMap) {
         "circle-color": "#ffffff",
         "circle-stroke-color": "#177542",
         "circle-stroke-width": 3,
+      },
+    });
+  if (!map.getSource(CURRENT_SOURCE))
+    map.addSource(CURRENT_SOURCE, {
+      type: "geojson",
+      data: currentConditionsCollection(undefined, "us"),
+    });
+  if (!map.getLayer(CURRENT_CIRCLE))
+    map.addLayer({
+      id: CURRENT_CIRCLE,
+      type: "circle",
+      source: CURRENT_SOURCE,
+      paint: {
+        "circle-radius": 18,
+        "circle-color": "#177542",
+        "circle-opacity": 0.95,
+        "circle-stroke-color": "#ffffff",
+        "circle-stroke-width": 3,
+      },
+    });
+  if (!map.getLayer(CURRENT_VALUE))
+    map.addLayer({
+      id: CURRENT_VALUE,
+      type: "symbol",
+      source: CURRENT_SOURCE,
+      layout: {
+        "text-field": ["get", "value"],
+        "text-size": 10,
+        "text-allow-overlap": true,
+      },
+      paint: { "text-color": "#ffffff" },
+    });
+  if (!map.getLayer(CURRENT_LABEL))
+    map.addLayer({
+      id: CURRENT_LABEL,
+      type: "symbol",
+      source: CURRENT_SOURCE,
+      minzoom: 5,
+      layout: {
+        "text-field": ["get", "label"],
+        "text-size": 10,
+        "text-offset": [0, 2.35],
+        "text-anchor": "top",
+        "text-max-width": 18,
+      },
+      paint: {
+        "text-color": "#17221b",
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 2,
       },
     });
   if (!map.getSource(STATION_SOURCE))
@@ -1002,6 +1087,7 @@ function ensureRasterProducts(
 }
 
 function renderedLayerIds(weatherLayerId: string) {
+  if (weatherLayerId === "weather.current") return [CURRENT_CIRCLE, CURRENT_VALUE, CURRENT_LABEL];
   if (weatherLayerId === "weather.radar.simple") return [RADAR_LAYER];
   if (weatherLayerId === "weather.severe.alerts") return [ALERT_FILL, ALERT_LINE];
   if (weatherLayerId === "weather.severe.intelligence")
@@ -1069,6 +1155,7 @@ export function WeatherMapOverlay({
   navigationTarget?: [number, number] | undefined;
 }) {
   const { map } = useMapRef();
+  const currentVisible = Boolean(workspace.layerSettings["weather.current"]?.visible);
   const radarVisible = Boolean(workspace.layerSettings["weather.radar.simple"]?.visible);
   const alertsVisible = Boolean(workspace.layerSettings["weather.severe.alerts"]?.visible);
   const stationsVisible = Boolean(workspace.layerSettings["weather.metar"]?.visible);
@@ -1107,7 +1194,12 @@ export function WeatherMapOverlay({
         alertsVisible ? alertCollection(bundle?.alerts ?? []) : alertCollection([]),
       );
       (map.getSource(INSPECT_SOURCE) as GeoJSONSource | undefined)?.setData(
-        pointCollection(workspace.lastInspectionPoint),
+        pointCollection(
+          currentVisible && bundle?.current ? undefined : workspace.lastInspectionPoint,
+        ),
+      );
+      (map.getSource(CURRENT_SOURCE) as GeoJSONSource | undefined)?.setData(
+        currentConditionsCollection(currentVisible ? bundle?.current : null, workspace.unitSystem),
       );
       (map.getSource(STATION_SOURCE) as GeoJSONSource | undefined)?.setData(
         stationCollection(stationsVisible ? (bundle?.stationObservations ?? []) : []),
@@ -1151,6 +1243,19 @@ export function WeatherMapOverlay({
           "raster-opacity",
           workspace.layerSettings["weather.radar.simple"]?.opacity ?? 0.72,
         );
+      if (map.getLayer(CURRENT_CIRCLE))
+        map.setPaintProperty(
+          CURRENT_CIRCLE,
+          "circle-opacity",
+          workspace.layerSettings["weather.current"]?.opacity ?? 0.95,
+        );
+      for (const id of [CURRENT_VALUE, CURRENT_LABEL])
+        if (map.getLayer(id))
+          map.setPaintProperty(
+            id,
+            "text-opacity",
+            workspace.layerSettings["weather.current"]?.opacity ?? 1,
+          );
       if (map.getLayer(ALERT_FILL))
         map.setPaintProperty(
           ALERT_FILL,
@@ -1221,6 +1326,7 @@ export function WeatherMapOverlay({
   }, [
     alertsVisible,
     bundle,
+    currentVisible,
     frame,
     map,
     photographyVisible,
@@ -1236,6 +1342,7 @@ export function WeatherMapOverlay({
     workspace.lastInspectionPoint,
     workspace.layerOrder,
     workspace.layerSettings,
+    workspace.unitSystem,
   ]);
 
   useEffect(() => {

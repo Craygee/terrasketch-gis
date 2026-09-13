@@ -100,7 +100,8 @@ export const weatherLayerRegistry: WeatherLayerDefinition[] = [
     id: "weather.current",
     name: "Current conditions",
     group: "Current",
-    description: "Latest supported observation at the inspected map location.",
+    description:
+      "Latest supported observation at the inspected map location, shown as a temperature marker with a concise conditions label.",
     capability: "weather.basic",
     dataType: "point",
     providerProducts: ["observation", "point-forecast"],
