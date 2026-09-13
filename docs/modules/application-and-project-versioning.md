@@ -1,7 +1,7 @@
 # Application and project versioning
 
-Status: In test
-Owner branch: `feature/test-module-development`
+Status: Merged
+Owner branch: `main`
 Core mapping impact: None; version information extends the existing project and backup workflows
 Pricing: Undecided
 
@@ -48,8 +48,9 @@ Pricing remains undecided. Core mapping and its existing save/restore capability
   Project Settings, desktop header, mobile Help, and project backup export.
 - No payments, plans, entitlements, administration permissions, or billing contracts are changed.
 - No database migration is required, avoiding schema or migration-order overlap.
-- Coordination with the administration/billing work is pending before merge. Keep this module on
-  the test branch until that review is complete.
+- Release coordination on 2026-09-12 found no schema, entitlement, payment, permission or
+  administrator-portal dependency. The versioning extension can ship independently while the
+  existing free core-mapping contract remains unchanged.
 
 ## Security and privacy
 
@@ -89,4 +90,3 @@ Pricing remains undecided. Core mapping and its existing save/restore capability
   safely by creating a new branch from its tag/commit.
 - No setup, connection, database, billing, entitlement, production-infrastructure, or backup-system
   change is required.
-

@@ -1,7 +1,7 @@
 # Pipeline Engineering & Estimating
 
-Status: In test  
-Owner branch: `feature/test-module-development`  
+Status: Merged
+Owner branch: `main`
 Core mapping impact: None; this is an optional workspace and core map tools remain free  
 Pricing: Undecided
 
@@ -61,12 +61,18 @@ undecided.
 ## Administration/billing coordination
 
 Phase 1 touches shared frontend route/store code but does not add an entitlement or schema. Before
-merge, register a stable module identifier with the separate administrator portal contract and
-coordinate the compact navigation entry.
+future access enforcement, register the stable module identifier `pipeline.engineering` with the
+separate administrator portal contract. The compact navigation entry was reviewed with the shared
+application shell for this release.
 
 Future database tables, storage, server functions, provider secrets, quotas and any module-access
 policy are pending coordination. No payments, plans, entitlements, administrative permissions,
 production infrastructure or backups are changed here.
+
+Release coordination on 2026-09-12 confirmed that the separate administration portal currently
+defines only free core mapping and does not enforce GIS module access. The Pipeline foundation is
+therefore released as an open optional workspace; no administrator-portal record, grant, plan,
+permission or billing behavior is changed by this release.
 
 ## Security and privacy
 

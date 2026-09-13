@@ -1,7 +1,7 @@
 # Weather / Meteorology
 
-Status: In test  
-Owner branch: `feature/test-module-development`  
+Status: Merged
+Owner branch: `main`
 Core mapping impact: None; optional workspace, core map remains free  
 Pricing: Undecided
 
@@ -80,9 +80,13 @@ safe chase routing, soundings or certified operational risk.
   production setting is created.
 - Per-user Xweather credentials are an additive, non-entitlement connection setting. Future
   organization-managed connections, capability overrides, durable usage metering and billing remain
-  pending administration/billing coordination before merge.
+  pending administration/billing coordination.
 - Phase 1 telemetry is in-memory and not user/org attributed. Durable metering requires the pending
   coordinated schema and privacy review.
+- Release coordination on 2026-09-12 confirmed that the separate administration portal does not yet
+  enforce GIS module access and currently defines only the free core-mapping contract. Weather is
+  therefore released as an open optional workspace without changing that portal, plans, permissions,
+  grants or billing. Its existing capability ids are the stable integration boundary for later work.
 
 ## Security and privacy
 
@@ -117,3 +121,6 @@ safe chase routing, soundings or certified operational risk.
 - **Connect Xweather** in the layer/source panels supports test-and-save, masked status, credential
   replacement and disconnect. Public NOAA layers remain available without an Xweather account.
 - Rollback: `landdraft-stable-2026-09-10`.
+- Production release intentionally leaves the noncommercial Spotter Network position feed disabled.
+  Enabling community spotter positions outside the isolated preview still requires written provider
+  permission and a separate production configuration review.
