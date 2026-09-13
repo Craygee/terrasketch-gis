@@ -44,6 +44,7 @@ import { ConnectionManager } from "./ConnectionManager";
 import { FieldModule } from "./FieldModule";
 import { ProjectAreaControl } from "./ProjectAreaControl";
 import { ProjectSwitcher } from "./ProjectSwitcher";
+import { LandDraftTools } from "./LandDraftTools";
 
 const AiAssistant = lazy(() =>
   import("./AiAssistant").then((module) => ({ default: module.AiAssistant })),
@@ -252,6 +253,7 @@ function MobileShell() {
             </div>
           ) : sheet === "data" ? (
             <div className="grid gap-2 p-4">
+              <LandDraftTools />
               <button
                 onClick={() => {
                   setSheet(null);

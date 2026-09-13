@@ -47,7 +47,8 @@ adapter. Setup is an engineering and licensing task, not an end-user URL field:
 - Code, normalized contracts and non-secret provider configuration move with the Git commit when the
   feature branch is reviewed and merged.
 - API keys and other secrets **do not transfer automatically**. This is intentional environment
-  isolation. Store test credentials only as secrets on the `landdraft-preview` Worker.
+  isolation. The current shared test Worker is `landdraft-test`; `landdraft-preview` is the
+  older preview environment. Store credentials only in their explicitly authorized environment.
 - If a provider is approved for release, add its production credential separately to the production
   deployment during the coordinated release. Never copy a key into frontend code or Git.
 - Database/provider-status migrations, organization controls, billing and production infrastructure

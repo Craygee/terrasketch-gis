@@ -39,6 +39,7 @@ import { useTours } from "./TourProvider";
 import { SharePanel } from "./SharePanel";
 import { ProjectAreaControl } from "./ProjectAreaControl";
 import { ProjectSwitcher } from "./ProjectSwitcher";
+import { LandDraftTools } from "./LandDraftTools";
 
 export function TopBar({
   onTogglePanel,
@@ -315,6 +316,7 @@ export function TopBar({
         />
       </div>
 
+      <LandDraftTools />
       <button
         onClick={() => {
           setShowAbout((s) => !s);

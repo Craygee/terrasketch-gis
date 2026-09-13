@@ -15,6 +15,19 @@ September 10, 2026 stable checkpoint.
 
 ## Public test deployment
 
+### Current shared test site (September 13, 2026)
+
+Use `https://landdraft-test.tight-sky-0ae1.workers.dev/` for current Weather, Water,
+and main-workspace testing. The active branch is `codex/landdraft-test`; use
+`scripts/prepare-weather-test.mjs` with the isolated test environment before deployment.
+Check `/weather-test-release.json` for the deployed source revision. Module navigation is
+relative to the current host, so opening the older preview URL keeps users on that older site.
+Do not change or redirect the legacy environment without checking its workspace/data dependencies.
+
+### Legacy preview deployment
+
+The following describes the older preview environment, not the current shared test site:
+
 - Hosting target: the isolated Cloudflare Worker named `landdraft-preview`.
 - Public test URL: `https://landdraft-preview.tight-sky-0ae1.workers.dev/`.
 - Source repository: `Craygee/terrasketch-gis`.
