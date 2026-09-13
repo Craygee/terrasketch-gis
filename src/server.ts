@@ -3,8 +3,6 @@ import "./lib/error-capture";
 import { LANDDRAFT_APP_CHANNEL } from "./lib/appVersion";
 import { consumeLastCapturedError } from "./lib/error-capture";
 import { renderErrorPage } from "./lib/error-page";
-import { handleXweatherTileProxy } from "./lib/weather/xweather.server";
-import { handleXweatherConnection } from "./lib/weather/xweatherConnection.server";
 import { runWithWeatherContext } from "./lib/weather/runtimeContext.server";
 import { handleNativeRadarProxy } from "./lib/weather/nativeRadar.server";
 
@@ -67,10 +65,10 @@ export default {
       try {
         const nativeRadar = await handleNativeRadarProxy(request, env);
         if (nativeRadar) return applyEnvironmentHeaders(nativeRadar);
-        const xweatherConnection = await handleXweatherConnection(request, env);
-        if (xweatherConnection) return applyEnvironmentHeaders(xweatherConnection);
-        const weatherTile = await handleXweatherTileProxy(request, env);
-        if (weatherTile) return applyEnvironmentHeaders(weatherTile);
+        if (new URL(request.url).pathname.startsWith("/api/weather/xweather/"))
+          return new Response("External weather provider connections have been removed.", {
+            status: 410,
+          });
         const handler = await getServerEntry();
         const response = await handler.fetch(request, env, ctx);
         return applyEnvironmentHeaders(await normalizeCatastrophicSsrResponse(response));

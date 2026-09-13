@@ -105,10 +105,8 @@ export function NativeRadarOverlay({
     };
     const update = async () => {
       if (cancelled) return;
-      if (!map.isStyleLoaded()) {
-        map.once("idle", update);
-        return;
-      }
+      // getStyle() is absent until the style is initialized; unrelated tile loads must not block radar.
+      if (!map.getStyle()) return;
       const grouped = new Map<string, NativeRadarFrame[]>();
       for (const frame of frames)
         if (workspace.layerSettings[frame.layerId]?.visible)
@@ -135,10 +133,7 @@ export function NativeRadarOverlay({
           })) as NativeRadarReading;
           if (cancelled) return;
           onReadingRef.current(reading);
-          if (!map.isStyleLoaded()) {
-            map.once("idle", update);
-            return;
-          }
+          if (!map.getStyle()) return;
           if (!map.getSource(id)) {
             map.addSource(id, {
               type: "raster",

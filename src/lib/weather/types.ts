@@ -385,6 +385,7 @@ export interface WeatherPreset {
 }
 
 export interface WeatherWorkspaceState {
+  nativeLayerCatalogVersion?: 1;
   radarSiteId?: string | undefined;
   radarTilt?: number | undefined;
   version: 1;

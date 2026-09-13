@@ -1,4 +1,5 @@
 import { weatherLayerRegistry } from "./registry.ts";
+import { isLanddraftLayer } from "./landdraftLayers.ts";
 import type {
   WeatherLayerSetting,
   WeatherPreset,
@@ -20,9 +21,11 @@ export function defaultWeatherLayerSettings(): Record<string, WeatherLayerSettin
           "weather.wind.surface",
           "weather.lightning.recent",
         ].includes(layer.id),
-        visible: ["weather.current", "weather.radar.simple", "weather.severe.alerts"].includes(
-          layer.id,
-        ),
+        visible: [
+          "weather.current",
+          "weather.radar.pro.reflectivity",
+          "weather.severe.alerts",
+        ].includes(layer.id),
         menuVisible: true,
       },
     ]),
@@ -44,6 +47,7 @@ export function defaultWeatherTimeline(): WeatherTimelineState {
 export function defaultWeatherWorkspace(): WeatherWorkspaceState {
   return {
     version: 1,
+    nativeLayerCatalogVersion: 1,
     enabled: true,
     introductoryChooserSeen: false,
     unitSystem: "us",
@@ -58,6 +62,7 @@ export function defaultWeatherWorkspace(): WeatherWorkspaceState {
 
 export function normalizeWeatherWorkspace(
   stored: WeatherWorkspaceState | undefined,
+  resetPlayback = true,
 ): WeatherWorkspaceState {
   const defaults = defaultWeatherWorkspace();
   if (!stored) return defaults;
@@ -66,7 +71,7 @@ export function normalizeWeatherWorkspace(
     const saved = stored.layerSettings?.[layer.id];
     if (!saved) continue;
     layerSettings[layer.id] = {
-      visible: Boolean(saved.visible),
+      visible: isLanddraftLayer(layer.id) && Boolean(saved.visible),
       favorite: Boolean(saved.favorite),
       opacity: Math.max(0, Math.min(1, Number(saved.opacity) || 0)),
       menuVisible: saved.menuVisible !== false,
@@ -74,6 +79,12 @@ export function normalizeWeatherWorkspace(
         ? { lastUsedAt: saved.lastUsedAt }
         : {}),
     };
+  }
+  if (
+    !stored.nativeLayerCatalogVersion &&
+    stored.layerSettings?.["weather.radar.simple"]?.visible
+  ) {
+    layerSettings["weather.radar.pro.reflectivity"]!.visible = true;
   }
   const savedOrder = Array.from(new Set(Array.isArray(stored.layerOrder) ? stored.layerOrder : []));
   const layerOrder = [
@@ -84,6 +95,7 @@ export function normalizeWeatherWorkspace(
     ...defaults,
     ...stored,
     version: 1,
+    nativeLayerCatalogVersion: 1,
     layerSettings,
     layerOrder,
     radarSiteId:
@@ -94,7 +106,11 @@ export function normalizeWeatherWorkspace(
       Number.isInteger(stored.radarTilt) && stored.radarTilt! >= 0 && stored.radarTilt! <= 3
         ? stored.radarTilt
         : 0,
-    timeline: { ...defaults.timeline, ...stored.timeline, playing: false },
+    timeline: {
+      ...defaults.timeline,
+      ...stored.timeline,
+      playing: resetPlayback ? false : Boolean(stored.timeline?.playing),
+    },
     presets: Array.isArray(stored.presets) ? stored.presets.slice(0, 25) : [],
   };
 }

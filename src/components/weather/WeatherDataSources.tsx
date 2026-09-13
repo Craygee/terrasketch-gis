@@ -2,16 +2,10 @@ import { useState } from "react";
 import { Database, Search } from "lucide-react";
 import { weatherProviderRegistry } from "@/lib/weather/providerRegistry";
 import { weatherProductRegistry } from "@/lib/weather/productRegistry";
+import { isLanddraftLayer } from "@/lib/weather/landdraftLayers";
 import type { WeatherBundle } from "@/lib/weather/types";
-import type { XweatherConnectionStatus } from "@/lib/weather/xweatherConnection";
 
-export function WeatherDataSources({
-  bundle,
-}: {
-  bundle: WeatherBundle | null;
-  xweatherConnection: XweatherConnectionStatus;
-  onManageXweather: () => void;
-}) {
+export function WeatherDataSources({ bundle }: { bundle: WeatherBundle | null }) {
   const [search, setSearch] = useState("");
   const groups = [
     {
@@ -55,6 +49,10 @@ export function WeatherDataSources({
               .filter(
                 (item) =>
                   group.test(item.provider_id) &&
+                  weatherProductRegistry.some(
+                    (product) =>
+                      product.providerId === item.provider_id && isLanddraftLayer(product.layerId),
+                  ) &&
                   item.provider_name.toLowerCase().includes(search.toLowerCase()),
               )
               .map((provider) => {

@@ -1213,7 +1213,7 @@ export function WeatherMapOverlay({
   useEffect(() => {
     if (!map) return;
     const update = () => {
-      if (!map.isStyleLoaded()) return;
+      if (!map.getStyle()) return;
       ensureRadar(map, frame);
       ensureRasterProducts(map, rasterProducts);
       ensureVectorLayers(map);

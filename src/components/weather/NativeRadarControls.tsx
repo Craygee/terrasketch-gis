@@ -4,6 +4,7 @@ import {
   type NativeRadarReading,
 } from "@/lib/weather/nativeRadar";
 import type { WeatherBundle, WeatherWorkspaceState } from "@/lib/weather/types";
+import { useMapRef } from "@/lib/gis/mapRef";
 
 export function NativeRadarControls({
   workspace,
@@ -18,6 +19,10 @@ export function NativeRadarControls({
   onWorkspace(value: WeatherWorkspaceState): void;
   onLayer(id: string, change: { visible: boolean }): void;
 }) {
+  const { map } = useMapRef();
+  const selectedSite =
+    bundle?.radarSites?.find((site) => site.id === workspace.radarSiteId) ??
+    bundle?.nativeRadarFrames?.[0]?.site;
   return (
     <details className="rounded-2xl border border-border bg-background" open>
       <summary className="cursor-pointer px-3 py-2 text-xs font-semibold">
@@ -43,6 +48,16 @@ export function NativeRadarControls({
             ))}
           </select>
         </label>
+        {selectedSite && (
+          <button
+            className="w-full rounded-lg border px-2 py-2 text-xs"
+            onClick={() =>
+              map?.flyTo({ center: [selectedSite.longitude, selectedSite.latitude], zoom: 8 })
+            }
+          >
+            Center map on {selectedSite.id}
+          </button>
+        )}
         <label className="block space-y-1">
           <span>Elevation product</span>
           <select

@@ -45,7 +45,7 @@ export async function discoverNativeRadar(
           const cached = catalogCache.get(prefix);
           if (cached && cached.expires > now) return cached.keys;
           const response = await fetch(
-            `${NATIVE_RADAR_BUCKET}/?list-type=2&prefix=${prefix}&max-keys=1000`,
+            `${NATIVE_RADAR_BUCKET}/?list-type=2&prefix=${prefix}&start-after=${site.id.slice(1)}_${product}_${new Date(now - 3600000).toISOString().slice(0, 19).replace(/[-T:]/g, "_")}&max-keys=1000`,
             { signal },
           );
           if (!response.ok) throw new Error("NOAA radar catalog unavailable");

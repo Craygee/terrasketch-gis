@@ -89,13 +89,13 @@ test("older weather workspaces receive a complete persistent layer order", () =>
 
 test("weather layer menu visibility persists independently from map visibility", () => {
   const previous = defaultWeatherWorkspace();
-  const radar = previous.layerSettings["weather.radar.simple"]!;
-  previous.layerSettings["weather.radar.simple"] = {
+  const radar = previous.layerSettings["weather.radar.pro.reflectivity"]!;
+  previous.layerSettings["weather.radar.pro.reflectivity"] = {
     ...radar,
     visible: true,
     menuVisible: false,
   };
   const normalized = normalizeWeatherWorkspace(previous);
-  assert.equal(normalized.layerSettings["weather.radar.simple"]?.visible, true);
-  assert.equal(normalized.layerSettings["weather.radar.simple"]?.menuVisible, false);
+  assert.equal(normalized.layerSettings["weather.radar.pro.reflectivity"]?.visible, true);
+  assert.equal(normalized.layerSettings["weather.radar.pro.reflectivity"]?.menuVisible, false);
 });
