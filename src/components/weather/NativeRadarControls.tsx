@@ -12,12 +12,14 @@ export function NativeRadarControls({
   readings,
   onWorkspace,
   onLayer,
+  showProducts = true,
 }: {
   workspace: WeatherWorkspaceState;
   bundle: WeatherBundle | null;
   readings: Record<string, NativeRadarReading>;
   onWorkspace(value: WeatherWorkspaceState): void;
   onLayer(id: string, change: { visible: boolean }): void;
+  showProducts?: boolean;
 }) {
   const { map } = useMapRef();
   const selectedSite =
@@ -80,6 +82,7 @@ export function NativeRadarControls({
         <div className="space-y-1">
           {Object.entries(NATIVE_RADAR_PRODUCTS).map(([id, spec]) => {
             const visible = !!workspace.layerSettings[id]?.visible;
+            if (!showProducts && !visible) return null;
             const frame = nativeFrameAt(
               (bundle?.nativeRadarFrames ?? []).filter((f) => f.layerId === id),
               workspace.timeline.selectedTime,
@@ -97,12 +100,14 @@ export function NativeRadarControls({
             return (
               <div key={id} className="rounded-lg bg-secondary p-2">
                 <label className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    aria-label={`Native ${spec.name}`}
-                    checked={visible}
-                    onChange={(e) => onLayer(id, { visible: e.target.checked })}
-                  />
+                  {showProducts && (
+                    <input
+                      type="checkbox"
+                      aria-label={`Native ${spec.name}`}
+                      checked={visible}
+                      onChange={(e) => onLayer(id, { visible: e.target.checked })}
+                    />
+                  )}
                   {spec.name}
                 </label>
                 {visible && (

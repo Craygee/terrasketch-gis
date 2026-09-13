@@ -1,24 +1,30 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { defaultWeatherWorkspace, normalizeWeatherWorkspace } from "./model.ts";
-import { followsLatestScan, isLanddraftLayer } from "./landdraftLayers.ts";
+import { followsLatestScan } from "./landdraftLayers.ts";
 import type { WeatherBundle } from "./types.ts";
 
-test("native catalog migrates old composite selection and excludes external imagery", () => {
+test("restoration preserves public and native layer selections and controls", () => {
   const saved = defaultWeatherWorkspace();
   delete saved.nativeLayerCatalogVersion;
-  saved.layerSettings["weather.radar.simple"]!.visible = true;
-  saved.layerSettings["weather.satellite.infrared"]!.visible = true;
+  for (const id of [
+    "weather.radar.simple",
+    "weather.satellite.infrared",
+    "weather.radar.pro.velocity",
+  ]) {
+    saved.layerSettings[id] = { visible: true, opacity: 0.43, favorite: true, menuVisible: true };
+  }
+  saved.layerOrder.reverse();
   const restored = normalizeWeatherWorkspace(saved);
-  assert.equal(restored.layerSettings["weather.radar.simple"]!.visible, false);
-  assert.equal(restored.layerSettings["weather.satellite.infrared"]!.visible, false);
-  assert.equal(restored.layerSettings["weather.radar.pro.reflectivity"]!.visible, true);
-  restored.layerSettings["weather.radar.pro.reflectivity"]!.visible = false;
-  assert.equal(
-    normalizeWeatherWorkspace(restored).layerSettings["weather.radar.pro.reflectivity"]!.visible,
-    false,
-  );
-  assert.equal(isLanddraftLayer("weather.xweather.radar"), false);
+  for (const id of [
+    "weather.radar.simple",
+    "weather.satellite.infrared",
+    "weather.radar.pro.velocity",
+  ]) {
+    assert.deepEqual(restored.layerSettings[id], saved.layerSettings[id]);
+  }
+  assert.deepEqual(restored.layerOrder, saved.layerOrder);
+  assert.equal(restored.layerSettings["weather.radar.pro.reflectivity"]!.visible, false);
 });
 test("runtime normalization preserves animation while stored restoration stops playback", () => {
   const state = defaultWeatherWorkspace();
@@ -29,6 +35,7 @@ test("runtime normalization preserves animation while stored restoration stops p
 test("refresh follows latest radar without moving a historical selection or active playback", () => {
   const state = defaultWeatherWorkspace();
   state.timeline.selectedTime = "2026-09-13T20:10:00Z";
+  state.layerSettings["weather.radar.pro.reflectivity"]!.visible = true;
   const previous = {
     nativeRadarFrames: [
       { layerId: "weather.radar.pro.reflectivity", timestamp: "2026-09-13T20:10:00Z" },
@@ -40,4 +47,15 @@ test("refresh follows latest radar without moving a historical selection or acti
   assert.equal(followsLatestScan(state, previous), false);
   state.timeline.playing = true;
   assert.equal(followsLatestScan(state, null), false);
+});
+
+test("public composite refresh respects a historical selection", () => {
+  const state = defaultWeatherWorkspace();
+  const previous = {
+    radarFrames: [{ timestamp: "2026-09-13T20:10:00Z" }],
+  } as unknown as WeatherBundle;
+  state.timeline.selectedTime = "2026-09-13T20:00:00Z";
+  assert.equal(followsLatestScan(state, previous), false);
+  state.timeline.selectedTime = "2026-09-13T20:10:00Z";
+  assert.equal(followsLatestScan(state, previous), true);
 });

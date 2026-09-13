@@ -2,7 +2,6 @@ import { useState } from "react";
 import { Database, Search } from "lucide-react";
 import { weatherProviderRegistry } from "@/lib/weather/providerRegistry";
 import { weatherProductRegistry } from "@/lib/weather/productRegistry";
-import { isLanddraftLayer } from "@/lib/weather/landdraftLayers";
 import type { WeatherBundle } from "@/lib/weather/types";
 
 export function WeatherDataSources({ bundle }: { bundle: WeatherBundle | null }) {
@@ -50,8 +49,7 @@ export function WeatherDataSources({ bundle }: { bundle: WeatherBundle | null })
                 (item) =>
                   group.test(item.provider_id) &&
                   weatherProductRegistry.some(
-                    (product) =>
-                      product.providerId === item.provider_id && isLanddraftLayer(product.layerId),
+                    (product) => product.providerId === item.provider_id,
                   ) &&
                   item.provider_name.toLowerCase().includes(search.toLowerCase()),
               )

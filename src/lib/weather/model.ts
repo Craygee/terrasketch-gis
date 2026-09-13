@@ -1,5 +1,4 @@
 import { weatherLayerRegistry } from "./registry.ts";
-import { isLanddraftLayer } from "./landdraftLayers.ts";
 import type {
   WeatherLayerSetting,
   WeatherPreset,
@@ -21,11 +20,9 @@ export function defaultWeatherLayerSettings(): Record<string, WeatherLayerSettin
           "weather.wind.surface",
           "weather.lightning.recent",
         ].includes(layer.id),
-        visible: [
-          "weather.current",
-          "weather.radar.pro.reflectivity",
-          "weather.severe.alerts",
-        ].includes(layer.id),
+        visible: ["weather.current", "weather.radar.simple", "weather.severe.alerts"].includes(
+          layer.id,
+        ),
         menuVisible: true,
       },
     ]),
@@ -71,7 +68,7 @@ export function normalizeWeatherWorkspace(
     const saved = stored.layerSettings?.[layer.id];
     if (!saved) continue;
     layerSettings[layer.id] = {
-      visible: isLanddraftLayer(layer.id) && Boolean(saved.visible),
+      visible: Boolean(saved.visible),
       favorite: Boolean(saved.favorite),
       opacity: Math.max(0, Math.min(1, Number(saved.opacity) || 0)),
       menuVisible: saved.menuVisible !== false,
@@ -79,12 +76,6 @@ export function normalizeWeatherWorkspace(
         ? { lastUsedAt: saved.lastUsedAt }
         : {}),
     };
-  }
-  if (
-    !stored.nativeLayerCatalogVersion &&
-    stored.layerSettings?.["weather.radar.simple"]?.visible
-  ) {
-    layerSettings["weather.radar.pro.reflectivity"]!.visible = true;
   }
   const savedOrder = Array.from(new Set(Array.isArray(stored.layerOrder) ? stored.layerOrder : []));
   const layerOrder = [
