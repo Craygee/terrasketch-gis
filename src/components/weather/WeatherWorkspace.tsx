@@ -282,11 +282,16 @@ export function WeatherWorkspace() {
         });
         if (requestId !== latestWeatherRequest.current) return null;
         const currentWorkspace = latestWorkspace.current;
-        if (followsLatestScan(currentWorkspace, latestBundle.current))
-          writeWorkspace.current({
+        if (followsLatestScan(currentWorkspace, latestBundle.current)) {
+          const liveWorkspace = {
             ...currentWorkspace,
             timeline: { ...currentWorkspace.timeline, selectedTime: new Date().toISOString() },
-          });
+          };
+          // Layer activation resumes before React commits; share the new time synchronously.
+          latestWorkspace.current = liveWorkspace;
+          writeWorkspace.current(liveWorkspace);
+        }
+        latestBundle.current = next;
         setBundle(next);
         return next;
       } catch (nextError) {
