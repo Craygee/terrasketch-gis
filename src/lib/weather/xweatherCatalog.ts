@@ -159,7 +159,7 @@ export const XWEATHER_ADDITIONAL_LAYERS: XweatherCatalogLayer[] = [
       [
         "precipitation",
         "Observed precipitation",
-        "precip-1h",
+        "precip",
         "One-hour accumulated precipitation",
         "United States and territories",
         "in / mm",
@@ -167,7 +167,7 @@ export const XWEATHER_ADDITIONAL_LAYERS: XweatherCatalogLayer[] = [
       [
         "snow-depth",
         "Estimated snow depth",
-        "snow-depth-global",
+        "snow-depth",
         "Estimated snow depth",
         "Global",
         "in / cm",

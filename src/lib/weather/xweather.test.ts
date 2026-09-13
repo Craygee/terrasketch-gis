@@ -39,9 +39,9 @@ test("parses the combined API key issued by the current Xweather dashboard", () 
   assert.equal(parseXweatherApiKey("_missing-client"), null);
 });
 
-test("browser tile templates remain same-origin and contain no provider credential", () => {
+test("browser tile templates use the authenticated protocol and contain no provider credential", () => {
   const template = xweatherTileTemplate("radar-global", "current");
-  assert.equal(template, "/api/weather/xweather/tiles/radar-global/{z}/{x}/{y}/current.png");
+  assert.equal(template, "landdraft-xweather://tiles/radar-global/{z}/{x}/{y}/current.png");
   assert.equal(template.includes("client"), false);
   assert.equal(template.includes("secret"), false);
 });
@@ -49,7 +49,7 @@ test("browser tile templates remain same-origin and contain no provider credenti
 test("forecast tile templates preserve provider-relative future offsets", () => {
   assert.equal(
     xweatherTileTemplate("ftemperatures", "+6hours"),
-    "/api/weather/xweather/tiles/ftemperatures/{z}/{x}/{y}/+6hours.png",
+    "landdraft-xweather://tiles/ftemperatures/{z}/{x}/{y}/+6hours.png",
   );
 });
 
@@ -66,4 +66,10 @@ test("Xweather catalog has stable unique LandDraft ids and valid provider metada
     assert.ok(layer.offsets.length > 0);
     assert.ok([1, 5, 10].includes(layer.costMultiplier));
   }
+  assert.equal(
+    XWEATHER_ADDITIONAL_LAYERS.some((layer) =>
+      ["precip-1h", "snow-depth-global"].includes(layer.providerLayer),
+    ),
+    false,
+  );
 });

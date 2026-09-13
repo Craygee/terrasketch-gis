@@ -356,6 +356,24 @@ export async function handleXweatherConnection(request: Request, bindings?: unkn
     if (request.method === "GET") {
       const row = await readConnection(config, authenticated.token, authenticated.user.id);
       if (!row) return jsonResponse({ state: "not-connected", connected: false });
+      if (row.status === "connected") {
+        try {
+          await decryptXweatherCredentials(
+            row.encrypted_credentials,
+            authenticated.user.id,
+            config.encryptionSecret,
+          );
+        } catch {
+          return jsonResponse({
+            state: "invalid",
+            connected: false,
+            clientIdHint: row.client_id_hint,
+            lastTestedAt: row.last_tested_at ?? undefined,
+            updatedAt: row.updated_at ?? undefined,
+            error: "Reconnect Xweather so LandDraft can securely refresh this connection.",
+          });
+        }
+      }
       return jsonResponse({
         state: row.status === "connected" ? "connected" : "invalid",
         connected: row.status === "connected",

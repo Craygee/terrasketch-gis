@@ -168,7 +168,7 @@ function offsetTime(offset: string, now: Date) {
 }
 
 export function xweatherTileTemplate(providerLayer: string, offset: string) {
-  return `/api/weather/xweather/tiles/${encodeURIComponent(providerLayer)}/{z}/{x}/{y}/${offset}.png`;
+  return `landdraft-xweather://tiles/${encodeURIComponent(providerLayer)}/{z}/{x}/{y}/${offset}.png`;
 }
 
 function xweatherSource(
@@ -315,6 +315,18 @@ function plainResponse(message: string, status: number) {
   });
 }
 
+function upstreamErrorResponse(status: number) {
+  if (status === 401)
+    return plainResponse("Xweather rejected this API key. Reconnect Xweather.", 401);
+  if (status === 403)
+    return plainResponse("This Xweather account does not have Raster Maps access.", 403);
+  if (status === 429)
+    return plainResponse("The Xweather account has reached its current usage limit.", 429);
+  if (status === 400 || status === 404)
+    return plainResponse("This Xweather product or time is not available.", status);
+  return plainResponse("Xweather is temporarily unavailable.", 502);
+}
+
 export async function handleXweatherTileProxy(request: Request, bindings?: unknown) {
   const url = new URL(request.url);
   if (!url.pathname.startsWith("/api/weather/xweather/tiles/")) return null;
@@ -342,12 +354,12 @@ export async function handleXweatherTileProxy(request: Request, bindings?: unkno
     runtimeStatus.latencyMs = Date.now() - startedAt;
     if (!response.ok) {
       runtimeStatus.lastError = `Xweather returned HTTP ${response.status}`;
-      return plainResponse("Weather tile is temporarily unavailable", 502);
+      return upstreamErrorResponse(response.status);
     }
     const contentType = response.headers.get("content-type") ?? "";
     if (!contentType.toLowerCase().startsWith("image/")) {
       runtimeStatus.lastError = "Xweather returned an unexpected response";
-      return plainResponse("Weather tile is temporarily unavailable", 502);
+      return plainResponse("Xweather returned an unsupported tile response.", 502);
     }
     runtimeStatus.lastSuccess = new Date().toISOString();
     runtimeStatus.lastError = undefined;
@@ -364,6 +376,6 @@ export async function handleXweatherTileProxy(request: Request, bindings?: unkno
     runtimeStatus.latencyMs = Date.now() - startedAt;
     runtimeStatus.lastError =
       error instanceof Error ? error.message.slice(0, 200) : "Xweather request failed";
-    return plainResponse("Weather tile is temporarily unavailable", 502);
+    return plainResponse("Xweather is temporarily unavailable.", 502);
   }
 }

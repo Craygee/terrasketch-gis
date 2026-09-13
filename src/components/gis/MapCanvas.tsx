@@ -56,7 +56,7 @@ import {
   toDms,
 } from "@/lib/gis/measure";
 import { cn } from "@/lib/utils";
-import { readCloudSession } from "@/lib/cloud";
+import { installXweatherMapProtocol } from "@/lib/weather/xweatherProtocol";
 
 const TEXAS_CENTER: [number, number] = [-98.5, 31.3];
 
@@ -64,6 +64,7 @@ const TEXAS_CENTER: [number, number] = [-98.5, 31.3];
 // production builds. Pin the worker to an emitted asset so GeoJSON sources are
 // parsed reliably in hosted previews and deployments.
 setWorkerUrl(mapLibreWorkerUrl);
+installXweatherMapProtocol();
 
 interface MenuState {
   x: number;
@@ -213,25 +214,6 @@ export function MapCanvas() {
       pitch: wb.mapView?.pitch ?? 0,
       attributionControl: { compact: true },
       canvasContextAttributes: { preserveDrawingBuffer: true },
-      transformRequest(url) {
-        try {
-          const target = new URL(url, window.location.origin);
-          if (
-            target.origin === window.location.origin &&
-            target.pathname.startsWith("/api/weather/xweather/tiles/")
-          ) {
-            const accessToken = readCloudSession()?.access_token;
-            if (accessToken)
-              return {
-                url: target.toString(),
-                headers: { Authorization: `Bearer ${accessToken}` },
-              };
-          }
-        } catch {
-          // MapLibre will validate and report an invalid resource URL itself.
-        }
-        return { url };
-      },
     });
     map.addControl(new NavigationControl({ visualizePitch: false }), "bottom-right");
     map.addControl(new ScaleControl({ unit: "imperial" }), "bottom-left");
