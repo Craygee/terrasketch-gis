@@ -2,6 +2,14 @@
 
 Target: https://landdraft-test.tight-sky-0ae1.workers.dev/weather
 
+## Approved test secret configuration — 2026-09-13
+
+The owner explicitly approved transferring the existing test-only encryption key to Cloudflare's `landdraft-test` Worker. Wrangler secret bulk installed exactly `XWEATHER_CREDENTIAL_ENCRYPTION_KEY`; no key value was printed or placed in browser assets. This resolves the earlier approval restriction recorded below. Current Worker version after secret installation: `84364470-4409-4307-bbd6-89c5eda5bd33`; application code remains revision `6fc25920c82934ad3d8985a6c408af91f27af8ca`.
+
+The unauthenticated connection endpoint now returns HTTP 401 (sign-in required), rather than server-not-configured. Commercial grants remain empty and no vendor credentials were added. This verifies configuration and access enforcement, not an actual licensed vendor connection. Retain this same key for deployments sharing the test credential store; do not rotate it without a credential migration plan. Production and recovery are unchanged.
+
+The following deployment history describes the state before that approval:
+
 Final verified Worker version: `03bf0a70-b518-45db-8560-f5fce21be9b7`, application revision `6fc25920c82934ad3d8985a6c408af91f27af8ca` (2026-09-13). Online observation recheck displayed 9 mph wind and Unavailable gust instead of the previous 33 mph / 0 mph. Hosted Data Sources retained LICENSE REVIEW REQUIRED for Xweather; the connection endpoint explicitly returned server-not-configured. No secret transfer took place.
 
 Post-deployment browser checks: authenticated workspace, current/radar/SPC data, source cards, historical scrub hiding/restoring SPC, mobile portrait and tablet portrait, desktop no-horizontal-overflow check, Data Sources. Browser viewport overrides were reset. These checks are not a complete physical-device, expert safety, or load certification.
