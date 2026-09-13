@@ -1284,7 +1284,7 @@ function WeatherLayerPanel({
         <details className="group rounded-2xl border border-primary/30 bg-primary/5">
           <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 text-xs font-semibold [&::-webkit-details-marker]:hidden">
             <ChevronRight className="size-4 shrink-0 text-primary transition-transform group-open:rotate-90" />
-            <span className="min-w-0 flex-1 truncate">Recommended storm-chaser layers</span>
+            <span className="min-w-0 flex-1 truncate">Recommended base layers</span>
             <span className="rounded-full bg-background px-2 py-0.5 text-[8px] text-muted-foreground">
               {
                 recommendedChaserLayers.filter(
