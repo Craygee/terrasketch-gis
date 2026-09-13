@@ -5,7 +5,13 @@ import type { WeatherChaserPosition, WeatherPointRequest, WeatherQuality } from 
 
 export const SPOTTER_NETWORK_FEED_PAGE = "https://www.spotternetwork.org/pages/feeds/gibson-ridge";
 export const SPOTTER_NETWORK_NO_NAME_FEED = "https://www.spotternetwork.org/feeds/gr-no.txt";
+export const SPOTTER_NETWORK_FEATURED_NO_NAME_FEED =
+  "https://www.spotternetwork.org/feeds/gr-p-no.txt";
 export const SPOTTER_NETWORK_MAX_POSITION_AGE_MINUTES = 30;
+
+type SpotterFeedOptions = {
+  featured?: boolean;
+};
 
 const validFeedUrl = (value: string) => {
   const url = new URL(value);
@@ -42,6 +48,7 @@ function anonymousPositionId(latitude: number, longitude: number, observedAt: st
 export function parseSpotterNetworkPositionFeed(
   raw: string,
   receivedAt = new Date().toISOString(),
+  options: SpotterFeedOptions = {},
 ): WeatherChaserPosition[] {
   const receivedTime = new Date(receivedAt).getTime();
   const positions: WeatherChaserPosition[] = [];
@@ -80,10 +87,14 @@ export function parseSpotterNetworkPositionFeed(
       location,
       observedAt,
       motionStatus: statusFromBlock(block),
+      featured: options.featured === true,
+      memberClass: options.featured ? "experienced-reporter" : "trained-spotter",
       source: sourceMetadata({
         providerId: "spotter-network-evaluation",
         providerName: "Spotter Network",
-        product: "privacy-minimized trained spotter position",
+        product: options.featured
+          ? "privacy-minimized experienced reporter position"
+          : "privacy-minimized trained spotter position",
         temporalKind: "observed",
         sourceTimestamp: observedAt,
         validTime: observedAt,
@@ -92,6 +103,7 @@ export function parseSpotterNetworkPositionFeed(
         qualityFlags: [
           "COMMUNITY_POSITION",
           "IDENTITY_REMOVED",
+          ...(options.featured ? ["EXPERIENCED_REPORTER_FEED"] : []),
           "NON_COMMERCIAL_PERMISSION_REQUIRED",
         ],
         rawSourceReference: SPOTTER_NETWORK_FEED_PAGE,
@@ -101,6 +113,15 @@ export function parseSpotterNetworkPositionFeed(
   }
 
   return [...new Map(positions.map((position) => [position.id, position])).values()];
+}
+
+export function mergeSpotterNetworkPositions(
+  allPositions: WeatherChaserPosition[],
+  featuredPositions: WeatherChaserPosition[],
+) {
+  const merged = new Map(allPositions.map((position) => [position.id, position]));
+  for (const position of featuredPositions) merged.set(position.id, position);
+  return [...merged.values()];
 }
 
 export function nearbySpotterNetworkPositions(
@@ -128,6 +149,7 @@ export function nearbySpotterNetworkPositions(
 export async function loadSpotterNetworkPositionFeed(
   signal: AbortSignal,
   feedUrl = SPOTTER_NETWORK_NO_NAME_FEED,
+  options: SpotterFeedOptions = {},
 ) {
   const response = await fetch(validFeedUrl(feedUrl), {
     signal,
@@ -137,5 +159,5 @@ export async function loadSpotterNetworkPositionFeed(
     },
   });
   if (!response.ok) throw new Error(`Spotter Network returned HTTP ${response.status}`);
-  return parseSpotterNetworkPositionFeed(await response.text());
+  return parseSpotterNetworkPositionFeed(await response.text(), new Date().toISOString(), options);
 }

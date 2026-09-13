@@ -245,14 +245,22 @@ export interface WeatherStationObservation {
 
 /**
  * Privacy-minimized position supplied by an approved community spotter feed.
- * LandDraft intentionally does not retain names, callsigns, contact details,
- * or continuous position history in this contract.
+ * Identity fields stay optional so a future licensed provider can supply them;
+ * the current Spotter Network evaluation adapter does not retain identity or
+ * contact data and does not store continuous position history.
  */
 export interface WeatherChaserPosition {
   id: string;
   location: Feature<Point>;
   observedAt: string;
   motionStatus: "moving" | "stationary" | "unknown";
+  featured: boolean;
+  memberClass: "trained-spotter" | "experienced-reporter" | "unknown";
+  displayName?: string | undefined;
+  callsign?: string | undefined;
+  organization?: string | undefined;
+  headingDeg?: number | undefined;
+  speedMS?: number | undefined;
   source: WeatherSourceMetadata;
 }
 
@@ -336,6 +344,7 @@ export interface WeatherLayerSetting {
   opacity: number;
   favorite: boolean;
   visible: boolean;
+  menuVisible: boolean;
 }
 
 export interface WeatherTimelineState {

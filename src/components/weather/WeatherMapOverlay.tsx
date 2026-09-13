@@ -1,4 +1,5 @@
 import { useEffect, useMemo } from "react";
+import { Popup } from "maplibre-gl";
 import type { GeoJSONSource, Map as MlMap, MapMouseEvent, RasterTileSource } from "maplibre-gl";
 import { circle } from "@turf/turf";
 import type { Feature, FeatureCollection, LineString, Point, Polygon, MultiPolygon } from "geojson";
@@ -61,6 +62,7 @@ const COMMUNITY_CHASER_SOURCE = "landdraft-weather-community-chasers";
 const COMMUNITY_CHASER_CLUSTER = "landdraft-weather-community-chaser-cluster";
 const COMMUNITY_CHASER_CLUSTER_COUNT = "landdraft-weather-community-chaser-cluster-count";
 const COMMUNITY_CHASER_POINT = "landdraft-weather-community-chaser-point";
+const COMMUNITY_CHASER_FEATURED = "landdraft-weather-community-chaser-featured";
 const NAVIGATION_TARGET_SOURCE = "landdraft-weather-navigation-target";
 const NAVIGATION_TARGET_CIRCLE = "landdraft-weather-navigation-target-circle";
 const NAVIGATION_TARGET_LABEL = "landdraft-weather-navigation-target-label";
@@ -209,6 +211,9 @@ function communityChaserCollection(positions: WeatherChaserPosition[]): FeatureC
         id: position.id,
         observedAt: position.observedAt,
         motionStatus: position.motionStatus,
+        featured: position.featured,
+        displayName: position.displayName ?? "",
+        callsign: position.callsign ?? "",
       },
     })),
   };
@@ -784,12 +789,38 @@ function ensureVectorLayers(map: MlMap) {
       source: COMMUNITY_CHASER_SOURCE,
       filter: ["!", ["has", "point_count"]],
       paint: {
-        "circle-radius": 7,
-        "circle-color": ["case", ["==", ["get", "motionStatus"], "moving"], "#1d4ed8", "#2563eb"],
+        "circle-radius": ["case", ["boolean", ["get", "featured"], false], 9, 7],
+        "circle-color": [
+          "case",
+          ["boolean", ["get", "featured"], false],
+          "#f59e0b",
+          ["==", ["get", "motionStatus"], "moving"],
+          "#1d4ed8",
+          "#2563eb",
+        ],
         "circle-opacity": 0.92,
-        "circle-stroke-color": "#ffffff",
-        "circle-stroke-width": 2,
+        "circle-stroke-color": [
+          "case",
+          ["boolean", ["get", "featured"], false],
+          "#78350f",
+          "#ffffff",
+        ],
+        "circle-stroke-width": ["case", ["boolean", ["get", "featured"], false], 2.5, 2],
       },
+    });
+  if (!map.getLayer(COMMUNITY_CHASER_FEATURED))
+    map.addLayer({
+      id: COMMUNITY_CHASER_FEATURED,
+      type: "symbol",
+      source: COMMUNITY_CHASER_SOURCE,
+      filter: ["all", ["!", ["has", "point_count"]], ["==", ["get", "featured"], true]],
+      layout: {
+        "text-field": "★",
+        "text-size": 11,
+        "text-allow-overlap": true,
+        "text-ignore-placement": true,
+      },
+      paint: { "text-color": "#ffffff", "text-halo-color": "#78350f", "text-halo-width": 0.5 },
     });
   if (!map.getSource(NAVIGATION_TARGET_SOURCE))
     map.addSource(NAVIGATION_TARGET_SOURCE, { type: "geojson", data: pointCollection(undefined) });
@@ -895,7 +926,12 @@ function renderedLayerIds(weatherLayerId: string) {
     ];
   if (weatherLayerId === "weather.metar") return [STATION_CIRCLE, STATION_LABEL];
   if (weatherLayerId === "weather.storm_chaser.spotters")
-    return [COMMUNITY_CHASER_CLUSTER, COMMUNITY_CHASER_CLUSTER_COUNT, COMMUNITY_CHASER_POINT];
+    return [
+      COMMUNITY_CHASER_CLUSTER,
+      COMMUNITY_CHASER_CLUSTER_COUNT,
+      COMMUNITY_CHASER_POINT,
+      COMMUNITY_CHASER_FEATURED,
+    ];
   if (weatherLayerId === "weather.photo") return [PHOTO_CIRCLE, PHOTO_LABEL];
   if (weatherLayerId.startsWith("weather.")) return [rasterKey(weatherLayerId)];
   return [];
@@ -1048,6 +1084,7 @@ export function WeatherMapOverlay({
         COMMUNITY_CHASER_CLUSTER,
         COMMUNITY_CHASER_CLUSTER_COUNT,
         COMMUNITY_CHASER_POINT,
+        COMMUNITY_CHASER_FEATURED,
         CHASER_CIRCLE,
         NAVIGATION_TARGET_CIRCLE,
         NAVIGATION_TARGET_LABEL,
@@ -1076,6 +1113,66 @@ export function WeatherMapOverlay({
     workspace.layerOrder,
     workspace.layerSettings,
   ]);
+
+  useEffect(() => {
+    if (!map) return;
+    const popup = new Popup({ closeButton: false, closeOnClick: false, offset: 14 });
+    let hoveredId = "";
+    const hover = (event: MapMouseEvent) => {
+      if (!map.getLayer(COMMUNITY_CHASER_POINT)) return;
+      const feature = map.queryRenderedFeatures(event.point, {
+        layers: [COMMUNITY_CHASER_POINT],
+      })[0];
+      const id = String(feature?.properties?.["id"] ?? "");
+      if (!id) {
+        hoveredId = "";
+        popup.remove();
+        map.getCanvas().style.cursor = "";
+        return;
+      }
+      map.getCanvas().style.cursor = "pointer";
+      if (id === hoveredId) return;
+      const position = bundle?.chaserPositions.find((item) => item.id === id);
+      if (!position) return;
+      hoveredId = id;
+      const container = document.createElement("div");
+      container.className = "min-w-44 space-y-1 p-1 text-[11px] text-foreground";
+      const title = document.createElement("strong");
+      title.className = "block";
+      title.textContent =
+        position.displayName ??
+        position.callsign ??
+        (position.featured ? "Featured experienced reporter" : "Community spotter");
+      container.append(title);
+      const identity = document.createElement("div");
+      identity.className = "text-[9px] text-muted-foreground";
+      identity.textContent =
+        position.displayName || position.callsign
+          ? [position.callsign, position.organization].filter(Boolean).join(" · ")
+          : "Name unavailable in the current privacy feed";
+      container.append(identity);
+      const details = document.createElement("div");
+      details.className = "text-[9px]";
+      details.textContent = `${position.motionStatus} · observed ${new Date(
+        position.observedAt,
+      ).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
+      container.append(details);
+      const coordinates = position.location.geometry.coordinates as [number, number];
+      popup.setLngLat(coordinates).setDOMContent(container).addTo(map);
+    };
+    const leaveMap = () => {
+      hoveredId = "";
+      popup.remove();
+      map.getCanvas().style.cursor = "";
+    };
+    map.on("mousemove", hover);
+    map.on("mouseout", leaveMap);
+    return () => {
+      map.off("mousemove", hover);
+      map.off("mouseout", leaveMap);
+      leaveMap();
+    };
+  }, [bundle?.chaserPositions, map]);
 
   useEffect(() => {
     if (!map) return;

@@ -29,7 +29,9 @@ import { buildStormObjectsFromAlerts } from "./stormIntelligence";
 import { loadProbSevereStormObjects } from "./probSevere.server";
 import {
   loadSpotterNetworkPositionFeed,
+  mergeSpotterNetworkPositions,
   nearbySpotterNetworkPositions,
+  SPOTTER_NETWORK_FEATURED_NO_NAME_FEED,
 } from "./spotterNetwork.server";
 import {
   xweatherProviderHealth,
@@ -1566,13 +1568,41 @@ export async function loadWeatherBundle(request: WeatherPointRequest): Promise<W
                 env?.["SPOTTER_NETWORK_POSITION_FEED_URL"],
               ),
           );
-          chaserPositions = nearbySpotterNetworkPositions(allPositions, request);
+          let featuredPositions: WeatherChaserPosition[] = [];
+          try {
+            featuredPositions = await withCache(
+              "spotter-network-evaluation:featured-positions",
+              60_000,
+              {
+                providerId: "spotter-network-evaluation",
+                product: "experienced reporter positions",
+              },
+              () =>
+                loadSpotterNetworkPositionFeed(
+                  controller.signal,
+                  env?.["SPOTTER_NETWORK_FEATURED_POSITION_FEED_URL"] ??
+                    SPOTTER_NETWORK_FEATURED_NO_NAME_FEED,
+                  { featured: true },
+                ),
+            );
+          } catch {
+            warnings.push(
+              "Experienced-reporter highlights are temporarily unavailable; trained spotter positions remain visible.",
+            );
+          }
+          chaserPositions = nearbySpotterNetworkPositions(
+            mergeSpotterNetworkPositions(allPositions, featuredPositions),
+            request,
+          );
           providerHealth.push(
             health({
               providerId: "spotter-network-evaluation",
               providerName: "Spotter Network",
               status: chaserPositions.length ? "up" : "degraded",
-              products: ["privacy-minimized trained spotter positions"],
+              products: [
+                "privacy-minimized trained spotter positions",
+                "experienced reporter highlights",
+              ],
               coverage: "Positions within 800 km of the inspected point",
               lastSuccessfulRequest: generatedAt,
               lastUpdate: chaserPositions[0]?.observedAt,

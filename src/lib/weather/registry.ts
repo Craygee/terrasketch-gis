@@ -65,6 +65,30 @@ export const STORM_CHASER_RECOMMENDED_LAYERS = [
   },
 ] as const;
 
+export const STORM_CHASER_PRO_RADAR_LAYERS = [
+  "weather.radar.pro.reflectivity",
+  "weather.radar.pro.velocity",
+  "weather.radar.pro.storm-velocity",
+  "weather.radar.pro.correlation",
+  "weather.radar.pro.differential-reflectivity",
+  "weather.radar.pro.hydrometeor",
+] as const;
+
+export const STORM_CHASER_RADAR_COMPANIONS = [
+  {
+    id: "radarscope",
+    name: "RadarScope",
+    href: "https://www.radarscope.app/",
+    description: "Open the official professional radar app and product information.",
+  },
+  {
+    id: "radaromega",
+    name: "RadarOmega",
+    href: "https://www.radaromega.com/",
+    description: "Open the official multi-platform radar app and product information.",
+  },
+] as const;
+
 export const weatherLayerRegistry: WeatherLayerDefinition[] = [
   {
     id: "weather.current",
@@ -314,6 +338,7 @@ export const weatherLayerRegistry: WeatherLayerDefinition[] = [
     audience: "basic",
     attribution: "Spotter Network (when separately authorized)",
     legend: [
+      { color: "#f59e0b", label: "Featured experienced reporter" },
       { color: "#2563eb", label: "Recent community spotter" },
       { color: "#93c5fd", label: "Clustered spotters" },
     ],

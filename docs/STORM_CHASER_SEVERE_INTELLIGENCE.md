@@ -61,6 +61,15 @@ The durable distinction is:
   test/evaluation use. It discards identity/contact text, excludes positions over 30 minutes old and
   exposes provider permission status rather than silently enabling a non-commercial feed in
   production.
+- A second privacy-safe Spotter Network feed highlights active members with recent acceptable
+  reporting history in gold with a star. Hover and click cards show available classification,
+  freshness, movement, coordinates and provenance; identity remains unavailable under the current
+  no-name evaluation feed.
+- Desktop Storm Chaser settings can persistently hide unwanted catalog layers without disabling
+  active map layers. NOAA ProbSevere remains pinned as the visible analysis foundation.
+- RadarScope and RadarOmega are presented as external professional companion applications alongside
+  LandDraft's NOAA radar controls. Their app subscriptions are not treated as embeddable data feeds;
+  direct integration remains dependent on written vendor API/licensing approval.
 
 Detailed research and source decisions: `docs/STORM_CHASER_SEVERE_INTELLIGENCE_RESEARCH.md`.
 

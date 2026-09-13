@@ -23,6 +23,7 @@ export function defaultWeatherLayerSettings(): Record<string, WeatherLayerSettin
         visible: ["weather.current", "weather.radar.simple", "weather.severe.alerts"].includes(
           layer.id,
         ),
+        menuVisible: true,
       },
     ]),
   );
@@ -68,6 +69,7 @@ export function normalizeWeatherWorkspace(
       visible: Boolean(saved.visible),
       favorite: Boolean(saved.favorite),
       opacity: Math.max(0, Math.min(1, Number(saved.opacity) || 0)),
+      menuVisible: saved.menuVisible !== false,
     };
   }
   const savedOrder = Array.from(new Set(Array.isArray(stored.layerOrder) ? stored.layerOrder : []));

@@ -15,6 +15,7 @@ import {
   Crosshair,
   Database,
   Eye,
+  ExternalLink,
   GripVertical,
   Heart,
   Layers3,
@@ -28,7 +29,9 @@ import {
   Route,
   Save,
   Search,
+  Settings2,
   ShieldAlert,
+  Star,
   Thermometer,
   Wind,
   X,
@@ -54,6 +57,8 @@ import {
 } from "@/lib/weather/format";
 import { createWeatherPreset, normalizeWeatherWorkspace } from "@/lib/weather/model";
 import {
+  STORM_CHASER_PRO_RADAR_LAYERS,
+  STORM_CHASER_RADAR_COMPANIONS,
   STORM_CHASER_RECOMMENDED_LAYERS,
   WEATHER_LAYER_GROUPS,
   weatherLayerRegistry,
@@ -833,9 +838,16 @@ export function WeatherWorkspace() {
               onSelectStorm={selectStorm}
               onSelectCommunityChaser={(position) => {
                 setSelectedCommunityChaser(position);
-                toast.info("Community spotter position", {
-                  description: `Updated ${weatherAgeLabel(position.source)} · identity withheld`,
-                });
+                toast.info(
+                  position.displayName ??
+                    position.callsign ??
+                    (position.featured ? "Featured experienced reporter" : "Community spotter"),
+                  {
+                    description: `Updated ${weatherAgeLabel(position.source)} · ${position.motionStatus}${
+                      position.displayName || position.callsign ? "" : " · name withheld"
+                    }`,
+                  },
+                );
                 if (window.innerWidth < 1024) setMobileSheet("weather");
               }}
               stormObjectsVisible={
@@ -1180,12 +1192,15 @@ function WeatherLayerPanel({
 }) {
   const [draggedLayer, setDraggedLayer] = useState<string | null>(null);
   const [layerSearch, setLayerSearch] = useState("");
+  const [layerMenuSearch, setLayerMenuSearch] = useState("");
   const [dropTarget, setDropTarget] = useState<{
     id: string;
     edge: "before" | "after";
   } | null>(null);
   const normalizedSearch = layerSearch.trim().toLowerCase();
+  const normalizedMenuSearch = layerMenuSearch.trim().toLowerCase();
   const selectedLayers = weatherLayerRegistry.filter((layer) => {
+    if (workspace.layerSettings[layer.id]?.menuVisible === false) return false;
     if (!advanced && !normalizedSearch && layer.audience !== "basic") return false;
     if (!normalizedSearch) return layer.group === workspace.selectedCategory;
     return [
@@ -1208,9 +1223,36 @@ function WeatherLayerPanel({
           const layer = weatherLayerRegistry.find(
             (candidate) => candidate.id === recommendation.id,
           );
-          return layer && hasWeatherCapability(layer.capability) ? [{ recommendation, layer }] : [];
+          return layer &&
+            hasWeatherCapability(layer.capability) &&
+            (recommendation.core || workspace.layerSettings[layer.id]?.menuVisible !== false)
+            ? [{ recommendation, layer }]
+            : [];
         })
       : [];
+  const proRadarLayers = STORM_CHASER_PRO_RADAR_LAYERS.flatMap((id) => {
+    const layer = weatherLayerRegistry.find((candidate) => candidate.id === id);
+    return layer && hasWeatherCapability(layer.capability) ? [layer] : [];
+  });
+  const menuGroups = groups.filter((group) =>
+    weatherLayerRegistry.some(
+      (layer) =>
+        layer.group === group &&
+        workspace.layerSettings[layer.id]?.menuVisible !== false &&
+        hasWeatherCapability(layer.capability),
+    ),
+  );
+  const configurableMenuLayers = weatherLayerRegistry.filter(
+    (layer) =>
+      hasWeatherCapability(layer.capability) &&
+      (!normalizedMenuSearch ||
+        [layer.name, layer.group, layer.description].some((value) =>
+          value.toLowerCase().includes(normalizedMenuSearch),
+        )),
+  );
+  const hiddenMenuLayerCount = weatherLayerRegistry.filter(
+    (layer) => workspace.layerSettings[layer.id]?.menuVisible === false,
+  ).length;
   const layerStatus = (id: string) => {
     const requested = bundle?.request.requestedLayerIds?.includes(id) ?? false;
     const hasRaster = bundle?.rasterFrames.some((frame) => frame.layerId === id) ?? false;
@@ -1297,7 +1339,8 @@ function WeatherLayerPanel({
           <div className="space-y-2 border-t border-primary/20 p-2.5">
             <p className="px-1 text-[9px] leading-relaxed text-muted-foreground">
               NOAA ProbSevere is the core analysis layer and stays first. These are quick controls;
-              every layer remains available in its normal category below.
+              other layers remain available in their normal categories unless hidden in Layer menu
+              settings.
             </p>
             {recommendedChaserLayers.map(({ recommendation, layer }) => {
               const setting = workspace.layerSettings[layer.id];
@@ -1348,6 +1391,157 @@ function WeatherLayerPanel({
                 </div>
               );
             })}
+          </div>
+        </details>
+      )}
+
+      {workspaceView === "storm-chaser" && !compact && (
+        <details className="rounded-2xl border border-border bg-background">
+          <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 text-xs font-semibold [&::-webkit-details-marker]:hidden">
+            <Settings2 className="size-4 shrink-0 text-primary" />
+            <span className="min-w-0 flex-1 truncate">Layer menu settings</span>
+            <span className="rounded-full bg-secondary px-2 py-0.5 text-[8px] text-muted-foreground">
+              {hiddenMenuLayerCount} hidden
+            </span>
+          </summary>
+          <div className="space-y-2 border-t border-border p-2.5">
+            <p className="text-[9px] leading-relaxed text-muted-foreground">
+              Uncheck layers you do not want in the layer catalog. Active layers remain in the stack
+              so they can still be turned off. ProbSevere stays pinned as the analysis core.
+            </p>
+            <div className="flex gap-1">
+              <button
+                type="button"
+                onClick={() =>
+                  onWorkspace({
+                    ...workspace,
+                    layerSettings: Object.fromEntries(
+                      Object.entries(workspace.layerSettings).map(([id, setting]) => [
+                        id,
+                        { ...setting, menuVisible: true },
+                      ]),
+                    ),
+                  })
+                }
+                className="rounded-lg bg-secondary px-2 py-1.5 text-[8px] font-semibold"
+              >
+                Show all
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  onWorkspace({
+                    ...workspace,
+                    layerSettings: Object.fromEntries(
+                      Object.entries(workspace.layerSettings).map(([id, setting]) => [
+                        id,
+                        {
+                          ...setting,
+                          menuVisible:
+                            id === "weather.severe.intelligence" ? true : setting.visible,
+                        },
+                      ]),
+                    ),
+                  })
+                }
+                className="rounded-lg bg-secondary px-2 py-1.5 text-[8px] font-semibold"
+              >
+                Hide inactive
+              </button>
+            </div>
+            <label className="flex items-center gap-2 rounded-xl border border-border px-2 py-1.5">
+              <Search className="size-3 shrink-0 text-muted-foreground" />
+              <input
+                value={layerMenuSearch}
+                onChange={(event) => setLayerMenuSearch(event.target.value)}
+                placeholder="Find a layer to show or hide"
+                className="min-w-0 flex-1 bg-transparent text-[9px] outline-none"
+              />
+            </label>
+            <div className="max-h-64 space-y-1 overflow-y-auto pr-1">
+              {configurableMenuLayers.map((layer) => {
+                const setting = workspace.layerSettings[layer.id];
+                const pinned = layer.id === "weather.severe.intelligence";
+                if (!setting) return null;
+                return (
+                  <label
+                    key={layer.id}
+                    className="flex items-center gap-2 rounded-lg bg-secondary px-2 py-1.5 text-[9px]"
+                    title={layer.description}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={pinned || setting.menuVisible !== false}
+                      disabled={pinned}
+                      onChange={(event) => onLayer(layer.id, { menuVisible: event.target.checked })}
+                      className="accent-primary"
+                    />
+                    <span className="min-w-0 flex-1 truncate">{layer.name}</span>
+                    <span className="shrink-0 text-[7px] text-muted-foreground">
+                      {pinned ? "PINNED CORE" : layer.group}
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+        </details>
+      )}
+
+      {workspaceView === "storm-chaser" && (
+        <details className="rounded-2xl border border-border bg-background">
+          <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 text-xs font-semibold [&::-webkit-details-marker]:hidden">
+            <CloudRainWind className="size-4 shrink-0 text-primary" />
+            <span className="min-w-0 flex-1 truncate">Professional radar tools</span>
+          </summary>
+          <div className="space-y-2 border-t border-border p-2.5">
+            <p className="text-[9px] leading-relaxed text-muted-foreground">
+              LandDraft uses its own reviewed NOAA/provider connections. RadarScope and RadarOmega
+              subscriptions are companion apps and do not grant LandDraft access to their private
+              feeds.
+            </p>
+            <div className="space-y-1">
+              {proRadarLayers.map((layer) => {
+                const setting = workspace.layerSettings[layer.id];
+                if (!setting) return null;
+                const status = layerStatus(layer.id);
+                return (
+                  <button
+                    key={layer.id}
+                    type="button"
+                    onClick={() => onLayer(layer.id, { visible: !setting.visible })}
+                    className={cn(
+                      "flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left text-[9px] font-semibold",
+                      setting.visible ? "bg-primary text-primary-foreground" : "bg-secondary",
+                    )}
+                  >
+                    <Eye className="size-3.5 shrink-0" />
+                    <span className="min-w-0 flex-1 truncate">{layer.name}</span>
+                    <span className="shrink-0 text-[7px] opacity-80">{status.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="grid grid-cols-2 gap-1">
+              {STORM_CHASER_RADAR_COMPANIONS.map((app) => (
+                <a
+                  key={app.id}
+                  href={app.href}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="rounded-xl border border-border p-2 text-[9px] font-semibold hover:bg-accent"
+                  title={app.description}
+                >
+                  <span className="flex items-center gap-1">
+                    {app.name}
+                    <ExternalLink className="ml-auto size-3" />
+                  </span>
+                  <span className="mt-1 block text-[7px] font-normal text-muted-foreground">
+                    Official app/site
+                  </span>
+                </a>
+              ))}
+            </div>
           </div>
         </details>
       )}
@@ -1514,7 +1708,7 @@ function WeatherLayerPanel({
       </label>
 
       <div className="grid grid-cols-2 gap-1">
-        {groups.map((group) => (
+        {menuGroups.map((group) => (
           <button
             key={group}
             onClick={() => onCategory(group)}
@@ -1536,7 +1730,7 @@ function WeatherLayerPanel({
           <div className="rounded-2xl bg-secondary p-3 text-[10px] text-muted-foreground">
             {normalizedSearch
               ? "No weather layers match this search."
-              : "Turn on professional layers to see this category."}
+              : "No visible menu layers remain in this category. Restore them in Layer menu settings or turn on professional layers."}
           </div>
         )}
         {selectedLayers.map((layer) => {
@@ -1951,30 +2145,68 @@ function StormChaserPanel({
         </div>
       </details>
 
-      <details className="rounded-2xl border border-blue-200 bg-blue-50 p-3 text-blue-950">
+      <details
+        className="rounded-2xl border border-blue-200 bg-blue-50 p-3 text-blue-950"
+        open={selectedCommunityChaser ? true : undefined}
+      >
         <summary className="cursor-pointer text-[10px] font-semibold">
-          Community spotters · {communityChasers.length} nearby
+          Community spotters · {communityChasers.length} nearby ·{" "}
+          {communityChasers.filter((chaser) => chaser.featured).length} featured
         </summary>
         <p className="mt-1 text-[8px] leading-relaxed">
-          Recent positions appear as blue markers and clusters. LandDraft discards names, callsigns,
-          contact details, and positions older than 30 minutes.
+          Recent trained spotters appear in blue. Gold star markers come from Spotter Network’s
+          experienced-reporter feed. “Featured” reflects recent acceptable reporting history, not a
+          safety or skill endorsement.
         </p>
         {selectedCommunityChaser && (
           <div className="mt-2 rounded-xl bg-white/80 p-2 text-[8px]">
-            <strong className="block">Selected community spotter</strong>
+            <div className="flex items-center gap-1">
+              <strong className="min-w-0 flex-1 truncate">
+                {selectedCommunityChaser.displayName ??
+                  selectedCommunityChaser.callsign ??
+                  "Selected community spotter"}
+              </strong>
+              {selectedCommunityChaser.featured && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-1.5 py-0.5 font-semibold text-amber-900">
+                  <Star className="size-2.5 fill-current" /> Featured
+                </span>
+              )}
+            </div>
+            {!selectedCommunityChaser.displayName && !selectedCommunityChaser.callsign && (
+              <span className="mt-1 block text-muted-foreground">
+                Name unavailable in the current privacy feed
+              </span>
+            )}
+            {(selectedCommunityChaser.callsign || selectedCommunityChaser.organization) && (
+              <span className="mt-1 block text-muted-foreground">
+                {[selectedCommunityChaser.callsign, selectedCommunityChaser.organization]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </span>
+            )}
             <span className="mt-1 block">
               Updated {weatherAgeLabel(selectedCommunityChaser.source)} ·{" "}
               {selectedCommunityChaser.motionStatus}
+            </span>
+            <span className="mt-1 block">
+              {selectedCommunityChaser.memberClass === "experienced-reporter"
+                ? "Experienced reporter classification"
+                : "Trained community spotter"}
             </span>
             <span className="mt-1 block font-mono">
               {selectedCommunityChaser.location.geometry.coordinates[1]?.toFixed(4)},{" "}
               {selectedCommunityChaser.location.geometry.coordinates[0]?.toFixed(4)}
             </span>
+            <span className="mt-1 block text-muted-foreground">
+              Source: {selectedCommunityChaser.source.providerName} · observed{" "}
+              {new Date(selectedCommunityChaser.observedAt).toLocaleString()}
+            </span>
           </div>
         )}
         <p className="mt-2 text-[7px] leading-relaxed opacity-80">
           Spotter locations do not indicate that a storm is safe to approach and are not an official
-          warning product. Production use requires separate provider authorization.
+          warning product. The current no-name evaluation feed intentionally withholds identities;
+          production use and any named feed require separate provider authorization.
         </p>
       </details>
 

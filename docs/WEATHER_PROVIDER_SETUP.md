@@ -138,13 +138,16 @@ Test/evaluation configuration:
 ```text
 SPOTTER_NETWORK_NONCOMMERCIAL_FEED_ENABLED=true
 SPOTTER_NETWORK_POSITION_FEED_URL=https://www.spotternetwork.org/feeds/gr-no.txt
+SPOTTER_NETWORK_FEATURED_POSITION_FEED_URL=https://www.spotternetwork.org/feeds/gr-p-no.txt
 ```
 
 The URL is restricted in code to the official HTTPS Spotter Network host. Even the no-name feed can
 contain voluntary identity/contact text. LandDraft parses only coordinates, position time and a
-basic moving/stationary state, then discards the rest before caching. Positions older than 30
-minutes are rejected, results are limited to 500 positions within 800 km of the inspected point,
-and the browser never receives the upstream raw feed.
+basic moving/stationary state, then discards the rest before caching. The optional featured feed
+contains members with more than five Acceptable-or-better reports in the prior 12 months; matching
+no-name positions receive a gold Featured marker. This is not a safety or skill endorsement.
+Positions older than 30 minutes are rejected, results are limited to 500 positions within 800 km
+of the inspected point, and the browser never receives the upstream raw feed.
 
 Potential operating cost is currently provider-permission/licensing work plus Worker requests and
 bandwidth; pricing remains undecided. Production activation must be coordinated before merge.
