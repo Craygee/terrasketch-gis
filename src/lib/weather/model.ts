@@ -70,6 +70,9 @@ export function normalizeWeatherWorkspace(
       favorite: Boolean(saved.favorite),
       opacity: Math.max(0, Math.min(1, Number(saved.opacity) || 0)),
       menuVisible: saved.menuVisible !== false,
+      ...(typeof saved.lastUsedAt === "string" && Number.isFinite(Date.parse(saved.lastUsedAt))
+        ? { lastUsedAt: saved.lastUsedAt }
+        : {}),
     };
   }
   const savedOrder = Array.from(new Set(Array.isArray(stored.layerOrder) ? stored.layerOrder : []));

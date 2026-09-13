@@ -356,6 +356,7 @@ export interface WeatherLayerDefinition {
 }
 
 export interface WeatherLayerSetting {
+  lastUsedAt?: string;
   opacity: number;
   favorite: boolean;
   visible: boolean;
@@ -410,7 +411,13 @@ export interface WeatherPointRequest {
 }
 
 export interface WeatherBundle {
+  spcOutlooks?: SpcOutlook[];
   request: WeatherPointRequest;
+  providerControls?: {
+    disabledProviders: string[];
+    disabledFeatures: string[];
+    configurationValid: boolean;
+  };
   generatedAt: string;
   current: WeatherObservation | null;
   forecast: WeatherForecastPeriod[];
@@ -431,6 +438,14 @@ export interface WeatherBundle {
     satellite: boolean;
     lightningDensity: boolean;
   };
+}
+
+export interface SpcOutlook {
+  statement?: string;
+  layerId: string;
+  day: number;
+  areas: Feature<Polygon | MultiPolygon, { label: string; fill: string; stroke: string }>[];
+  source: WeatherSourceMetadata;
 }
 
 export interface WeatherProviderContext {

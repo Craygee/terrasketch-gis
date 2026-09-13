@@ -27,6 +27,8 @@ import {
   type WeatherEventIcon,
 } from "@/lib/weather/stormPresentation";
 import { timeAdjustedStormForecast } from "@/lib/weather/stormIntelligence";
+import { spcVisible } from "@/lib/weather/spc";
+import { SPC_PRODUCTS } from "@/lib/weather/spcCatalog";
 
 const ALERT_SOURCE = "landdraft-weather-alerts";
 const ALERT_FILL = "landdraft-weather-alert-fill";
@@ -207,7 +209,13 @@ function currentConditionsCollection(
 ): FeatureCollection<Point> {
   if (!observation) return { type: "FeatureCollection", features: [] };
   const wind = formatWind(observation.windSpeedMS, unitSystem);
-  const details = [observation.summary, wind === "Unavailable" ? undefined : `Wind ${wind}`]
+  const details = [
+    observation.source.temporalKind !== "observed"
+      ? observation.source.temporalKind.toUpperCase()
+      : undefined,
+    observation.summary,
+    wind === "Unavailable" ? undefined : `Wind ${wind}`,
+  ]
     .filter(Boolean)
     .join(" · ");
   return {
@@ -1087,6 +1095,8 @@ function ensureRasterProducts(
 }
 
 function renderedLayerIds(weatherLayerId: string) {
+  const spc = SPC_PRODUCTS.find((product) => product.layerId === weatherLayerId);
+  if (spc) return [`landdraft-spc-${spc.productId}-fill`, `landdraft-spc-${spc.productId}-line`];
   if (weatherLayerId === "weather.current") return [CURRENT_CIRCLE, CURRENT_VALUE, CURRENT_LABEL];
   if (weatherLayerId === "weather.radar.simple") return [RADAR_LAYER];
   if (weatherLayerId === "weather.severe.alerts") return [ALERT_FILL, ALERT_LINE];
@@ -1190,6 +1200,53 @@ export function WeatherMapOverlay({
       ensureRadar(map, frame);
       ensureRasterProducts(map, rasterProducts);
       ensureVectorLayers(map);
+      for (const product of SPC_PRODUCTS) {
+        const layerId = product.layerId;
+        const sourceId = `landdraft-spc-${product.productId}`;
+        const fillId = `${sourceId}-fill`;
+        const lineId = `${sourceId}-line`;
+        const outlook = bundle?.spcOutlooks?.find((item) => item.layerId === layerId);
+        const visible =
+          workspace.layerSettings[layerId]?.visible &&
+          outlook &&
+          spcVisible(outlook, workspace.timeline);
+        const data: FeatureCollection<Polygon | MultiPolygon> = {
+          type: "FeatureCollection",
+          features: visible ? outlook.areas : [],
+        };
+        if (!map.getSource(sourceId))
+          map.addSource(sourceId, {
+            type: "geojson",
+            data,
+            attribution: "NOAA / NWS Storm Prediction Center · FORECAST",
+          });
+        else (map.getSource(sourceId) as GeoJSONSource).setData(data);
+        if (!map.getLayer(fillId))
+          map.addLayer(
+            {
+              id: fillId,
+              source: sourceId,
+              type: "fill",
+              paint: { "fill-color": ["get", "fill"] },
+            },
+            ALERT_FILL,
+          );
+        if (!map.getLayer(lineId))
+          map.addLayer(
+            {
+              id: lineId,
+              source: sourceId,
+              type: "line",
+              paint: { "line-color": ["get", "stroke"], "line-width": 2 },
+            },
+            ALERT_FILL,
+          );
+        map.setPaintProperty(
+          fillId,
+          "fill-opacity",
+          workspace.layerSettings[layerId]?.opacity ?? 0.3,
+        );
+      }
       (map.getSource(ALERT_SOURCE) as GeoJSONSource | undefined)?.setData(
         alertsVisible ? alertCollection(bundle?.alerts ?? []) : alertCollection([]),
       );
@@ -1314,6 +1371,8 @@ export function WeatherMapOverlay({
         STORM_REPORT_POINT,
         STORM_REPORT_LABEL,
         CHASER_CIRCLE,
+        ALERT_FILL,
+        ALERT_LINE,
         NAVIGATION_TARGET_CIRCLE,
         NAVIGATION_TARGET_LABEL,
       ]);
@@ -1343,6 +1402,7 @@ export function WeatherMapOverlay({
     workspace.layerOrder,
     workspace.layerSettings,
     workspace.unitSystem,
+    workspace.timeline,
   ]);
 
   useEffect(() => {

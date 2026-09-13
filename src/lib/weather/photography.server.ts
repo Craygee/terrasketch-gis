@@ -26,7 +26,7 @@ function riskFor(alerts: WeatherAlert[], current: WeatherObservation | null): We
 }
 
 function photoScore(current: WeatherObservation | null, riskLevel: WeatherRiskLevel) {
-  if (!current || riskLevel === "high") return null;
+  if (!current || riskLevel === "high" || riskLevel === "unknown") return null;
   let score = 60;
   const clouds = current.cloudCoverPct;
   if (clouds !== undefined) {
@@ -81,6 +81,7 @@ export async function buildPhotographyAssessment(
   const target = alerts.find(
     (alert) =>
       alert.geometry &&
+      alert.status === "actual" &&
       (alert.severity === "extreme" ||
         alert.severity === "severe" ||
         alert.severity === "moderate"),
@@ -132,7 +133,10 @@ export async function buildPhotographyAssessment(
         booleanPointInPolygon(location, targetGeometry)
       )
         candidateAlerts = [target, ...candidateAlerts];
-      const riskLevel = lookupFailed ? "unknown" : riskFor(candidateAlerts, current);
+      const weatherRisk = riskFor(candidateAlerts, current);
+      const riskLevel = weatherRisk === "high" ? "high" : "unknown";
+      // Weather-only conditions cannot establish road access, escape options,
+      // lightning exposure or terrain visibility. Never imply a safe location.
       const score = photoScore(current, riskLevel);
       const source = sourceMetadata({
         providerId: "landdraft-photography-analysis",
@@ -141,14 +145,14 @@ export async function buildPhotographyAssessment(
         temporalKind: "estimated",
         sourceTimestamp: validTime,
         validTime,
-        quality: lookupFailed ? "low" : current ? "moderate" : "low",
+        quality: "low",
         qualityFlags: [
           "DECISION_SUPPORT",
           "NOT_A_SAFETY_DETERMINATION",
-          "OFFICIAL_ALERT_SCREEN",
+          ...(lookupFailed ? ["ALERT_SCREEN_FAILED"] : ["OFFICIAL_ALERT_SCREEN"]),
+          "SAFETY_INPUTS_INCOMPLETE",
           ...(current ? ["MODEL_WEATHER_INPUT"] : []),
         ],
-        confidence: lookupFailed ? 0.25 : current ? 0.58 : 0.4,
         rawSourceReference: target.source.rawSourceReference,
         attribution: `${target.source.attribution}; model conditions where available`,
       });
@@ -162,8 +166,17 @@ export async function buildPhotographyAssessment(
         riskLevel,
         distanceFromTargetMiles: distance(location, targetCenter, { units: "miles" }),
         targetBearingDeg: normalizeBearing(bearing(location, targetCenter)),
-        reasons: reasonsFor(current, score),
-        cautions: cautionsFor(candidateAlerts, riskLevel),
+        reasons: [
+          ...reasonsFor(current, score),
+          "Opportunity score unavailable: terrain, road access, escape routes and lightning screening are required.",
+        ],
+        cautions: [
+          ...cautionsFor(candidateAlerts, riskLevel),
+          "Terrain, road access, escape routes and lightning are not verified.",
+          ...(lookupFailed
+            ? ["Candidate weather or official warning lookup failed; hazard status is unknown."]
+            : []),
+        ],
         activeAlertCount: candidateAlerts.length,
         source,
       };

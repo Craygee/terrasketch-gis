@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "disabledProviders": [],
+  "disabledFeatures": [
+    "nexrad_level2",
+    "glm",
+    "boundary_analysis",
+    "photography_heatmap",
+    "terrain_los",
+    "hazard_routing",
+    "computer_vision_cameras",
+    "experimental_tornado_analysis"
+  ],
+  "grants": []
+}

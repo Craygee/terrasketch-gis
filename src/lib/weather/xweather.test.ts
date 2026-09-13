@@ -2,20 +2,35 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { xweatherRasterFramesFor, xweatherTileTemplate } from "./xweather.server.ts";
 import { XWEATHER_ADDITIONAL_LAYERS } from "./xweatherCatalog.ts";
+import { syntheticLicenseGrant, syntheticPolicyBindings } from "./policyFixtures.ts";
 import {
   decryptXweatherCredentials,
   encryptXweatherCredentials,
   parseXweatherApiKey,
 } from "./xweatherConnection.server.ts";
 
-test("returns commercial frames only after the user's connection is confirmed", () => {
+test("commercial frames require both connection and deployment product approval", () => {
   const request = {
     latitude: 31.9,
     longitude: -102.1,
     requestedLayerIds: ["weather.xweather.current.temperature"],
   };
   assert.equal(xweatherRasterFramesFor(request).length, 0);
-  assert.ok(xweatherRasterFramesFor({ ...request, xweatherConnected: true }).length > 0);
+  const prior = process.env["WEATHER_PROVIDER_POLICY"];
+  try {
+    process.env["WEATHER_PROVIDER_POLICY"] = "";
+    assert.equal(xweatherRasterFramesFor({ ...request, xweatherConnected: true }).length, 0);
+    const product = XWEATHER_ADDITIONAL_LAYERS.find(
+      (layer) => layer.id === request.requestedLayerIds[0],
+    )!.providerLayer;
+    process.env["WEATHER_PROVIDER_POLICY"] = syntheticPolicyBindings(
+      syntheticLicenseGrant({ products: [product] }),
+    ).WEATHER_PROVIDER_POLICY;
+    assert.ok(xweatherRasterFramesFor({ ...request, xweatherConnected: true }).length > 0);
+  } finally {
+    if (prior === undefined) delete process.env["WEATHER_PROVIDER_POLICY"];
+    else process.env["WEATHER_PROVIDER_POLICY"] = prior;
+  }
 });
 
 test("encrypts Xweather credentials for one user and rejects a different user", async () => {

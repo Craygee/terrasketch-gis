@@ -8,6 +8,8 @@ import type {
 } from "./types.ts";
 import { XWEATHER_ADDITIONAL_LAYERS } from "./xweatherCatalog.ts";
 import { resolveUserXweatherCredentials } from "./xweatherConnection.server.ts";
+import { xweatherProductPermitted } from "./providerPolicy.server.ts";
+import { consumeProviderRequest, recordProviderAudit } from "./providerOperations.server.ts";
 
 type XweatherRasterLayer = {
   providerLayer: string;
@@ -200,6 +202,7 @@ export function xweatherRasterFramesFor(
     if (!requested.has(layerId)) return [];
     const layer = XWEATHER_RASTER_LAYERS[mapping.providerLayer];
     if (!layer) return [];
+    if (!xweatherProductPermitted(layer.providerLayer)) return [];
     return frameOffsets(layer).map((offset) => {
       const timestamp = offsetTime(offset, now);
       return {
@@ -215,7 +218,7 @@ export function xweatherRasterFramesFor(
 }
 
 export function xweatherRadarFrames(now = new Date(), connected = false): RadarFrame[] {
-  if (!connected) return [];
+  if (!connected || !xweatherProductPermitted("radar-global")) return [];
   const layer = XWEATHER_RASTER_LAYERS["radar-global"]!;
   return frameOffsets(layer).map((offset) => {
     const timestamp = offsetTime(offset, now);
@@ -230,13 +233,7 @@ export function xweatherRadarFrames(now = new Date(), connected = false): RadarF
 }
 
 export function xweatherProviderHealth(connected = false): WeatherProviderHealth {
-  const status = !connected
-    ? "not-configured"
-    : runtimeStatus.lastSuccess
-      ? "up"
-      : runtimeStatus.lastError
-        ? "down"
-        : "degraded";
+  const status = connected ? "degraded" : "not-configured";
   return {
     providerId: "xweather-raster",
     providerName: "Vaisala Xweather Raster Maps",
@@ -250,15 +247,9 @@ export function xweatherProviderHealth(connected = false): WeatherProviderHealth
       "air quality, fire, maritime and tropical imagery",
     ],
     coverage: "Global with product-specific regional limitations",
-    ...(runtimeStatus.latencyMs !== undefined ? { latencyMs: runtimeStatus.latencyMs } : {}),
-    ...(runtimeStatus.lastSuccess ? { lastSuccessfulRequest: runtimeStatus.lastSuccess } : {}),
-    ...(!connected
-      ? { error: "Connect your own Xweather account to use these optional products" }
-      : runtimeStatus.lastError
-        ? { error: runtimeStatus.lastError }
-        : !runtimeStatus.lastSuccess
-          ? { error: "Configured; awaiting the first proxied map tile" }
-          : {}),
+    error: connected
+      ? "Account-specific product access is checked by the authenticated proxy"
+      : "Configure optional access in Data Sources",
     costClass: "commercial",
   };
 }
@@ -337,6 +328,14 @@ export async function handleXweatherTileProxy(request: Request, bindings?: unkno
   const credentials = await resolveUserXweatherCredentials(request, bindings);
   if (!credentials)
     return plainResponse("Connect your Xweather account to use this weather product", 401);
+  if (!consumeProviderRequest(credentials.userId, "tile"))
+    return plainResponse("Weather tile request limit reached. Retry in one minute.", 429);
+  const correlationId = crypto.randomUUID();
+  if (!xweatherProductPermitted(parts.layer.providerLayer, bindings, credentials.userId))
+    return plainResponse(
+      "LICENSE REVIEW REQUIRED: this product is not approved for LandDraft use",
+      403,
+    );
 
   const credentialPath = `${credentials.clientId}_${credentials.clientSecret}`;
   const upstreamUrl =
@@ -345,6 +344,7 @@ export async function handleXweatherTileProxy(request: Request, bindings?: unkno
   const startedAt = Date.now();
   try {
     const response = await fetch(upstreamUrl, {
+      signal: AbortSignal.any([request.signal, AbortSignal.timeout(12_000)]),
       headers: {
         Accept: "image/png,image/*;q=0.8",
         Referer: `${url.origin}/`,
@@ -365,17 +365,21 @@ export async function handleXweatherTileProxy(request: Request, bindings?: unkno
     runtimeStatus.lastError = undefined;
     const headers = new Headers();
     headers.set("content-type", contentType);
-    headers.set(
-      "cache-control",
-      `private, max-age=${parts.layer.cacheSeconds}, stale-while-revalidate=60`,
-    );
+    headers.set("cache-control", "private, no-store");
     headers.set("x-landdraft-weather-provider", "xweather-raster");
+    headers.set("x-landdraft-correlation-id", correlationId);
+    recordProviderAudit({
+      correlationId,
+      providerId: "xweather",
+      subjectId: credentials.userId,
+      action: "tile",
+      outcome: "success",
+    });
     headers.set("x-landdraft-weather-cost-multiplier", String(parts.layer.costMultiplier));
     return new Response(response.body, { status: 200, headers });
-  } catch (error) {
+  } catch {
     runtimeStatus.latencyMs = Date.now() - startedAt;
-    runtimeStatus.lastError =
-      error instanceof Error ? error.message.slice(0, 200) : "Xweather request failed";
+    runtimeStatus.lastError = "Xweather request failed";
     return plainResponse("Xweather is temporarily unavailable.", 502);
   }
 }

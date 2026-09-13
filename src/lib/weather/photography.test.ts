@@ -85,3 +85,42 @@ test("photography scoring is suppressed when candidate points remain in a severe
   assert.ok(result.zones.every((zone) => zone.riskLevel === "high"));
   assert.ok(result.zones.every((zone) => zone.score === null));
 });
+
+test("failed candidate warnings never become an all-clear", async () => {
+  const result = await buildPhotographyAssessment(
+    request,
+    [alert],
+    new AbortController().signal,
+    async () => {
+      throw new Error("Warning provider unavailable");
+    },
+  );
+  assert.ok(result.zones.every((zone) => zone.score === null));
+  assert.ok(result.zones.every((zone) => zone.riskLevel !== "lower"));
+  assert.ok(
+    result.zones.every((zone) => zone.cautions.some((text) => text.includes("lookup failed"))),
+  );
+});
+
+test("favorable weather cannot override unverified roads, terrain and lightning", async () => {
+  const result = await buildPhotographyAssessment(
+    request,
+    [alert],
+    new AbortController().signal,
+    async () => ({ alerts: [], current: model }),
+  );
+  assert.ok(result.zones.every((zone) => zone.score === null));
+  assert.ok(result.zones.every((zone) => zone.reasons.some((text) => text.includes("terrain"))));
+});
+
+test("exercise alerts cannot create real-world photography targets", async () => {
+  const result = await buildPhotographyAssessment(
+    request,
+    [{ ...alert, status: "exercise" }],
+    new AbortController().signal,
+    async () => {
+      throw new Error("Must not fetch");
+    },
+  );
+  assert.equal(result.status, "no-severe-target");
+});

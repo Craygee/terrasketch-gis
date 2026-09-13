@@ -6,6 +6,9 @@ export type XweatherConnectionState =
 export interface XweatherConnectionStatus {
   state: XweatherConnectionState;
   connected: boolean;
+  approvedProducts?: string[];
+  verifiedProducts?: string[];
+  lastSuccessfulRequest?: string;
   clientIdHint?: string | undefined;
   lastTestedAt?: string | undefined;
   updatedAt?: string | undefined;
@@ -31,6 +34,15 @@ async function connectionRequest(init: RequestInit = {}): Promise<XweatherConnec
   return {
     state: payload.state ?? "not-connected",
     connected: payload.connected === true,
+    approvedProducts: Array.isArray(payload.approvedProducts)
+      ? payload.approvedProducts.filter((item) => typeof item === "string")
+      : [],
+    verifiedProducts: Array.isArray(payload.verifiedProducts)
+      ? payload.verifiedProducts.filter((item) => typeof item === "string")
+      : [],
+    ...(payload.lastSuccessfulRequest
+      ? { lastSuccessfulRequest: payload.lastSuccessfulRequest }
+      : {}),
     ...(payload.clientIdHint ? { clientIdHint: payload.clientIdHint } : {}),
     ...(payload.lastTestedAt ? { lastTestedAt: payload.lastTestedAt } : {}),
     ...(payload.updatedAt ? { updatedAt: payload.updatedAt } : {}),
@@ -52,3 +64,5 @@ export const connectXweather = (apiKey: string) =>
   });
 
 export const disconnectXweather = () => connectionRequest({ method: "DELETE" });
+export const testXweatherConnection = (product?: string) =>
+  connectionRequest({ method: "PATCH", body: JSON.stringify({ product }) });

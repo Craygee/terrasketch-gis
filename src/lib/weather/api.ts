@@ -32,6 +32,17 @@ function validatePoint(input: unknown): WeatherPointRequest {
 export const getWeatherAtPoint = createServerFn({ method: "POST" })
   .validator(validatePoint)
   .handler(async ({ data }) => {
+    const { currentWeatherContext } = await import("./runtimeContext.server");
+    const context = currentWeatherContext();
+    if (data.xweatherConnected && context) {
+      const { resolveUserXweatherCredentials } = await import("./xweatherConnection.server");
+      const credentials = await resolveUserXweatherCredentials(
+        context.request,
+        context.bindings,
+      ).catch(() => null);
+      if (credentials) context.authenticatedUserId = credentials.userId;
+      else data.xweatherConnected = false;
+    } else data.xweatherConnected = false;
     const { loadWeatherBundle } = await import("./gateway.server");
     return loadWeatherBundle(data);
   });

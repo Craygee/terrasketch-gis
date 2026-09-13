@@ -6,7 +6,18 @@ import reactRefresh from "eslint-plugin-react-refresh";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
-  { ignores: ["dist", ".output", ".vinxi", ".codex-lovable-sync", ".pnpm-store"] },
+  {
+    ignores: [
+      "dist",
+      ".output",
+      ".vinxi",
+      ".codex-lovable-sync",
+      ".pnpm-store",
+      ".release",
+      ".local-backups",
+      ".wrangler",
+    ],
+  },
   {
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     files: ["**/*.{ts,tsx}"],

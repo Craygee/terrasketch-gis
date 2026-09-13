@@ -1,5 +1,6 @@
 import type { WeatherLayerDefinition } from "./types";
 import { XWEATHER_ADDITIONAL_LAYERS } from "./xweatherCatalog.ts";
+import { SPC_PRODUCTS } from "./spcCatalog.ts";
 
 export const WEATHER_LAYER_GROUPS = [
   "Current",
@@ -8,6 +9,7 @@ export const WEATHER_LAYER_GROUPS = [
   "Wind",
   "Lightning",
   "Severe weather",
+  "SPC",
   "Forecast",
   "Meteorology",
   "Aviation",
@@ -96,12 +98,33 @@ export const STORM_CHASER_RADAR_COMPANIONS = [
 ] as const;
 
 export const weatherLayerRegistry: WeatherLayerDefinition[] = [
+  ...SPC_PRODUCTS.map((product): WeatherLayerDefinition => ({
+    id: product.layerId,
+    name: product.name,
+    group: "SPC",
+    description:
+      "Official convective forecast. Probabilities describe the stated hazard within 25 miles of a point during the valid period, not a guarantee at a location. Latest issuance only; source colors and below-threshold statements are retained. Not a warning.",
+    capability: "weather.severe",
+    dataType: "geojson",
+    providerProducts: [product.productId],
+    defaultOpacity: 0.3,
+    minZoom: 0,
+    maxZoom: 24,
+    animationSupport: false,
+    timeSupport: true,
+    inspectSupport: false,
+    mobileVisibility: "primary",
+    audience: "basic",
+    attribution: "NOAA / NWS Storm Prediction Center",
+    providerName: "NOAA Storm Prediction Center",
+    coverage: "Contiguous United States",
+  })),
   {
     id: "weather.current",
     name: "Current conditions",
     group: "Current",
     description:
-      "Latest supported observation at the inspected map location, shown as a temperature marker with a concise conditions label.",
+      "Latest supported conditions at the inspected map location. Model or estimated fallback values are explicitly labeled and are not observations.",
     capability: "weather.basic",
     dataType: "point",
     providerProducts: ["observation", "point-forecast"],

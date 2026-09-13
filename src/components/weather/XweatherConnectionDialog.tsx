@@ -21,11 +21,11 @@ import { Label } from "@/components/ui/label";
 import {
   connectXweather,
   disconnectXweather,
+  testXweatherConnection,
   type XweatherConnectionStatus,
 } from "@/lib/weather/xweatherConnection";
 
-const XWEATHER_SIGNUP_URL =
-  "https://www.xweather.com/signup/checkout?items=payg::monthly:v1&source=api-pricing-hero";
+const XWEATHER_SIGNUP_URL = "https://new.xweather.com/legal";
 const XWEATHER_DASHBOARD_URL = "https://data.portal.xweather.com/account/";
 
 export function XweatherConnectionDialog({
@@ -43,6 +43,15 @@ export function XweatherConnectionDialog({
   const [editing, setEditing] = useState(!status.connected);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [product, setProduct] = useState("");
+  const connectionBlock =
+    status.state === "loading"
+      ? "Checking connection configuration…"
+      : status.state === "server-not-configured"
+        ? "Secure provider connections are not configured for this deployment. An administrator must configure server-side credential encryption before connecting."
+        : !status.approvedProducts?.length
+          ? "LICENSE REVIEW REQUIRED. An administrator must record an active product-specific license approval before credentials can be submitted."
+          : null;
 
   useEffect(() => {
     if (!open) return;
@@ -52,6 +61,10 @@ export function XweatherConnectionDialog({
   }, [open, status.connected]);
 
   const connect = async () => {
+    if (connectionBlock) {
+      setError(connectionBlock);
+      return;
+    }
     if (!apiKey.trim()) {
       setError("Enter the API key from your Xweather dashboard.");
       return;
@@ -64,7 +77,7 @@ export function XweatherConnectionDialog({
       setApiKey("");
       setEditing(false);
       toast.success("Xweather connected", {
-        description: "Premium weather usage now belongs to this Xweather account.",
+        description: "The tested product is available under your account's reviewed access.",
       });
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "Xweather did not connect");
@@ -74,7 +87,6 @@ export function XweatherConnectionDialog({
   };
 
   const disconnect = async () => {
-    if (!window.confirm("Disconnect Xweather for your LandDraft account?")) return;
     setBusy(true);
     setError(null);
     try {
@@ -89,6 +101,21 @@ export function XweatherConnectionDialog({
     }
   };
 
+  const testSaved = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const next = await testXweatherConnection(product || undefined);
+      onStatus({ ...status, ...next });
+      if (next.error) setError(next.error);
+      else toast.success("Product access verified");
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : "Connection test failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[min(92dvh,46rem)] max-w-xl overflow-y-auto rounded-3xl">
@@ -97,13 +124,18 @@ export function XweatherConnectionDialog({
             <span className="flex size-9 items-center justify-center rounded-xl bg-primary text-primary-foreground">
               <KeyRound className="size-4" />
             </span>
-            Connect your Xweather account
+            Data Sources · Xweather
           </DialogTitle>
           <DialogDescription>
-            Use your own Xweather allowance for optional premium products. This does not connect
-            your password or give LandDraft access to your Xweather account profile.
+            Use an account whose subscription and license permit LandDraft integration. Credentials
+            alone do not establish rights to a product.
           </DialogDescription>
         </DialogHeader>
+        {connectionBlock && (
+          <p role="status" className="rounded-xl bg-amber-50 p-3 text-xs text-amber-950">
+            {connectionBlock}
+          </p>
+        )}
 
         {status.connected && !editing ? (
           <div className="space-y-3">
@@ -118,8 +150,42 @@ export function XweatherConnectionDialog({
                 </p>
               )}
               {status.error && <p className="mt-2 text-xs">{status.error}</p>}
+              <p className="mt-2 text-xs">
+                Entitlements:{" "}
+                {status.verifiedProducts?.length
+                  ? status.verifiedProducts.join(", ")
+                  : "Not yet verified in this session"}
+              </p>
+              {status.lastSuccessfulRequest && (
+                <p className="mt-1 text-xs">
+                  Last successful request: {new Date(status.lastSuccessfulRequest).toLocaleString()}
+                </p>
+              )}
             </div>
+            <label className="block text-xs">
+              Product to test
+              <select
+                value={product}
+                onChange={(event) => setProduct(event.target.value)}
+                className="mt-1 w-full rounded-xl border border-border bg-background p-3"
+              >
+                <option value="">Select an approved product</option>
+                {(status.approvedProducts ?? []).map((item) => (
+                  <option key={item} value={item}>
+                    {item}
+                  </option>
+                ))}
+              </select>
+            </label>
             <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                disabled={busy || !status.approvedProducts?.length}
+                onClick={() => void testSaved()}
+                className="rounded-xl bg-secondary px-3 py-3 text-xs font-semibold disabled:opacity-50"
+              >
+                Test connection
+              </button>
               <button
                 type="button"
                 onClick={() => setEditing(true)}
@@ -141,8 +207,8 @@ export function XweatherConnectionDialog({
           <div className="space-y-4">
             <ol className="space-y-2 rounded-2xl bg-secondary p-4 text-xs leading-relaxed">
               <li>
-                <strong>1.</strong> Choose <strong>Xweather Weather API — Pay As You Go</strong>.
-                LandDraft uses its <strong>Raster Maps</strong> products.
+                <strong>1.</strong> Confirm that your agreement permits the intended LandDraft use.
+                An active, product-specific license approval is required before connecting.
               </li>
               <li>
                 <strong>2.</strong> In the left menu, select <strong>API Keys</strong>. Copy the key
@@ -162,7 +228,7 @@ export function XweatherConnectionDialog({
                 rel="noreferrer noopener"
                 className="inline-flex items-center gap-2 rounded-xl bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground hover:bg-primary/90"
               >
-                Create free Weather API account <ExternalLink className="size-3.5" />
+                Terms and licensing <ExternalLink className="size-3.5" />
               </a>
               <a
                 href={XWEATHER_DASHBOARD_URL}
@@ -179,6 +245,7 @@ export function XweatherConnectionDialog({
               <Input
                 id="xweather-api-key"
                 type="password"
+                disabled={busy || !!connectionBlock}
                 value={apiKey}
                 onChange={(event) => setApiKey(event.target.value)}
                 autoComplete="new-password"
@@ -196,13 +263,14 @@ export function XweatherConnectionDialog({
               charges remain associated with your Xweather account. Some products consume multiple
               accesses per request.
             </p>
-
-            {error && (
-              <p className="rounded-xl bg-destructive/10 p-3 text-xs text-destructive">{error}</p>
-            )}
           </div>
         )}
 
+        {error && (
+          <p role="alert" className="rounded-xl bg-destructive/10 p-3 text-xs text-destructive">
+            {error}
+          </p>
+        )}
         <DialogFooter className="gap-2">
           {status.connected && editing && (
             <button
@@ -217,7 +285,7 @@ export function XweatherConnectionDialog({
           {editing && (
             <button
               type="button"
-              disabled={busy}
+              disabled={busy || !!connectionBlock}
               onClick={() => void connect()}
               className="flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-50"
             >
