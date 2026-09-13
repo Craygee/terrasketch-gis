@@ -34,6 +34,7 @@ import { weatherProduct } from "./productRegistry.ts";
 import { publicProviderPermitted } from "./providerRegistry.ts";
 import { parseSpcOutlook, spcUrl } from "./spc.ts";
 import { SPC_PRODUCTS } from "./spcCatalog.ts";
+import { measurementValue, nwsWindMetersPerSecond } from "./nwsMeasurement.ts";
 import { nearestWeatherRadarSite, type WeatherRadarSite } from "./radar";
 import { buildStormObjectsFromAlerts } from "./stormIntelligence";
 import { loadProbSevereStormObjects } from "./probSevere.server";
@@ -365,12 +366,6 @@ async function loadWmsRasterFrames(spec: WmsRasterSpec, signal: AbortSignal) {
   );
 }
 
-function measurementValue(input: unknown): number | undefined {
-  if (!input || typeof input !== "object") return undefined;
-  const value = Number((input as Record<string, unknown>)["value"]);
-  return Number.isFinite(value) ? value : undefined;
-}
-
 function boundedText(input: unknown, length = 4_000) {
   return String(input ?? "")
     .trim()
@@ -456,8 +451,8 @@ function normalizeNwsObservation(
         ? celsiusToKelvin(measurementValue(properties["dewpoint"])!)
         : undefined,
     relativeHumidityPct: measurementValue(properties["relativeHumidity"]),
-    windSpeedMS: measurementValue(properties["windSpeed"]),
-    windGustMS: measurementValue(properties["windGust"]),
+    windSpeedMS: nwsWindMetersPerSecond(properties["windSpeed"]),
+    windGustMS: nwsWindMetersPerSecond(properties["windGust"]),
     windDirectionDeg: measurementValue(properties["windDirection"]),
     pressurePa:
       measurementValue(properties["barometricPressure"]) ??

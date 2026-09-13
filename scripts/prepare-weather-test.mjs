@@ -33,7 +33,8 @@ config.vars = {
   WEATHER_PROVIDER_POLICY: JSON.stringify(policy),
   WEATHER_ENABLE_OPEN_METEO_EVALUATION: "false",
 };
-config.limits = { cpu_ms: 30000 };
+// Preserve the account's existing plan limits; never require a paid upgrade.
+delete config.limits;
 const publicRoot = resolve(".output/public");
 let testReferenceSeen = false;
 async function scan(path) {
