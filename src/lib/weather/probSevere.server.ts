@@ -1,4 +1,7 @@
 import { bearing, centroid, distance, point } from "@turf/turf";
+import { analyzeStormObject } from "./stormAnalysis.ts";
+import { StormContextStore } from "./analysisRetention.ts";
+const stormContext = new StormContextStore();
 import type { Feature, FeatureCollection, MultiPolygon, Point, Polygon } from "geojson";
 import { sourceMetadata } from "./normalize.ts";
 import { forecastFromValidatedMotion } from "./stormIntelligence.ts";
@@ -35,13 +38,21 @@ export interface ProbSevereInputFrame {
 }
 
 function numeric(properties: ProbSevereProperties, key: string) {
+  if (typeof properties[key] !== "number" && typeof properties[key] !== "string") return undefined;
+  if (
+    properties[key] === null ||
+    properties[key] === undefined ||
+    typeof properties[key] === "boolean" ||
+    String(properties[key]).trim() === ""
+  )
+    return undefined;
   const value = Number(properties[key]);
   return Number.isFinite(value) ? value : undefined;
 }
 
 function probability(properties: ProbSevereProperties, key: string) {
   const value = numeric(properties, key);
-  return value === undefined ? undefined : Math.max(0, Math.min(100, value));
+  return value === undefined || value < 0 || value > 100 ? undefined : value;
 }
 
 function frameTime(filename: string) {
@@ -69,6 +80,9 @@ async function cached<T>(key: string, ttlMs: number, loader: () => Promise<T>): 
   try {
     const value = await loader();
     cache.set(key, { value, expiresAt: Date.now() + ttlMs });
+    if (cache.size > 100)
+      for (const [cacheKey, entry] of cache)
+        if (entry.expiresAt < Date.now() || cache.size > 100) cache.delete(cacheKey);
     recordWeatherUsage({ providerId: PROVIDER_ID, product: key, success: true, cacheHit: false });
     return value;
   } catch (error) {
@@ -106,7 +120,7 @@ export function selectHistoryFrames(filenames: string[]) {
   const latestTime = latest ? frameTime(latest) : undefined;
   if (!latest || !latestTime) return [];
   const latestMs = new Date(latestTime).getTime();
-  const selected = [0, 5, 10, 15, 30].flatMap((minutes) => {
+  const selected = [0, 2, 4, 6, 8, 10, 15, 30, 60, 120].flatMap((minutes) => {
     const target = latestMs - minutes * 60_000;
     const closest = filenames.reduce<string | undefined>((best, candidate) => {
       const candidateTime = frameTime(candidate);
@@ -118,7 +132,9 @@ export function selectHistoryFrames(filenames: string[]) {
         ? candidate
         : best;
     }, undefined);
-    return closest ? [closest] : [];
+    return closest && Math.abs(Date.parse(frameTime(closest)!) - target) <= 5 * 60_000
+      ? [closest]
+      : [];
   });
   return Array.from(new Set(selected)).sort((left, right) =>
     (frameTime(left) ?? "").localeCompare(frameTime(right) ?? ""),
@@ -254,11 +270,14 @@ function motionFromHistory(
   latestSource: WeatherSourceMetadata,
 ): StormMotion | null {
   const latest = history.at(-1);
-  const previous = history.find(
-    (sample) =>
-      latest &&
-      new Date(latest.validTime).getTime() - new Date(sample.validTime).getTime() >= 4 * 60_000,
-  );
+  const previous = [...history]
+    .reverse()
+    .find(
+      (sample) =>
+        latest &&
+        Date.parse(latest.validTime) - Date.parse(sample.validTime) >= 4 * 60_000 &&
+        Date.parse(latest.validTime) - Date.parse(sample.validTime) <= 12 * 60_000,
+    );
   if (!latest || !previous) return null;
   const elapsedSeconds =
     (new Date(latest.validTime).getTime() - new Date(previous.validTime).getTime()) / 1_000;
@@ -305,7 +324,7 @@ function evidenceFor(properties: ProbSevereProperties, validTime: string) {
             id: `${label}-${index}`,
             label,
             value: `${value} ${unit}`,
-            kind: "observed" as const,
+            kind: "model" as const,
             validTime,
             providerId: PROVIDER_ID,
             sourceReference: INDEX_URL,
@@ -432,17 +451,27 @@ export async function loadProbSevereStormObjects(
   request: WeatherPointRequest,
   signal: AbortSignal,
 ): Promise<StormObject[]> {
-  const filenames = await recentFrameNames(signal);
-  const selectedNames = selectHistoryFrames(filenames);
-  if (!selectedNames.length) throw new Error("ProbSevere published no current frame");
-  const frames = await Promise.all(
-    selectedNames.map(async (filename) => ({
-      filename,
-      validTime: frameTime(filename)!,
-      data: await fetchFrame(filename, signal),
-    })),
-  );
-  return normalizeProbSevereFrames(frames, request);
+  try {
+    const filenames = await recentFrameNames(signal);
+    const selectedNames = selectHistoryFrames(filenames);
+    if (!selectedNames.length) throw new Error("ProbSevere published no current frame");
+    const results = await Promise.allSettled(
+      selectedNames.map(async (filename) => ({
+        filename,
+        validTime: frameTime(filename)!,
+        data: await fetchFrame(filename, signal),
+      })),
+    );
+    const frames = results.flatMap((result) =>
+      result.status === "fulfilled" ? [result.value] : [],
+    );
+    if (!frames.length) throw new Error("ProbSevere frames unavailable");
+    return stormContext.update(normalizeProbSevereFrames(frames, request));
+  } catch (error) {
+    const retained = stormContext.update([], Date.now(), true);
+    if (retained.length) return retained;
+    throw error;
+  }
 }
 
 /** Latest provider polygons and attributes, without LandDraft history or projections. */
@@ -457,6 +486,13 @@ export function normalizeProbSevereFrames(
   frames: ProbSevereInputFrame[],
   request: WeatherPointRequest,
 ): StormObject[] {
+  frames = [
+    ...new Map(
+      [...frames]
+        .sort((a, b) => a.validTime.localeCompare(b.validTime))
+        .map((frame) => [frame.validTime, frame]),
+    ).values(),
+  ];
   const latest = frames.at(-1);
   if (!latest) return [];
   const requestPoint = point([request.longitude, request.latitude]);
@@ -464,13 +500,33 @@ export function normalizeProbSevereFrames(
     .flatMap((feature) => {
       const providerId = String(feature.properties.ID ?? "").trim();
       if (!providerId) return [];
-      const history = frames.flatMap((frame) => {
+      let history = frames.flatMap((frame) => {
         const match = frame.data.features.find(
           (candidate) => String(candidate.properties.ID ?? "").trim() === providerId,
         );
         return match ? [sampleFrom(match, frame.validTime)] : [];
       });
+      // Impossible displacement or long tracking loss starts a new segment, not an intensity jump.
+      for (let index = history.length - 1; index > 0; index--) {
+        const elapsed =
+          (Date.parse(history[index]!.validTime) - Date.parse(history[index - 1]!.validTime)) /
+          1000;
+        if (
+          elapsed > 30 * 60 ||
+          elapsed <= 0 ||
+          (distance(history[index - 1]!.location, history[index]!.location, {
+            units: "kilometers",
+          }) *
+            1000) /
+            elapsed >
+            80
+        ) {
+          history = history.slice(index);
+          break;
+        }
+      }
       const storm = stormFromFeature(feature, latest.validTime, history, latest.filename);
+      if (storm) storm.analysis = analyzeStormObject(storm);
       return storm ? [storm] : [];
     })
     .sort((left, right) => {

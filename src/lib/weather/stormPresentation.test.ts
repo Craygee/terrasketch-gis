@@ -40,10 +40,9 @@ test("generic tracked storms are not labeled as detected hazards from probabilit
   );
 });
 
-test("uses a severe official-warning floor without inventing a probability", () => {
+test("official warning does not invent a physical intensity", () => {
   const score = stormSeverityScore(storm("Tornado Warning"));
-  assert.equal(score, 85);
-  assert.equal(stormSeverityBand(score), "extreme");
+  assert.equal(score, null);
 });
 
 test("severity bands progress from green-compatible lower risk to dark red extreme", () => {

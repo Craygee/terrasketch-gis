@@ -84,6 +84,26 @@ export function layerAvailability(
     !bundle?.spcOutlooks?.some((outlook) => outlook.layerId === id && spcCurrent(outlook, now))
   )
     return no("stale", "SPC outlook expired or needs refresh", true);
+  // Retain storm context through stale feeds; analysis and projections enforce their own freshness.
+  if (id === "weather.severe.intelligence" && bundle?.stormObjects.length) {
+    const latest = Math.max(
+      ...bundle.stormObjects.map((storm) => Date.parse(storm.observedAt)).filter(Number.isFinite),
+    );
+    const stale = !Number.isFinite(latest) || now - latest > 6 * 60000;
+    const healthy = bundle.providerHealth.some(
+      (provider) => provider.providerId === "noaa-probsevere-v3" && provider.status === "up",
+    );
+    return {
+      ready: true,
+      state: stale ? "stale" : "available",
+      canCheck: true,
+      label: stale
+        ? `STALE · last storm observation ${Number.isFinite(latest) ? Math.floor((now - latest) / 60000) + " min ago" : "time unavailable"}`
+        : healthy
+          ? "Available"
+          : "NOAA feed delayed · displaying available storm guidance",
+    };
+  }
   if (
     !bundle ||
     !Number.isFinite(Date.parse(bundle.generatedAt)) ||

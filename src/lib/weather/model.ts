@@ -1,4 +1,5 @@
 import { weatherLayerRegistry } from "./registry.ts";
+import { STORM_STYLE_MODES } from "./stormPresentation.ts";
 import type {
   WeatherLayerSetting,
   WeatherPreset,
@@ -85,6 +86,7 @@ export function normalizeWeatherWorkspace(
   return {
     ...defaults,
     ...stored,
+    stormStyle: STORM_STYLE_MODES.includes(stored.stormStyle!) ? stored.stormStyle! : "Intensity",
     version: 1,
     nativeLayerCatalogVersion: 1,
     layerSettings,

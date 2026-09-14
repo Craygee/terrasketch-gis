@@ -33,8 +33,10 @@ import { formatTemperature, formatWind } from "@/lib/weather/format";
 import {
   stormEventIcon,
   stormIconImageId,
-  stormSeverityColor,
+  intensityColor,
   stormSeverityScore,
+  stormMapStyle,
+  type StormStyleMode,
   type WeatherEventIcon,
 } from "@/lib/weather/stormPresentation";
 import { timeAdjustedStormForecast } from "@/lib/weather/stormIntelligence";
@@ -323,6 +325,7 @@ function photographyCollection(zones: WeatherViewingZone[]): FeatureCollection<P
 function stormCollection(
   storms: StormObject[],
   selectedStormId: string | null,
+  mode: StormStyleMode = "Intensity",
 ): FeatureCollection<Point> {
   return {
     type: "FeatureCollection",
@@ -333,11 +336,11 @@ function stormCollection(
         properties: {
           id: storm.id,
           alertId: storm.officialAlertIds[0] ?? "",
-          title: storm.title,
+          title: `${storm.title} · ${stormMapStyle(storm, mode).label}`,
           basis: storm.basis,
           selected: storm.id === selectedStormId,
           severity,
-          severityColor: stormSeverityColor(severity),
+          severityColor: stormMapStyle(storm, mode).color,
           icon: stormIconImageId(stormEventIcon(storm)),
           temporalState: storm.basis === "provider-guidance" ? "ANALYZED" : "OFFICIAL",
         },
@@ -349,6 +352,7 @@ function stormCollection(
 function stormAreaCollection(
   storms: StormObject[],
   selectedStormId: string | null = null,
+  mode: StormStyleMode = "Intensity",
 ): FeatureCollection<Polygon | MultiPolygon> {
   return {
     type: "FeatureCollection",
@@ -361,6 +365,7 @@ function stormAreaCollection(
                 id: storm.id,
                 title: storm.title,
                 selected: storm.id === selectedStormId,
+                analysisColor: stormMapStyle(storm, mode).color,
                 maximumProbability: Math.max(
                   storm.hazards.tornado.probabilityPct ?? 0,
                   storm.hazards.hail.probabilityPct ?? 0,
@@ -431,7 +436,7 @@ function stormForecastCollection(
           leadMinutes: forecast.leadMinutes,
           label: `+${forecast.leadMinutes}m`,
           severity,
-          severityColor: stormSeverityColor(severity),
+          severityColor: intensityColor(severity),
           icon: eventIcon,
           temporalState: "PREDICTED",
         },
@@ -703,17 +708,7 @@ function ensureVectorLayers(map: MlMap) {
       type: "fill",
       source: STORM_AREA_SOURCE,
       paint: {
-        "fill-color": [
-          "step",
-          ["get", "maximumProbability"],
-          "#facc15",
-          30,
-          "#f97316",
-          60,
-          "#dc2626",
-          80,
-          "#7f1d1d",
-        ],
+        "fill-color": ["get", "analysisColor"],
         "fill-opacity": 0.16,
       },
     });
@@ -1301,12 +1296,17 @@ export function WeatherMapOverlay({
         ),
       );
       (map.getSource(STORM_SOURCE) as GeoJSONSource | undefined)?.setData(
-        stormCollection(stormObjectsVisible ? (bundle?.stormObjects ?? []) : [], selectedStormId),
+        stormCollection(
+          stormObjectsVisible ? (bundle?.stormObjects ?? []) : [],
+          selectedStormId,
+          workspace.stormStyle,
+        ),
       );
       (map.getSource(STORM_AREA_SOURCE) as GeoJSONSource | undefined)?.setData(
         stormAreaCollection(
           stormObjectsVisible ? (bundle?.stormObjects ?? []) : [],
           selectedStormId,
+          workspace.stormStyle,
         ),
       );
       const selectedStorm =
@@ -1435,6 +1435,7 @@ export function WeatherMapOverlay({
     workspace.layerOrder,
     workspace.layerSettings,
     workspace.unitSystem,
+    workspace.stormStyle,
     workspace.timeline,
   ]);
 

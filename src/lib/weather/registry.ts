@@ -28,7 +28,7 @@ export const WEATHER_LAYER_GROUPS = [
 export const STORM_CHASER_RECOMMENDED_LAYERS = [
   {
     id: "weather.severe.intelligence",
-    label: "NOAA ProbSevere",
+    label: "LandDraft Predictive Model",
     reason: "Core tracked-storm analysis, hazard guidance, trends, and projected motion.",
     core: true,
   },
@@ -320,7 +320,7 @@ export const weatherLayerRegistry: WeatherLayerDefinition[] = [
     name: "LandDraft Predictive Model",
     group: "Severe weather",
     description:
-      "LandDraft predictive storm tracking and projected motion corridors, powered by NOAA/CIMSS ProbSevere observations and guidance. NOAA hazard probabilities retain their source calibration. Projections are estimates, not official warnings.",
+      "LandDraft storm tracking, experimental physical intensity, trends, confidence and projected motion. NOAA/CIMSS ProbSevere probabilities remain separate. Projections and the unvalidated intensity index are LandDraft analysis, not official warnings.",
     capability: "weather.severe_intelligence",
     dataType: "geojson",
     providerProducts: ["probsevere-v3"],
@@ -334,7 +334,7 @@ export const weatherLayerRegistry: WeatherLayerDefinition[] = [
     audience: "basic",
     attribution: "NOAA / CIMSS ProbSevere v3",
     legend: [
-      { color: "#7f1d1d", label: "Tracked storm object" },
+      { color: "#6b7280", label: "Storm objects use selected coloring metric" },
       { color: "#f97316", label: "Likely motion corridor" },
       { color: "#fdba74", label: "Possible motion corridor" },
     ],

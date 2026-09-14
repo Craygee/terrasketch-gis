@@ -1,4 +1,6 @@
 import { NativeRadarControls } from "./NativeRadarControls";
+import { StormAnalysisCard } from "./StormAnalysisCard";
+import { STORM_STYLE_MODES, stormStyleLegend } from "@/lib/weather/stormPresentation";
 import { nearestWeatherRadarSite } from "@/lib/weather/radar";
 import { nativeProduct } from "@/lib/weather/nativeRadar";
 import { hasWeatherCapability } from "@/lib/weather/entitlements";
@@ -1283,6 +1285,7 @@ export function WeatherWorkspace() {
                     <SourcePanel bundle={bundle} />
                   ) : workspaceView === "storm-chaser" ? (
                     <StormChaserPanel
+                      alerts={bundle?.alerts ?? []}
                       storms={bundle?.stormObjects ?? []}
                       stormReports={bundle?.stormReports ?? []}
                       selectedStormReport={selectedStormReport}
@@ -1348,6 +1351,7 @@ export function WeatherWorkspace() {
           <aside className="hidden w-80 shrink-0 overflow-y-auto border-l border-border bg-card xl:block">
             {workspaceView === "storm-chaser" ? (
               <StormChaserPanel
+                alerts={bundle?.alerts ?? []}
                 storms={bundle?.stormObjects ?? []}
                 stormReports={bundle?.stormReports ?? []}
                 selectedStormReport={selectedStormReport}
@@ -1697,6 +1701,28 @@ function WeatherLayerPanel({
           </p>
         </section>
       )}
+      <label className="block rounded-xl border p-3 text-xs">
+        Storm object coloring
+        <select
+          className="mt-2 w-full rounded border p-2"
+          value={workspace.stormStyle ?? "Intensity"}
+          onChange={(event) =>
+            onWorkspace({
+              ...workspace,
+              stormStyle: event.target.value as (typeof STORM_STYLE_MODES)[number],
+            })
+          }
+        >
+          {STORM_STYLE_MODES.map((mode) => (
+            <option key={mode}>{mode}</option>
+          ))}
+        </select>
+        <span className="mt-2 block">
+          Intensity: 0–19 Weak · 20–39 Moderate · 40–59 Strong · 60–79 Severe · 80–100 Extreme.
+          Gray: insufficient current data. NOAA probabilities are separate. Storm labels show
+          values; official warnings retain priority.
+        </span>
+      </label>
       {!compact && (
         <WeatherLegends workspace={legendWorkspace} workspaceView={workspaceView} embedded />
       )}
@@ -2323,6 +2349,7 @@ function StormHistorySignal({
 }
 
 function StormChaserPanel({
+  alerts,
   storms,
   stormReports,
   selectedStormReport,
@@ -2350,6 +2377,7 @@ function StormChaserPanel({
   onNavigate,
   onClearNavigationTarget,
 }: {
+  alerts: WeatherAlert[];
   storms: StormObject[];
   stormReports: WeatherStormReport[];
   selectedStormReport: WeatherStormReport | null;
@@ -2767,6 +2795,13 @@ function StormChaserPanel({
                 : "border-rose-200 bg-rose-50 text-rose-950",
             )}
           >
+            <StormAnalysisCard
+              storm={activeStorm}
+              officialWarning={alerts.some(
+                (alert) =>
+                  activeStorm.officialAlertIds.includes(alert.id) && /warning/i.test(alert.event),
+              )}
+            />
             <span className="inline-flex rounded-full bg-white/80 px-2 py-1 text-[8px] font-bold">
               {activeStorm.statusLabel}
             </span>
@@ -3598,7 +3633,8 @@ function WeatherLegends({
               <span className="min-w-0">
                 <strong className="block text-[8px]">ProbSevere tracked storm</strong>
                 <span className="block text-[7px] leading-tight text-muted-foreground">
-                  Center symbol shows the leading hazard; circle color shows analyzed severity.
+                  Symbol identifies the event type; colors show{" "}
+                  {workspace.stormStyle ?? "Intensity"}. Probability is not storm intensity.
                 </span>
               </span>
             </div>
@@ -3610,25 +3646,31 @@ function WeatherLegends({
               <WeatherEventLegendItem type="lightning" label="Lightning" />
               <WeatherEventLegendItem type="storm" label="Tracked thunderstorm" />
             </div>
-            <div className="mt-1 flex items-center gap-1" aria-label="Severity color scale">
-              {[
-                ["#15803d", "Lower"],
-                ["#ca8a04", "Elevated"],
-                ["#ea580c", "Significant"],
-                ["#dc2626", "Severe"],
-                ["#7f1d1d", "Extreme"],
-              ].map(([color, label]) => (
-                <span key={label} className="flex min-w-0 flex-1 flex-col items-center gap-0.5">
-                  <span
-                    className="size-3 rounded-full border border-white shadow-sm"
-                    style={{ backgroundColor: color }}
-                  />
-                  <span className="max-w-full truncate text-[6px] text-muted-foreground">
-                    {label}
+            <p className="mt-2">{stormStyleLegend(workspace.stormStyle)}</p>
+            {(workspace.stormStyle ?? "Intensity") === "Intensity" && (
+              <div
+                className="mt-1 flex items-center gap-1"
+                aria-label="Experimental intensity color scale"
+              >
+                {[
+                  ["#15803d", "Weak"],
+                  ["#ca8a04", "Moderate"],
+                  ["#ea580c", "Strong"],
+                  ["#dc2626", "Severe"],
+                  ["#7f1d1d", "Extreme"],
+                ].map(([color, label]) => (
+                  <span key={label} className="flex min-w-0 flex-1 flex-col items-center gap-0.5">
+                    <span
+                      className="size-3 rounded-full border border-white shadow-sm"
+                      style={{ backgroundColor: color }}
+                    />
+                    <span className="max-w-full truncate text-[6px] text-muted-foreground">
+                      {label}
+                    </span>
                   </span>
-                </span>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
             <p className="mt-1 text-[7px] text-muted-foreground">
               Future symbols use the same event icon with +minute labels and projected-state
               styling.

@@ -1,4 +1,5 @@
 import { wmsTimes, selectWmsTimes, wmsTimeParameter } from "./wms.ts";
+import { linkStormWarnings } from "./stormWarnings.ts";
 import type { Feature, MultiPolygon, Point, Polygon } from "geojson";
 import {
   cardinalDirectionDegrees,
@@ -1722,7 +1723,7 @@ export async function loadWeatherBundle(request: WeatherPointRequest): Promise<W
     alerts,
     ...(probSevereSource ? { probSevereSource } : {}),
     stormObjects: [
-      ...probSevereObjects,
+      ...linkStormWarnings(probSevereObjects, alerts),
       ...buildStormObjectsFromAlerts(alerts, [request.longitude, request.latitude]),
     ],
     radarFrames,

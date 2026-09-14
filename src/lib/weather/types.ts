@@ -176,6 +176,7 @@ export interface StormHistorySample {
  * official alert areas without claiming that a radar-observed storm was found.
  */
 export interface StormObject {
+  analysis?: import("./analysisTypes").StormAnalysis;
   id: string;
   title: string;
   classification: string;
@@ -385,6 +386,7 @@ export interface WeatherPreset {
 }
 
 export interface WeatherWorkspaceState {
+  stormStyle?: import("./stormPresentation").StormStyleMode;
   nativeLayerCatalogVersion?: 1;
   radarSiteId?: string | undefined;
   radarTilt?: number | undefined;

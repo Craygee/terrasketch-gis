@@ -215,6 +215,11 @@ export async function buildPhotographyAssessment(
           "Opportunity score unavailable: terrain, road access, escape routes and lightning screening are required.",
         ],
         cautions: [
+          ...(trackedStorm?.analysis
+            ? [
+                `LandDraft intensity ${trackedStorm.analysis.intensity.value ?? "unavailable"}; trend ${trackedStorm.analysis.trend.state}; confidence ${trackedStorm.analysis.confidence}; quality ${trackedStorm.analysis.quality}. These metrics do not establish safe or desirable viewing.`,
+              ]
+            : []),
           ...cautionsFor(candidateAlerts, riskLevel),
           "Terrain, road access, escape routes and lightning are not verified.",
           ...(lookupFailed
