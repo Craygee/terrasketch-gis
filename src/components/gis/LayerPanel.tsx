@@ -1,5 +1,6 @@
 import { useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { bbox as turfBbox } from "@turf/turf";
+import { ParcelCacheControls } from "./ParcelCacheControls";
 import type { Feature } from "geojson";
 import {
   Eye,
@@ -3064,6 +3065,7 @@ function RemoteLayerSettings({
       {source.lastRefreshedAt && (
         <p>Updated {new Date(source.lastRefreshedAt).toLocaleTimeString()}</p>
       )}
+      {source.catalogId === "tx-parcels" && <ParcelCacheControls />}
     </div>
   );
 }

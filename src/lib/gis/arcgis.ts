@@ -1,4 +1,5 @@
 import type { FeatureCollection } from "geojson";
+import { downloadParcels, SOURCE_URL } from "../../../supabase/functions/parcel-cache/model.ts";
 
 /**
  * Remote source adapter. Converts ArcGIS FeatureServer / MapServer layer URLs
@@ -21,6 +22,12 @@ export function normalizeArcgisLayerUrl(raw: string): string {
     .trim()
     .replace(/\?.*$/, "")
     .replace(/\/query$/i, "");
+  if (
+    /^https:\/\/services1\.arcgis\.com\/1mtXwieMId59thmg\/ArcGIS\/rest\/services\/2019_Texas_Parcels_StratMap\/FeatureServer(?:\/0)?\/?$/i.test(
+      url,
+    )
+  )
+    return SOURCE_URL;
   if (ARCGIS_LAYER_RE.test(url)) return url;
   if (ARCGIS_SERVICE_RE.test(url)) return `${url.replace(/\/$/, "")}/0`;
   return url;
@@ -203,6 +210,23 @@ export async function fetchRemoteGeoJSONPaged(
   url: string,
   opts: PagedRemoteQueryOptions = {},
 ): Promise<RemoteLoadProgress> {
+  if (normalizeArcgisLayerUrl(url).toLowerCase() === SOURCE_URL.toLowerCase()) {
+    if (!opts.bbox)
+      throw new Error("Texas parcels require a bounded map area. Zoom in and try again.");
+    const data = (await downloadParcels(opts.bbox, fetch, {
+      where: opts.where,
+      signal: opts.signal,
+    })) as FeatureCollection;
+    const result = {
+      data,
+      loaded: data.features.length,
+      total: data.features.length,
+      complete: true,
+      truncated: false,
+    };
+    opts.onProgress?.(result);
+    return result;
+  }
   if (classifyUrl(url) !== "arcgis") {
     const data = await fetchRemoteGeoJSON(url, opts);
     const result = {

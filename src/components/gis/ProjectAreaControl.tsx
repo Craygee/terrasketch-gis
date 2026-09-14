@@ -18,7 +18,9 @@ export function ProjectAreaControl({ align = "left" }: { align?: "left" | "right
   const currentView = (): MapViewState | null => {
     if (!map) return null;
     const center = map.getCenter();
+    const bounds = map.getBounds();
     return {
+      bounds: [bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()],
       center: [center.lng, center.lat],
       zoom: map.getZoom(),
       bearing: map.getBearing(),

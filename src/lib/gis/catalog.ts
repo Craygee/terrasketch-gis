@@ -43,13 +43,14 @@ export const catalog: CatalogEntry[] = [
     ...live,
     description:
       "County appraisal parcel boundaries with owner, situs, legal area, land/improvement/market value and tax-year fields where supplied.",
-    url: "https://services1.arcgis.com/1mtXwieMId59thmg/ArcGIS/rest/services/2019_Texas_Parcels_StratMap/FeatureServer/0",
+    url: "https://services.arcgis.com/KTcxiTD9dsQw4r7Z/arcgis/rest/services/2025_Land_Parcels/FeatureServer/328",
     sourcePage: "https://gio.texas.gov/stratmap/land-parcels.html",
     keywords: ["parcel", "property", "tax", "owner", "appraisal", "cad"],
     requiresViewport: true,
     minZoom: 12,
     countyField: "county",
-    license: "TxGIO / contributing appraisal districts",
+    license:
+      "TxDOT-hosted 2025 TxGIO data / contributing appraisal districts / BIS Consultants. Not survey grade; county acquisition dates vary.",
   }),
   tx({
     id: "txdot-roadways",
