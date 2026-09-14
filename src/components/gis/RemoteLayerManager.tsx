@@ -2,8 +2,6 @@ import { useEffect, useRef } from "react";
 import { fetchRemoteGeoJSONPaged } from "@/lib/gis/arcgis";
 import { useMapRef } from "@/lib/gis/mapRef";
 import { useWorkbench } from "@/lib/gis/store";
-import { cloudDataRequest } from "@/lib/cloud";
-import type { FeatureCollection } from "geojson";
 
 type Bbox = [number, number, number, number];
 
@@ -49,66 +47,6 @@ export function RemoteLayerManager() {
   const coverage = useRef(new Map<string, Coverage>());
   layersRef.current = wb.displayLayers;
   updateRef.current = wb.updateDisplayLayer;
-  const cachedSignature = wb.displayLayers
-    .filter((l) => l.source.kind === "derived" && l.source.query === "parcel-cache:v1")
-    .map((l) => l.id)
-    .join(",");
-  useEffect(() => {
-    if (!cachedSignature) return;
-    const controller = new AbortController();
-    let running = false;
-    const sync = async () => {
-      if (running) return;
-      running = true;
-      try {
-        const base = `/rest/v1/project_parcel_cache?project_id=eq.${encodeURIComponent(wb.projectId)}`;
-        const [status] = await cloudDataRequest<Array<{ retrieved_at: string | null }>>(
-          `${base}&select=retrieved_at`,
-          { signal: controller.signal },
-        );
-        const targets = layersRef.current.filter(
-          (l) =>
-            l.source.kind === "derived" &&
-            l.source.query === "parcel-cache:v1" &&
-            l.source.cachedAt !== status?.retrieved_at,
-        );
-        if (!status?.retrieved_at || !targets.length) return;
-        const [snapshot] = await cloudDataRequest<
-          Array<{
-            data: FeatureCollection;
-            retrieved_at: string;
-            provenance: Record<string, unknown>;
-          }>
-        >(`${base}&select=data,retrieved_at,provenance`, { signal: controller.signal });
-        if (
-          controller.signal.aborted ||
-          !snapshot?.data ||
-          snapshot.data.type !== "FeatureCollection"
-        )
-          return;
-        for (const layer of targets)
-          if (layer.source.kind === "derived")
-            updateRef.current(layer.id, {
-              data: snapshot.data,
-              source: {
-                ...layer.source,
-                cachedAt: snapshot.retrieved_at,
-                cacheProvenance: snapshot.provenance,
-              },
-            });
-      } catch {
-        /* Keep the currently displayed saved copy when offline or the cache is unavailable. */
-      } finally {
-        running = false;
-      }
-    };
-    void sync();
-    const interval = window.setInterval(() => void sync(), 60000);
-    return () => {
-      controller.abort();
-      window.clearInterval(interval);
-    };
-  }, [cachedSignature, wb.projectId]);
   const remoteSignature = wb.displayLayers
     .filter((layer) => layer.source.kind === "remote")
     .map((layer) =>
