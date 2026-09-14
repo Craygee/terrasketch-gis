@@ -3515,7 +3515,8 @@ function WeatherStatusPill({
   if (error)
     return (
       <div className="pointer-events-auto flex w-fit items-center gap-2 rounded-full bg-rose-50 px-3 py-2 text-[10px] font-semibold text-rose-900 shadow-float">
-        <AlertTriangle className="size-3.5" /> Weather connection unavailable
+        <AlertTriangle className="size-3.5 shrink-0" />
+        <span>Weather connection unavailable · {error}</span>
       </div>
     );
   if (!bundle) return null;
