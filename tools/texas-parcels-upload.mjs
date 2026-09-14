@@ -44,7 +44,7 @@ for(let i=0;i<files.length;i+=3){
  await Promise.all(files.slice(i,i+3).map(async part=>{
    if(!/^(part-\d{4}\.fgb|unmapped-\d{4}\.parquet)$/.test(part.file))throw new Error('Invalid part path');
    if(part.bytes>300000000)throw new Error('Part exceeds upload limit; rebuild with smaller batches');
-   if(part.sha256 && receipts[part.file]?.sha256===part.sha256)return;
+   if(part.sha256 ? receipts[part.file]?.sha256===part.sha256 : receipts[part.file]?.uploadedAt)return;
    await put(join(folder,part.file),`texas/versions/${version}/${part.file}`);
    receipts[part.file]={uploadedAt:new Date().toISOString(),sha256:part.sha256};
  }));

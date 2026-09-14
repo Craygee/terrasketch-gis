@@ -18,7 +18,7 @@ export default {
     headers.set('Content-Type',path.endsWith('.json')?'application/json':path.endsWith('.fgb')?'application/flatgeobuf':'application/octet-stream');
     headers.set('Cache-Control',path.endsWith('/current.json')?'public, max-age=60':'public, max-age=31536000, immutable');
     let status=200;
-    if(object.range){
+    if(range && object.range){
       const {offset=0,length}=object.range;
       headers.set('Content-Range',`bytes ${offset}-${offset+length-1}/${object.size}`);
       headers.set('Content-Length',String(length));status=206;
