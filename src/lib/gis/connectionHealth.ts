@@ -1,6 +1,7 @@
 import { basemapProbeUrl, basemaps, saveBasemapUrlOverride, setBasemapFallback } from "./basemaps";
 import { catalog, type CatalogEntry } from "./catalog";
 import { normalizeArcgisLayerUrl } from "./arcgis";
+import { getParcelManifest, isTexasParcelSource, TEXAS_PARCEL_URL } from "./texasParcels";
 import type { ConnectionRecoveryHint, GisLayer } from "./types";
 
 export type ConnectionKind = "basemap" | "public-data" | "project-layer";
@@ -193,6 +194,10 @@ export async function probeConnectionUrl(
 ): Promise<void> {
   const timeout = withTimeout(timeoutMs);
   try {
+    if (isTexasParcelSource(url)) {
+      await getParcelManifest(timeout.signal);
+      return;
+    }
     const arcgisDataLayer = isQueryableArcgisLayer(url);
     const target = arcgisDataLayer
       ? `${normalizeArcgisLayerUrl(url)}/query?where=1%3D1&returnCountOnly=true&f=json`
@@ -447,9 +452,15 @@ export async function findConnectionReplacement(
   clueNotes = "",
 ): Promise<ConnectionReplacement> {
   if (result.id === "catalog:tx-parcels" || /2019_Texas_Parcels_StratMap/i.test(result.url)) {
-    throw new Error(
-      "Texas parcel replacement requires a verified operational source and license review. Use the official TxGIO download page for available county editions.",
-    );
+    await getParcelManifest();
+    return {
+      url: TEXAS_PARCEL_URL,
+      title: "Texas Land Parcels — Statewide",
+      notes:
+        "Verified public TxGIO CC0 archive hosted by LandDraft; 253 counties in the 2025 release.",
+      source: "publisher page",
+      safeToAutoApply: true,
+    };
   }
   if (result.kind === "basemap") {
     const candidates = (trustedBasemapCandidates[result.basemapId ?? ""] ?? []).map(

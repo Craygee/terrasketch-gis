@@ -1,0 +1,56 @@
+name: Texas public parcel refresh
+on:
+  schedule:
+    - cron: '17 7 * * 1'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: texas-parcel-publisher
+  cancel-in-progress: false
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check public source and license
+        run: node tools/texas-parcels-sync.mjs
+      - name: Verify publisher credential and storage
+        env:
+          PARCEL_PUBLISH_TOKEN: ${{ secrets.PARCEL_PUBLISH_TOKEN }}
+        run: node tools/texas-parcels-publisher-check.mjs
+      - name: Compare hosted edition
+        id: edition
+        run: node tools/texas-parcels-refresh-needed.mjs
+      - name: Prepare disk space
+        if: steps.edition.outputs.needed == 'true'
+        run: sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc
+      - name: Install geospatial dependencies
+        if: steps.edition.outputs.needed == 'true'
+        run: pip install pyogrio==0.13.0 shapely==2.1.2 pyarrow==25.0.1 pyproj==3.8.0
+      - name: Download and verify complete archive
+        if: steps.edition.outputs.needed == 'true'
+        run: node tools/texas-parcels-sync.mjs --download
+      - name: Inspect and index
+        if: steps.edition.outputs.needed == 'true'
+        run: |
+          python tools/texas-parcels-inspect.py
+          python tools/texas-parcels-index.py
+      - name: Publish verified version
+        if: steps.edition.outputs.needed == 'true'
+        env:
+          PARCEL_PUBLISH_TOKEN: ${{ secrets.PARCEL_PUBLISH_TOKEN }}
+        run: node tools/texas-parcels-upload.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: parcel-source-check
+          path: .data/texas-parcels/latest-check.json
+          retention-days: 30

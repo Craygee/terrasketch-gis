@@ -1,0 +1,8 @@
+{
+  "name": "landdraft-public-parcels",
+  "main": "worker.mjs",
+  "account_id": "af489b2ad3227fd7aaafd91556d7893f",
+  "compatibility_date": "2026-09-14",
+  "workers_dev": true,
+  "r2_buckets": [{"binding":"PARCELS","bucket_name":"landdraft-public-parcels"}]
+}

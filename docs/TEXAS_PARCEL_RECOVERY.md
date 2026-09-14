@@ -1,101 +1,50 @@
-# Texas parcel recovery and scheduled storage investigation
+# Texas parcel recovery — public statewide archive
 
-Checked September 14, 2026. No production configuration or project data changed.
+The previous 2019 ArcGIS item was retired/inaccessible. TxGIO's current MapServer returned metadata but rejected real feature queries. Do not equate successful metadata with a working parcel layer.
 
-## Confirmed failure
+## Registered source and license
 
-Catalog `tx-parcels` references the retired 2019 StratMap ArcGIS service under
-`services1.arcgis.com/1mtXwieMId59thmg`. Its layer metadata returns error 499:
-"Item does not exist or is inaccessible."
+- Publisher: Texas Geographic Information Office (TxGIO), with county appraisal districts/BIS compilation.
+- Official program: https://gio.texas.gov/stratmap/land-parcels.html
+- Collection metadata: https://api.tnris.org/api/v1/collections?search=land%20parcels
+- 2025 collection: `0fa04328-872e-481c-b453-126a74777593`.
+- Explicit collection license: **CC0-1.0**, https://spdx.org/licenses/CC0-1.0.html; reviewed September 14, 2026.
+- Resources: https://api.tnris.org/api/v1/resources?collection_id=0fa04328-872e-481c-b453-126a74777593
+- Public archive: https://s3.amazonaws.com/data.tnris.org/0fa04328-872e-481c-b453-126a74777593/resources/stratmap25-landparcels_48_lp.zip
 
-The primary current TxGIO service is
-`https://feature.geographic.texas.gov/arcgis/rest/services/Parcels/stratmap_land_parcels_48_most_recent/MapServer/0`.
-Metadata is available, but bounded and single-object query requests returned error
-400, "Requested operation is not supported by this service." Do not use metadata
-success as proof this source can supply the existing vector layer.
+This direct collection license replaces the earlier unresolved TxDOT-mirror licensing assessment. The mirror is not used for the statewide archive. The source catalog marks the compilation non-authoritative; preserve the AS-IS/not-a-survey context.
 
-TxDOT item `bfee1546d60b4a998ad37a8765941898` publishes 2025 Land Parcels at
-`https://services.arcgis.com/KTcxiTD9dsQw4r7Z/arcgis/rest/services/2025_Land_Parcels/FeatureServer/328`.
-Layer ID is 328, not 0. Single-object GeoJSON works. Small Austin-area spatial
-queries timed out after 25 seconds. This is not yet a verified usable replacement.
+## Verified coverage and integrity
 
-## Publication and terms
+- Actual archive: 2,812,975,183 bytes (publisher resource metadata reports a different size).
+- SHA256: `22786b9f1ed23fd824d23ed50d9a462b36cbcc260fdf59cfacdfead789047803`.
+- 14,347,648 source records = 14,336,277 mapped + 11,371 retained without usable geometry.
+- 253 county resources. Donley (48129) absent. This is all available statewide-release data, not a claim of all 254 counties.
+- Source edition June 2025; county acquisition/tax dates vary. Weekly checks do not make old county records current.
+- Original fields retained; geometry transformed EPSG:3857 to EPSG:4326 using always-XY. Source geographic outliers are not silently deleted.
 
-Official program: https://gio.texas.gov/stratmap/land-parcels.html
+## Storage and access
 
-TxGIO offers county/state shapefile and geodatabase downloads through DataHub.
-Acquisition is generally annual, varying by county. A weekly check does not mean
-the publisher creates weekly parcel records. Preserve county, tax year, acquisition
-date, attribution, original source and retrieval time. Parcel boundaries are not surveys.
+Dedicated Cloudflare R2 bucket/Worker `landdraft-public-parcels` contains only public parcel files, with no private-project bindings. Versioned spatial FlatGeobuf parts support HTTP byte ranges. Browser queries use viewport bounds and a feature budget. Missing-geometry records remain separate Parquet files. Source URLs, edition, retrieval time and license accompany displayed/exported features.
 
-The TxDOT item publishes a spatial accuracy/completeness/currency disclaimer and
-credits county appraisal districts/BIS Consultants. The older TxGIO item
-`ac01f3669dde4e9ea67cee11f2771038` has no explicit licenseInfo and notes some county
-data may be available only to government agencies. Before bulk caching or
-redistribution, record the applicable collection/county download terms; public
-access alone is not a blanket redistribution grant. Do not mirror restricted counties.
+The old project-area Supabase cache migration/function is an inactive prototype, superseded for this statewide request; do not apply it to enable statewide storage.
 
-## Storage gap and proposed implementation
+## Weekly refresh and rollback
 
-`RemoteLayerManager` refreshes visible remote layers in the browser, while
-`project.ts` and `store.tsx` strip viewport data from saved projects. An actual saved
-copy must not use that transient viewport path. No parcel ingestion scheduler exists.
+GitHub Actions `.github/workflows/texas-parcels.yml` on `Craygee/terrasketch-gis` checks Mondays at 07:17 UTC and supports manual dispatch. It checks the newest public collection's explicit license, inventories all resources, compares source ETag, downloads only when changed, verifies archive length/hash, validates index counts, uploads immutable parts, then publishes `texas/current.json` last. Failed ingestion keeps the previous manifest.
 
-Add an opt-in saved dataset with an explicit project-area/county/state scope,
-provider terms record, immutable completed snapshots, atomic active-version pointer,
-job status, last check, source edition, next check, manual refresh and disable controls.
-Use server-side weekly checks; retain the last successful snapshot if refresh fails.
-Never call a truncated download complete. Large county/state acquisitions need bounded
-background ingestion and tiled display, not statewide GeoJSON in the browser.
-Keep private project membership checks on subscriptions and stored assets. Public
-source caches can be shared only where the source terms permit it.
+A dedicated `PARCEL_PUBLISH_TOKEN` secret is in GitHub Actions and the parcel Worker's `PUBLISH_TOKEN`; never copy it into client code, reports or logs. The publisher endpoint only permits the public parcel namespace. Rotation is supported by `tools/texas-parcels-provision.mjs` using in-memory generation and CLI stdin. Keep previous versions for rollback; storage usage grows with new editions and requires deliberate retention review.
 
-Before releasing: verify real viewport queries on a replacement, migrate only known
-retired URLs (preserve custom sources), test download completeness, interrupted refresh,
-tenant access, scheduler retries, source age, and disabled subscriptions. Verify the
-actual live deployment separately from the isolated test Worker.
+Rollback: restore `texas/current.json` from a previously verified immutable version manifest, preserving files referenced by active clients. Disable the GitHub workflow to pause scheduled updates. Do not delete old versions during an incident.
 
-## Project-area implementation (September 14)
+## Checks and remaining QA
 
-The user selected project area. `ProjectAreaControl` now saves fixed WGS84 bounds
-alongside the camera. Old areas require saving again; screen dimensions never silently
-determine the download footprint. The first release caps each area at 5,000 parcels,
-0.05 square degrees, and 12 MB of source JSON. Larger areas fail explicitly.
+Automated checks cover retired-URL migration, index byte-range reads, viewport limits, license rejection, identifiers/provenance, public read/write isolation and missing-dataset responses. Run TypeScript, scoped ESLint, parcel tests and production build. Verify real urban/rural viewport queries, source controls and an authenticated saved-layer workflow before declaring live browser QA complete. Missing/incomplete reads must remain visible errors or truncated results, never falsely complete statewide downloads.
 
-The TxDOT source works using **spatial object-ID lookup followed by ID batches**.
-Live verification returned 26 parcels for the previously failing Austin viewport and
-4 parcels for a San Antonio viewport. Ordinary spatial feature pagination remains
-unreliable. The ID-first adapter is implemented for this exact source, but is NOT an
-approved automatic replacement. The retired source explains the blockage, and the
-catalog points to official downloads. Unrelated/custom URLs remain unchanged.
+## September 14 deployment verification
 
-**Release blocker found during final licensing review:** TxDOT's GIS Metadata
-Standards prescribe terms restricting commercial use and third-party distribution:
-https://www.txdot.gov/content/dam/docs/division/tpp/txdot-gis-metadata-standard-nov24.pdf
-The parcel item instead contains only an accuracy disclaimer. This conflict requires
-dataset-specific confirmation or a permitted direct TxGIO/county source. No live
-replacement, cache policy activation, or production release has been performed.
+Public storage publication: 219 indexed FlatGeobuf parts plus 91 missing-geometry Parquet files. All 219 mapped files passed hosted HEAD/size checks. Full hosted queries matched every source OBJECTID in a direct geometry scan (the publisher geodatabase's own spatial index incorrectly returned empty results): Austin 1,415 / 9.0 s, San Antonio 340 / 4.5 s, El Paso 746 / 2.1 s, rural western Texas 26 / 0.8 s. These are cold-path development measurements, not an SLA.
 
-Layer settings now offer fixed-project-area download and weekly-check controls.
-They remain unavailable until the server policy and scheduler are enabled. The new
-additive migration creates RLS-protected project subscriptions, job leases and two
-snapshot generations; no production database change has been applied. Only owners
-can configure jobs, authorized project readers can load copies, and only the worker
-can publish snapshots. Saved copies load as durable derived layers and check for
-new server snapshots while the map is open. Server jobs do the weekly acquisition
-even when the app is closed. Pause preserves existing data. The initial subscription
-uses fixed bounds; changing its area requires an operator-managed removal/recreation.
+The weekly workflow was manually executed successfully: https://github.com/Craygee/terrasketch-gis/actions/runs/34865511301 . It verified catalog/license, server-side publisher credentials, multipart write/readback and unchanged-edition detection. The future full changed-edition Linux job has not yet encountered a new publisher release; the first complete index was produced locally and uploaded with the same version/manifest scheme.
 
-Deployment prerequisites: validate collection-specific storage terms, apply and test
-`202609140010_parcel_project_cache.sql` in staging, deploy `parcel-cache`, provision a
-dedicated random scheduler secret in Edge Function secrets and Vault, install
-`tools/parcel-cache-schedule.sql`, then enable `parcel_cache_policy` with a recorded
-terms URL/review time. The policy remains false by default. Do not upload secrets to
-source control or pretend a browser timer provides offline weekly refreshes.
-
-Validation: four downloader tests and an isolated PostgreSQL integration test passed
-(migration, owner-only configuration, cross-user denial, worker-only writes, leases,
-failure preservation, and pause). Type checking, targeted lint and staging build pass.
-Actual hosted scheduler, authenticated mobile workflow and live cache activation are
-not yet verified. Rollback: disable policy and unschedule dispatcher; preserve cache
-tables and last successful data. The live-query repair does not depend on the migration.
+Live application release commit: `be2edcd2` (Publish LandDraft 0.9.160 public Texas parcels), pushed normally to the deployment repository main branch after validation. Browser was signed out, so authenticated desktop/iPad/mobile UI verification remains outstanding. No database migrations were applied for this statewide implementation.

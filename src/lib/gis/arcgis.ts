@@ -1,5 +1,5 @@
 import type { FeatureCollection } from "geojson";
-import { downloadParcels, SOURCE_URL } from "../../../supabase/functions/parcel-cache/model.ts";
+import { fetchTexasParcels, isTexasParcelSource, TEXAS_PARCEL_URL } from "./texasParcels.ts";
 
 /**
  * Remote source adapter. Converts ArcGIS FeatureServer / MapServer layer URLs
@@ -27,9 +27,7 @@ export function normalizeArcgisLayerUrl(raw: string): string {
       url,
     )
   )
-    throw new Error(
-      "The retired Texas parcel service is unavailable. A replacement requires license review; official downloads are available from TxGIO.",
-    );
+    return TEXAS_PARCEL_URL;
   if (ARCGIS_LAYER_RE.test(url)) return url;
   if (ARCGIS_SERVICE_RE.test(url)) return `${url.replace(/\/$/, "")}/0`;
   return url;
@@ -112,6 +110,7 @@ export async function fetchArcgisFields(
   layerUrl: string,
   signal?: AbortSignal,
 ): Promise<ArcgisField[]> {
+  if (isTexasParcelSource(layerUrl)) return [];
   if (classifyUrl(layerUrl) !== "arcgis") return [];
   const response = await fetch(`${normalizeArcgisLayerUrl(layerUrl)}?f=json`, {
     signal: signal ?? null,
@@ -163,6 +162,7 @@ export async function fetchRemoteGeoJSON(
   url: string,
   opts: RemoteQueryOptions = {},
 ): Promise<FeatureCollection> {
+  if (isTexasParcelSource(url)) return (await fetchTexasParcels(opts)).data;
   const kind = classifyUrl(url);
   const requestUrl = kind === "arcgis" ? buildArcgisQueryUrl(url, opts) : url;
   const res = await fetchWithTimeout(requestUrl, opts.signal, opts.timeoutMs);
@@ -212,23 +212,7 @@ export async function fetchRemoteGeoJSONPaged(
   url: string,
   opts: PagedRemoteQueryOptions = {},
 ): Promise<RemoteLoadProgress> {
-  if (normalizeArcgisLayerUrl(url).toLowerCase() === SOURCE_URL.toLowerCase()) {
-    if (!opts.bbox)
-      throw new Error("Texas parcels require a bounded map area. Zoom in and try again.");
-    const data = (await downloadParcels(opts.bbox, fetch, {
-      where: opts.where,
-      signal: opts.signal,
-    })) as FeatureCollection;
-    const result = {
-      data,
-      loaded: data.features.length,
-      total: data.features.length,
-      complete: true,
-      truncated: false,
-    };
-    opts.onProgress?.(result);
-    return result;
-  }
+  if (isTexasParcelSource(url)) return fetchTexasParcels(opts);
   if (classifyUrl(url) !== "arcgis") {
     const data = await fetchRemoteGeoJSON(url, opts);
     const result = {
