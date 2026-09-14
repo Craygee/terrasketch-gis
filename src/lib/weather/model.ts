@@ -46,6 +46,8 @@ export function defaultWeatherWorkspace(): WeatherWorkspaceState {
   return {
     version: 1,
     nativeLayerCatalogVersion: 1,
+    radarSiteMode: "automatic",
+    radarSiteIds: [],
     enabled: true,
     introductoryChooserSeen: false,
     unitSystem: "us",
@@ -83,6 +85,31 @@ export function normalizeWeatherWorkspace(
     ...savedOrder.filter((id) => typeof id === "string" && id in layerSettings),
     ...weatherLayerRegistry.map((layer) => layer.id).filter((id) => !savedOrder.includes(id)),
   ];
+  const legacyRadarSite =
+    typeof stored.radarSiteId === "string" && /^[A-Z0-9]{4}$/.test(stored.radarSiteId)
+      ? stored.radarSiteId
+      : undefined;
+  const radarSiteIds = Array.from(
+    new Set(
+      (Array.isArray(stored.radarSiteIds)
+        ? stored.radarSiteIds
+        : legacyRadarSite
+          ? [legacyRadarSite]
+          : []
+      )
+        .filter((id): id is string => typeof id === "string" && /^[A-Z0-9]{4}$/.test(id))
+        .slice(0, 6),
+    ),
+  );
+  const radarSiteMode: NonNullable<WeatherWorkspaceState["radarSiteMode"]> = [
+    "automatic",
+    "covering",
+    "manual",
+  ].includes(stored.radarSiteMode ?? "")
+    ? stored.radarSiteMode!
+    : legacyRadarSite
+      ? "manual"
+      : "automatic";
   return {
     ...defaults,
     ...stored,
@@ -91,10 +118,9 @@ export function normalizeWeatherWorkspace(
     nativeLayerCatalogVersion: 1,
     layerSettings,
     layerOrder,
-    radarSiteId:
-      typeof stored.radarSiteId === "string" && /^[A-Z0-9]{4}$/.test(stored.radarSiteId)
-        ? stored.radarSiteId
-        : undefined,
+    radarSiteMode,
+    radarSiteIds,
+    radarSiteId: radarSiteMode === "manual" ? radarSiteIds[0] : undefined,
     radarTilt:
       Number.isInteger(stored.radarTilt) && stored.radarTilt! >= 0 && stored.radarTilt! <= 3
         ? stored.radarTilt

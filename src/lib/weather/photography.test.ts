@@ -102,15 +102,18 @@ test("failed candidate warnings never become an all-clear", async () => {
   );
 });
 
-test("favorable weather cannot override unverified roads, terrain and lightning", async () => {
+test("favorable weather produces an observation score without claiming route safety", async () => {
   const result = await buildPhotographyAssessment(
     request,
-    [alert],
+    [],
     new AbortController().signal,
     async () => ({ alerts: [], current: model }),
+    tracked("favorable"),
   );
-  assert.ok(result.zones.every((zone) => zone.score === null));
-  assert.ok(result.zones.every((zone) => zone.reasons.some((text) => text.includes("terrain"))));
+  assert.ok(result.zones.every((zone) => zone.score !== null && zone.riskLevel === "lower"));
+  assert.ok(
+    result.zones.every((zone) => zone.cautions.some((text) => text.includes("not verified"))),
+  );
 });
 
 test("exercise alerts cannot create real-world photography targets", async () => {
@@ -147,7 +150,28 @@ test("a tracked storm supports photography candidates without inventing an offic
   assert.match(result.targetDescription, /NOAA-tracked storm/);
   assert.ok(
     result.zones.every(
-      (zone) => zone.activeAlertCount === 0 && zone.riskLevel === "unknown" && zone.score === null,
+      (zone) => zone.activeAlertCount === 0 && zone.riskLevel === "lower" && zone.score !== null,
+    ),
+  );
+});
+
+test("model observation scoring survives an independent warning-feed failure", async () => {
+  const result = await buildPhotographyAssessment(
+    request,
+    [],
+    new AbortController().signal,
+    async () => ({
+      alerts: [],
+      current: model,
+      alertsAvailable: false,
+      conditionsAvailable: true,
+    }),
+    tracked("partial"),
+  );
+  assert.ok(result.zones.every((zone) => zone.score !== null && zone.riskLevel === "unknown"));
+  assert.ok(
+    result.zones.every((zone) =>
+      zone.cautions.some((text) => text.includes("warning lookup failed")),
     ),
   );
 });

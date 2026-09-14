@@ -33,3 +33,12 @@ export function nearestWeatherRadarSite(
     return !nearest || distanceKm < nearest.distanceKm ? { site, distanceKm } : nearest;
   }, null);
 }
+
+export function rankedWeatherRadarSites(
+  sites: WeatherRadarSite[],
+  point: { latitude: number; longitude: number },
+) {
+  return sites
+    .map((site) => ({ site, distanceKm: radarSiteDistanceKm(site, point) }))
+    .sort((a, b) => a.distanceKm - b.distanceKm);
+}

@@ -1,6 +1,6 @@
 import type { WeatherRadarSite } from "./radar.ts";
-export const nativeMapLayerId = (layerId: string) =>
-  `landdraft-native-${layerId.replaceAll(".", "-")}`;
+export const nativeMapLayerId = (layerId: string, siteId?: string) =>
+  `landdraft-native-${layerId.replaceAll(".", "-")}${siteId ? `-${siteId.toLowerCase()}` : ""}`;
 
 export const NATIVE_RADAR_PRODUCTS = {
   "weather.radar.pro.reflectivity": {

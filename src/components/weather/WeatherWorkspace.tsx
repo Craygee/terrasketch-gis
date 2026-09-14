@@ -1,7 +1,10 @@
 import { NativeRadarControls } from "./NativeRadarControls";
 import { StormAnalysisCard } from "./StormAnalysisCard";
-import { STORM_STYLE_MODES, stormStyleLegend } from "@/lib/weather/stormPresentation";
-import { nearestWeatherRadarSite } from "@/lib/weather/radar";
+import {
+  STORM_STYLE_MODES,
+  stormStyleLegend,
+  stormStyleLegendEntries,
+} from "@/lib/weather/stormPresentation";
 import { nativeProduct } from "@/lib/weather/nativeRadar";
 import { hasWeatherCapability } from "@/lib/weather/entitlements";
 import { weatherProviderRegistry } from "@/lib/weather/providerRegistry";
@@ -205,7 +208,10 @@ export function WeatherWorkspace() {
   const [nativeReadings, setNativeReadings] = useState<Record<string, NativeRadarReading>>({});
   const onNativeReading = useCallback(
     (reading: NativeRadarReading) =>
-      setNativeReadings((current) => ({ ...current, [reading.layerId]: reading })),
+      setNativeReadings((current) => ({
+        ...current,
+        [`${reading.layerId}|${reading.site ?? "pending"}`]: reading,
+      })),
     [],
   );
   const [loading, setLoading] = useState(false);
@@ -234,6 +240,10 @@ export function WeatherWorkspace() {
   const [chaseError, setChaseError] = useState<string | null>(null);
   const [navigationTargetMode, setNavigationTargetMode] = useState(false);
   const [navigationTarget, setNavigationTarget] = useState<[number, number] | undefined>();
+  const navigationTargetRef = useRef(navigationTarget);
+  navigationTargetRef.current = navigationTarget;
+  const chaserLocationRef = useRef(chaserLocation);
+  chaserLocationRef.current = chaserLocation;
   const [forecastReferenceTime, setForecastReferenceTime] = useState(() =>
     new Date().toISOString(),
   );
@@ -292,6 +302,27 @@ export function WeatherWorkspace() {
   const loadPoint = useCallback(
     async (point: [number, number], quietly = false, layers: string[] = requestedLayerIds) => {
       const mapCenter = map?.getCenter();
+      const currentWorkspace = latestWorkspace.current;
+      const selectedStorm = latestBundle.current?.stormObjects.find(
+        (storm) => storm.id === photographyStormId.current,
+      );
+      const stormFocus = selectedStorm?.centroid.geometry.coordinates as
+        [number, number] | undefined;
+      const radarFocus =
+        stormFocus ??
+        navigationTargetRef.current ??
+        chaserLocationRef.current ??
+        currentWorkspace.lastInspectionPoint ??
+        (mapCenter ? [mapCenter.wrap().lng, mapCenter.lat] : point);
+      const radarFocusSource = stormFocus
+        ? "storm"
+        : navigationTargetRef.current
+          ? "target"
+          : chaserLocationRef.current
+            ? "gps"
+            : currentWorkspace.lastInspectionPoint
+              ? "inspection"
+              : "map";
       const requestId = ++latestWeatherRequest.current;
       activePointRequest.current?.abort();
       const controller = new AbortController();
@@ -314,12 +345,21 @@ export function WeatherWorkspace() {
             requestedLayerIds: layers,
             photographyStormId: photographyStormId.current ?? undefined,
             mapCenter: mapCenter ? [mapCenter.wrap().lng, mapCenter.lat] : point,
-            radarSiteId: workspace.radarSiteId,
-            radarTilt: workspace.radarTilt,
+            radarFocus,
+            radarFocusSource,
+            ...(currentWorkspace.radarSiteMode
+              ? { radarSiteMode: currentWorkspace.radarSiteMode }
+              : {}),
+            ...(currentWorkspace.radarSiteIds?.length
+              ? { radarSiteIds: currentWorkspace.radarSiteIds }
+              : {}),
+            ...(currentWorkspace.radarSiteId ? { radarSiteId: currentWorkspace.radarSiteId } : {}),
+            ...(currentWorkspace.radarTilt === undefined
+              ? {}
+              : { radarTilt: currentWorkspace.radarTilt }),
           },
         });
         if (requestId !== latestWeatherRequest.current) return null;
-        const currentWorkspace = latestWorkspace.current;
         if (followsLatestScan(currentWorkspace, latestBundle.current)) {
           const liveWorkspace = {
             ...currentWorkspace,
@@ -345,19 +385,24 @@ export function WeatherWorkspace() {
         if (requestId === latestWeatherRequest.current) setLoading(false);
       }
     },
-    [requestedLayerIds, workspace.radarSiteId, workspace.radarTilt, map],
+    [requestedLayerIds, map],
   );
 
   useEffect(() => {
     if (
       !bundle ||
-      ((bundle.request.radarSiteId || "") === (workspace.radarSiteId || "") &&
+      ((bundle.request.radarSiteMode ?? "automatic") === (workspace.radarSiteMode ?? "automatic") &&
+        JSON.stringify(bundle.request.radarSiteIds ?? []) ===
+          JSON.stringify(workspace.radarSiteIds ?? []) &&
+        (bundle.request.radarSiteId || "") === (workspace.radarSiteId || "") &&
         (bundle.request.radarTilt ?? 0) === (workspace.radarTilt ?? 0))
     )
       return;
     void loadPoint(workspace.lastInspectionPoint ?? wb.mapView.center, true);
   }, [
     workspace.radarSiteId,
+    workspace.radarSiteIds,
+    workspace.radarSiteMode,
     workspace.radarTilt,
     workspace.lastInspectionPoint,
     wb.mapView.center,
@@ -370,18 +415,17 @@ export function WeatherWorkspace() {
     const followRadar = () => {
       const current = latestWorkspace.current;
       if (
-        current.radarSiteId ||
+        (current.radarSiteMode ?? "automatic") === "manual" ||
+        photographyStormId.current ||
+        navigationTargetRef.current ||
+        chaserLocationRef.current ||
+        current.lastInspectionPoint ||
         !Object.entries(current.layerSettings).some(
           ([id, setting]) => nativeProduct(id) && setting.visible,
         )
       )
         return;
       const center = map.getCenter().wrap();
-      const nextSite = nearestWeatherRadarSite(latestBundle.current?.radarSites ?? [], {
-        longitude: center.lng,
-        latitude: center.lat,
-      });
-      if (nextSite?.site.id === latestBundle.current?.nativeRadarFrames?.[0]?.site.id) return;
       void loadPoint(current.lastInspectionPoint ?? [center.lng, center.lat], true);
     };
     map.on("moveend", followRadar);
@@ -512,11 +556,18 @@ export function WeatherWorkspace() {
     const inspect = (event: MapMouseEvent) => {
       if (navigationTargetMode) {
         const point: [number, number] = [event.lngLat.lng, event.lngLat.lat];
+        navigationTargetRef.current = point;
         setNavigationTarget(point);
         setNavigationTargetMode(false);
         toast.success("Navigation point selected", {
           description: "Review current hazards and road conditions before opening directions.",
         });
+        if (
+          Object.entries(latestWorkspace.current.layerSettings).some(
+            ([id, setting]) => nativeProduct(id) && setting.visible,
+          )
+        )
+          void loadPoint(latestWorkspace.current.lastInspectionPoint ?? point, true);
         return;
       }
       const selectedWeatherObject = map
@@ -531,6 +582,7 @@ export function WeatherWorkspace() {
       updateWorkspace({ lastInspectionPoint: point });
       setSelectedAlert(null);
       setSelectedStormId(null);
+      photographyStormId.current = null;
       void loadPoint(point);
     };
     map.on("click", inspect);
@@ -789,6 +841,7 @@ export function WeatherWorkspace() {
       setPresenceSharing(false);
       setChaseActive(false);
       setChaserLocation(undefined);
+      chaserLocationRef.current = undefined;
       setChaserAccuracy(undefined);
       return;
     }
@@ -812,8 +865,19 @@ export function WeatherWorkspace() {
           ...(position.coords.speed === null ? {} : { speedMS: position.coords.speed }),
         };
         setChaserLocation(nextLocation);
+        chaserLocationRef.current = nextLocation;
         setChaserAccuracy(position.coords.accuracy);
         setChaseActive(true);
+        const priorFocus = latestBundle.current?.request.radarFocus;
+        if (
+          Object.entries(latestWorkspace.current.layerSettings).some(
+            ([id, setting]) => nativeProduct(id) && setting.visible,
+          ) &&
+          (latestBundle.current?.request.radarFocusSource !== "gps" ||
+            !priorFocus ||
+            Math.hypot(priorFocus[0] - nextLocation[0], priorFocus[1] - nextLocation[1]) > 0.2)
+        )
+          void loadPoint(latestWorkspace.current.lastInspectionPoint ?? nextLocation, true);
         if (chaseFollowRef.current && map) {
           map.easeTo({
             center: nextLocation,
@@ -900,7 +964,12 @@ export function WeatherWorkspace() {
     (storm: StormObject) => {
       setSelectedStormId(storm.id);
       photographyStormId.current = storm.id;
-      if (latestWorkspace.current.layerSettings["weather.photo"]?.visible) {
+      if (
+        latestWorkspace.current.layerSettings["weather.photo"]?.visible ||
+        Object.entries(latestWorkspace.current.layerSettings).some(
+          ([id, setting]) => nativeProduct(id) && setting.visible,
+        )
+      ) {
         void loadPoint(latestWorkspace.current.lastInspectionPoint ?? wb.mapView.center, true);
       }
       const alert = bundle?.alerts.find((item) => storm.officialAlertIds.includes(item.id));
@@ -1197,7 +1266,11 @@ export function WeatherWorkspace() {
               )}
             </div>
 
-            <WeatherLegends workspace={renderedWorkspace} workspaceView={workspaceView} />
+            <WeatherLegends
+              workspace={renderedWorkspace}
+              workspaceView={workspaceView}
+              bundle={displayBundle}
+            />
 
             <div className="absolute inset-x-2 bottom-[calc(.5rem+env(safe-area-inset-bottom))] z-40 grid grid-cols-4 gap-1 rounded-3xl border border-border bg-card/95 p-1 shadow-float backdrop-blur lg:hidden">
               <MobileButton
@@ -1314,7 +1387,10 @@ export function WeatherWorkspace() {
                         setMobileSheet(null);
                       }}
                       onNavigate={openNavigationTarget}
-                      onClearNavigationTarget={() => setNavigationTarget(undefined)}
+                      onClearNavigationTarget={() => {
+                        navigationTargetRef.current = undefined;
+                        setNavigationTarget(undefined);
+                      }}
                     />
                   ) : (
                     <InspectorPanel
@@ -1377,7 +1453,10 @@ export function WeatherWorkspace() {
                 onToggleFollow={toggleChaseFollow}
                 onChooseNavigationTarget={() => setNavigationTargetMode((active) => !active)}
                 onNavigate={openNavigationTarget}
-                onClearNavigationTarget={() => setNavigationTarget(undefined)}
+                onClearNavigationTarget={() => {
+                  navigationTargetRef.current = undefined;
+                  setNavigationTarget(undefined);
+                }}
               />
             ) : (
               <InspectorPanel bundle={bundle} activeAlert={activeAlert} workspace={workspace} />
@@ -1717,14 +1796,32 @@ function WeatherLayerPanel({
             <option key={mode}>{mode}</option>
           ))}
         </select>
-        <span className="mt-2 block">
-          Intensity: 0–19 Weak · 20–39 Moderate · 40–59 Strong · 60–79 Severe · 80–100 Extreme.
-          Gray: insufficient current data. NOAA probabilities are separate. Storm labels show
-          values; official warnings retain priority.
+        <span
+          className="mt-2 flex flex-wrap gap-x-3 gap-y-1"
+          aria-label={`${workspace.stormStyle ?? "Intensity"} map color scale`}
+        >
+          {stormStyleLegendEntries(workspace.stormStyle).map((entry) => (
+            <span key={entry.label} className="inline-flex items-center gap-1">
+              <span
+                className="size-2.5 shrink-0 rounded-full border border-black/10"
+                style={{ backgroundColor: entry.color }}
+              />
+              {entry.label}
+            </span>
+          ))}
+        </span>
+        <span className="mt-2 block text-muted-foreground">
+          Colors match storm objects on the map. NOAA probabilities are separate; official warnings
+          retain priority.
         </span>
       </label>
       {!compact && (
-        <WeatherLegends workspace={legendWorkspace} workspaceView={workspaceView} embedded />
+        <WeatherLegends
+          workspace={legendWorkspace}
+          workspaceView={workspaceView}
+          bundle={bundle}
+          embedded
+        />
       )}
 
       {workspaceView === "storm-chaser" && (
@@ -3480,8 +3577,8 @@ function PhotographyPanel({
               </div>
               <p className="mt-1 text-[10px] font-semibold">
                 {zone.score === null
-                  ? "Opportunity score unavailable — safety checks incomplete or hazards present"
-                  : `Photography ${zone.score}/100`}
+                  ? "Viewing conditions unavailable — observations missing or official hazard present"
+                  : `Viewing conditions ${zone.score}/100 · not a safety score`}
               </p>
               <p className="mt-1 text-[9px] text-muted-foreground">
                 {zone.distanceFromTargetMiles.toFixed(1)} mi from alert center · target bearing{" "}
@@ -3582,16 +3679,47 @@ function WeatherStatusPill({
 function WeatherLegends({
   workspace,
   workspaceView,
+  bundle,
   embedded = false,
 }: {
   workspace: WeatherWorkspaceState;
   workspaceView: WorkspaceView;
+  bundle: WeatherBundle | null;
   embedded?: boolean;
 }) {
   const activeLayers = weatherLayerRegistry.filter(
     (layer) => workspace.layerSettings[layer.id]?.visible,
   );
-  const layersWithLegends = activeLayers.filter((layer) => layer.legend?.length);
+  const legendFor = (layer: (typeof weatherLayerRegistry)[number]) => {
+    if (layer.id === "weather.severe.intelligence")
+      return stormStyleLegendEntries(workspace.stormStyle);
+    const spcEntries = (bundle?.spcOutlooks ?? [])
+      .filter((outlook) => outlook.layerId === layer.id)
+      .flatMap((outlook) =>
+        outlook.areas.map((area) => ({
+          color: area.properties.fill,
+          label: area.properties.label,
+        })),
+      );
+    if (spcEntries.length)
+      return Array.from(
+        new Map(spcEntries.map((entry) => [`${entry.color}|${entry.label}`, entry])).values(),
+      );
+    if (layer.id === "weather.severe.alerts")
+      return [
+        { color: "#7f1d1d", label: "Extreme" },
+        { color: "#dc2626", label: "Severe" },
+        { color: "#ca8a04", label: "Moderate" },
+      ];
+    if (layer.id === "weather.photo" && bundle?.photography?.zones.length)
+      return [
+        { color: "#059669", label: "Lower exposure" },
+        { color: "#d97706", label: "Elevated / unknown" },
+        { color: "#e11d48", label: "High exposure" },
+      ];
+    return layer.legend ?? [];
+  };
+  const layersWithLegends = activeLayers.filter((layer) => legendFor(layer).length);
   if (!activeLayers.length && workspaceView !== "storm-chaser") return null;
 
   return (
@@ -3686,8 +3814,8 @@ function WeatherLegends({
                   <span
                     className="size-2.5 shrink-0 rounded-sm border border-black/10 bg-primary/70"
                     style={
-                      layer.legend?.[0]?.color
-                        ? { backgroundColor: layer.legend[0].color }
+                      legendFor(layer)[0]?.color
+                        ? { backgroundColor: legendFor(layer)[0]!.color }
                         : undefined
                     }
                   />
@@ -3703,7 +3831,7 @@ function WeatherLegends({
           <div key={layer.id}>
             <strong className="block text-[9px]">{layer.name}</strong>
             <div className="mt-1 flex flex-wrap gap-x-2 gap-y-1">
-              {layer.legend?.map((entry) => (
+              {legendFor(layer).map((entry) => (
                 <span key={entry.label} className="flex items-center gap-1 text-muted-foreground">
                   <span
                     className="size-2.5 rounded-sm border border-black/10"

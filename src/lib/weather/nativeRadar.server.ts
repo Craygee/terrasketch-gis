@@ -1,4 +1,5 @@
 import {
+  NATIVE_RADAR_PRODUCTS,
   nativeKeyTime,
   nativeRadarKey,
   nativeProduct,
@@ -6,22 +7,46 @@ import {
   type NativeRadarLayer,
 } from "./nativeRadar.ts";
 import type { WeatherPointRequest } from "./types.ts";
-import { nearestWeatherRadarSite, type WeatherRadarSite } from "./radar.ts";
+import { rankedWeatherRadarSites, type WeatherRadarSite } from "./radar.ts";
 import { weatherProviderEnabled } from "./providerPolicy.server.ts";
 import { consumeProviderRequest } from "./providerOperations.server.ts";
 
 export const NATIVE_RADAR_BUCKET = "https://unidata-nexrad-level3.s3.amazonaws.com";
+export const MAX_NATIVE_RADAR_SITES = 6;
 const binaryCache = new Map<string, { bytes: Uint8Array; expires: number }>();
 const catalogCache = new Map<string, { keys: string[]; expires: number }>();
 
 export function selectNativeRadarSite(request: WeatherPointRequest, sites: WeatherRadarSite[]) {
-  sites = nativeRadarSites(sites);
-  if (request.radarSiteId) return sites.find((site) => site.id === request.radarSiteId);
-  const point = request.mapCenter
-    ? { longitude: request.mapCenter[0], latitude: request.mapCenter[1] }
-    : request;
-  const nearest = nearestWeatherRadarSite(sites, point);
-  return nearest && nearest.distanceKm <= 460 ? nearest.site : undefined;
+  return selectNativeRadarSites(request, sites)[0];
+}
+
+export function selectNativeRadarSites(request: WeatherPointRequest, sites: WeatherRadarSite[]) {
+  const eligible = nativeRadarSites(sites);
+  const manualIds = request.radarSiteIds?.length
+    ? request.radarSiteIds
+    : request.radarSiteId
+      ? [request.radarSiteId]
+      : [];
+  const mode = request.radarSiteMode ?? (manualIds.length ? "manual" : "automatic");
+  if (mode === "manual") {
+    const byId = new Map(eligible.map((site) => [site.id, site]));
+    return manualIds
+      .flatMap((id) => (byId.has(id) ? [byId.get(id)!] : []))
+      .slice(0, MAX_NATIVE_RADAR_SITES);
+  }
+  const focus = request.radarFocus ?? request.mapCenter ?? [request.longitude, request.latitude];
+  const ranked = rankedWeatherRadarSites(eligible, { longitude: focus[0], latitude: focus[1] });
+  const requestedRanges = (request.requestedLayerIds ?? []).flatMap((id) => {
+    const product = NATIVE_RADAR_PRODUCTS[id as keyof typeof NATIVE_RADAR_PRODUCTS];
+    return product ? [product.rangeKm] : [];
+  });
+  const coverageKm = requestedRanges.length ? Math.max(...requestedRanges) : 460;
+  if (mode === "covering")
+    return ranked
+      .filter(({ distanceKm }) => distanceKm <= coverageKm)
+      .slice(0, MAX_NATIVE_RADAR_SITES)
+      .map(({ site }) => site);
+  return ranked[0] && ranked[0].distanceKm <= coverageKm ? [ranked[0].site] : [];
 }
 
 export async function discoverNativeRadar(
@@ -29,8 +54,8 @@ export async function discoverNativeRadar(
   sites: WeatherRadarSite[],
   signal: AbortSignal,
 ): Promise<NativeRadarFrame[]> {
-  const site = selectNativeRadarSite(request, sites);
-  if (!site || !/^[A-Z0-9]{4}$/.test(site.id)) return [];
+  const selectedSites = selectNativeRadarSites(request, sites);
+  if (!selectedSites.length) return [];
   const now = Date.now();
   const days = [
     ...new Set(
@@ -41,46 +66,48 @@ export async function discoverNativeRadar(
   ];
   const requested = (request.requestedLayerIds ?? []).filter((id) => nativeProduct(id)).slice(0, 6);
   const results = await Promise.allSettled(
-    requested.map(async (layerId) => {
-      const product = nativeProduct(layerId, request.radarTilt ?? 0)!;
-      const lists = await Promise.all(
-        days.map(async (day) => {
-          const prefix = `${site.id.slice(1)}_${product}_${day}`;
-          const cached = catalogCache.get(prefix);
-          if (cached && cached.expires > now) return cached.keys;
-          const response = await fetch(
-            `${NATIVE_RADAR_BUCKET}/?list-type=2&prefix=${prefix}&start-after=${site.id.slice(1)}_${product}_${new Date(now - 3600000).toISOString().slice(0, 19).replace(/[-T:]/g, "_")}&max-keys=1000`,
-            { signal },
-          );
-          if (!response.ok) throw new Error("NOAA radar catalog unavailable");
-          const xml = await response.text();
-          if (xml.length > 1000000 || xml.includes("<IsTruncated>true</IsTruncated>"))
-            throw new Error("Incomplete radar catalog");
-          const keys = [...xml.matchAll(/<Key>([^<]+)<\/Key>/g)]
-            .map((m) => m[1]!)
-            .filter((key) => key.startsWith(prefix) && nativeRadarKey(key));
-          if (catalogCache.size >= 100) catalogCache.delete(catalogCache.keys().next().value!);
-          catalogCache.set(prefix, { keys, expires: now + 60000 });
-          return keys;
-        }),
-      );
-      return lists
-        .flat()
-        .filter((key) => {
-          const time = Date.parse(nativeKeyTime(key) ?? "");
-          return time <= now + 60000 && now - time <= 3600000;
-        })
-        .sort()
-        .slice(-6)
-        .map((key) => ({
-          id: key,
-          layerId: layerId as NativeRadarLayer,
-          timestamp: nativeKeyTime(key)!,
-          binaryUrl: `/api/weather/radar/native/${key}`,
-          site,
-          product,
-        }));
-    }),
+    selectedSites.flatMap((site) =>
+      requested.map(async (layerId) => {
+        const product = nativeProduct(layerId, request.radarTilt ?? 0)!;
+        const lists = await Promise.all(
+          days.map(async (day) => {
+            const prefix = `${site.id.slice(1)}_${product}_${day}`;
+            const cached = catalogCache.get(prefix);
+            if (cached && cached.expires > now) return cached.keys;
+            const response = await fetch(
+              `${NATIVE_RADAR_BUCKET}/?list-type=2&prefix=${prefix}&start-after=${site.id.slice(1)}_${product}_${new Date(now - 3600000).toISOString().slice(0, 19).replace(/[-T:]/g, "_")}&max-keys=1000`,
+              { signal },
+            );
+            if (!response.ok) throw new Error("NOAA radar catalog unavailable");
+            const xml = await response.text();
+            if (xml.length > 1000000 || xml.includes("<IsTruncated>true</IsTruncated>"))
+              throw new Error("Incomplete radar catalog");
+            const keys = [...xml.matchAll(/<Key>([^<]+)<\/Key>/g)]
+              .map((m) => m[1]!)
+              .filter((key) => key.startsWith(prefix) && nativeRadarKey(key));
+            if (catalogCache.size >= 100) catalogCache.delete(catalogCache.keys().next().value!);
+            catalogCache.set(prefix, { keys, expires: now + 60000 });
+            return keys;
+          }),
+        );
+        return lists
+          .flat()
+          .filter((key) => {
+            const time = Date.parse(nativeKeyTime(key) ?? "");
+            return time <= now + 60000 && now - time <= 3600000;
+          })
+          .sort()
+          .slice(-6)
+          .map((key) => ({
+            id: key,
+            layerId: layerId as NativeRadarLayer,
+            timestamp: nativeKeyTime(key)!,
+            binaryUrl: `/api/weather/radar/native/${key}`,
+            site,
+            product,
+          }));
+      }),
+    ),
   );
   return results.flatMap((result) => (result.status === "fulfilled" ? result.value : []));
 }

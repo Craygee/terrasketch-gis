@@ -10,7 +10,11 @@ import {
   type NativeRadarLayer,
 } from "./nativeRadar.ts";
 import { renderNativeRadarTile } from "./nativeRadarRender.ts";
-import { nativeRadarSites, selectNativeRadarSite } from "./nativeRadar.server.ts";
+import {
+  nativeRadarSites,
+  selectNativeRadarSite,
+  selectNativeRadarSites,
+} from "./nativeRadar.server.ts";
 
 test("native selection excludes airport radars without WSR-88D dual polarization products", () => {
   const sites = ["KTLX", "TOKC", "TJUA", "PHKI", "KCRI"].map((id) => ({
@@ -143,4 +147,31 @@ test("automatic radar follows the visible storm, not a distant saved inspection 
   assert.equal(selectNativeRadarSite(request, sites)?.id, "KENX");
   assert.equal(selectNativeRadarSite({ ...request, radarSiteId: "KGRK" }, sites)?.id, "KGRK");
   assert.equal(selectNativeRadarSite({ ...request, mapCenter: [0, 0] }, sites), undefined);
+});
+
+test("radar focus overrides the map center and covering mode returns nearby sites", () => {
+  const sites = [
+    { id: "KTLX", name: "Oklahoma City", longitude: -97.28, latitude: 35.33 },
+    { id: "KINX", name: "Tulsa", longitude: -95.56, latitude: 36.18 },
+    { id: "KENX", name: "New York", longitude: -74.06, latitude: 42.59 },
+  ];
+  const request = {
+    longitude: -74,
+    latitude: 43,
+    mapCenter: [-74, 43] as [number, number],
+    radarFocus: [-97.3, 35.4] as [number, number],
+    radarSiteMode: "automatic" as const,
+  };
+  assert.equal(selectNativeRadarSite(request, sites)?.id, "KTLX");
+  assert.deepEqual(
+    selectNativeRadarSites({ ...request, radarSiteMode: "covering" }, sites).map((site) => site.id),
+    ["KTLX", "KINX"],
+  );
+  assert.deepEqual(
+    selectNativeRadarSites(
+      { ...request, radarSiteMode: "manual", radarSiteIds: ["KINX", "KTLX"] },
+      sites,
+    ).map((site) => site.id),
+    ["KINX", "KTLX"],
+  );
 });

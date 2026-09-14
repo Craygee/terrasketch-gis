@@ -1618,7 +1618,7 @@ export async function loadWeatherBundle(request: WeatherPointRequest): Promise<W
         alerts,
         AbortSignal.timeout(12_000),
         async (candidate, signal) => {
-          const [candidateAlerts, model] = await Promise.all([
+          const [alertsResult, modelResult] = await Promise.allSettled([
             loadNwsAlerts(candidate, signal),
             withCache(
               `met-norway:${roundCoordinate(candidate.latitude)},${roundCoordinate(candidate.longitude)}`,
@@ -1627,7 +1627,12 @@ export async function loadWeatherBundle(request: WeatherPointRequest): Promise<W
               () => loadMetNorwayPoint(candidate, signal),
             ),
           ]);
-          return { alerts: candidateAlerts, current: model.current };
+          return {
+            alerts: alertsResult.status === "fulfilled" ? alertsResult.value : [],
+            current: modelResult.status === "fulfilled" ? modelResult.value.current : null,
+            alertsAvailable: alertsResult.status === "fulfilled",
+            conditionsAvailable: modelResult.status === "fulfilled",
+          };
         },
         selectPhotographyStorm(probSevereObjects, request),
       );

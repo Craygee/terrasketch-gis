@@ -11,6 +11,18 @@ export function validatePoint(input: unknown): WeatherPointRequest {
   if (!Number.isFinite(longitude) || longitude < -180 || longitude > 180)
     throw new Error("Longitude must be between -180 and 180");
   const requestedLayerIds = normalizeRequestedLayers(value["requestedLayerIds"]);
+  const radarSiteIds = Array.from(
+    new Set(
+      (Array.isArray(value["radarSiteIds"]) ? value["radarSiteIds"] : [])
+        .filter((id): id is string => typeof id === "string" && /^[A-Z0-9]{4}$/.test(id))
+        .slice(0, 6),
+    ),
+  );
+  const radarSiteMode = ["automatic", "covering", "manual"].includes(
+    String(value["radarSiteMode"] ?? ""),
+  )
+    ? (value["radarSiteMode"] as NonNullable<WeatherPointRequest["radarSiteMode"]>)
+    : undefined;
 
   return {
     ...(Array.isArray(value["mapCenter"]) &&
@@ -25,6 +37,27 @@ export function validatePoint(input: unknown): WeatherPointRequest {
       : {}),
     ...(typeof value["radarSiteId"] === "string" && /^[A-Z0-9]{4}$/.test(value["radarSiteId"])
       ? { radarSiteId: value["radarSiteId"] }
+      : {}),
+    ...(radarSiteMode ? { radarSiteMode } : {}),
+    ...(radarSiteIds.length ? { radarSiteIds } : {}),
+    ...(Array.isArray(value["radarFocus"]) &&
+    value["radarFocus"].length === 2 &&
+    typeof value["radarFocus"][0] === "number" &&
+    Number.isFinite(value["radarFocus"][0]) &&
+    Math.abs(value["radarFocus"][0]) <= 180 &&
+    typeof value["radarFocus"][1] === "number" &&
+    Number.isFinite(value["radarFocus"][1]) &&
+    Math.abs(value["radarFocus"][1]) <= 90
+      ? { radarFocus: value["radarFocus"] as [number, number] }
+      : {}),
+    ...(["storm", "target", "gps", "inspection", "map"].includes(
+      String(value["radarFocusSource"] ?? ""),
+    )
+      ? {
+          radarFocusSource: value["radarFocusSource"] as NonNullable<
+            WeatherPointRequest["radarFocusSource"]
+          >,
+        }
       : {}),
     ...(Number.isInteger(value["radarTilt"]) &&
     Number(value["radarTilt"]) >= 0 &&

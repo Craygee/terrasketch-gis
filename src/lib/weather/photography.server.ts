@@ -30,7 +30,12 @@ export function selectPhotographyStorm(storms: StormObject[], request: WeatherPo
 type CandidateLoader = (
   request: WeatherPointRequest,
   signal: AbortSignal,
-) => Promise<{ alerts: WeatherAlert[]; current: WeatherObservation | null }>;
+) => Promise<{
+  alerts: WeatherAlert[];
+  current: WeatherObservation | null;
+  alertsAvailable?: boolean;
+  conditionsAvailable?: boolean;
+}>;
 
 const normalizeBearing = (value: number) => ((value % 360) + 360) % 360;
 
@@ -43,8 +48,8 @@ function riskFor(alerts: WeatherAlert[], current: WeatherObservation | null): We
   return current ? "lower" : "unknown";
 }
 
-function photoScore(current: WeatherObservation | null, riskLevel: WeatherRiskLevel) {
-  if (!current || riskLevel === "high" || riskLevel === "unknown") return null;
+function photoScore(current: WeatherObservation | null, suppressForOfficialHazard: boolean) {
+  if (!current || suppressForOfficialHazard) return null;
   let score = 60;
   const clouds = current.cloudCoverPct;
   if (clouds !== undefined) {
@@ -59,7 +64,8 @@ function photoScore(current: WeatherObservation | null, riskLevel: WeatherRiskLe
     else if (wind > 12) score -= 10;
   }
   if ((current.precipitationMm ?? 0) > 0.5) score -= 15;
-  if (riskLevel === "elevated") score -= 20;
+  if ((current.windGustMS ?? current.windSpeedMS ?? 0) >= 15 || (current.precipitationMm ?? 0) >= 2)
+    score -= 20;
   return Math.max(0, Math.min(100, Math.round(score)));
 }
 
@@ -161,13 +167,17 @@ export async function buildPhotographyAssessment(
       const latitude = location.geometry.coordinates[1]!;
       let candidateAlerts: WeatherAlert[] = [];
       let current: WeatherObservation | null = null;
-      let lookupFailed = false;
+      let alertLookupFailed = false;
+      let conditionsLookupFailed = false;
       try {
         const result = await loadCandidate({ latitude, longitude }, signal);
         candidateAlerts = result.alerts;
         current = result.current;
+        alertLookupFailed = result.alertsAvailable === false;
+        conditionsLookupFailed = result.conditionsAvailable === false;
       } catch {
-        lookupFailed = true;
+        alertLookupFailed = true;
+        conditionsLookupFailed = true;
       }
       if (
         !trackedTarget &&
@@ -177,10 +187,14 @@ export async function buildPhotographyAssessment(
       )
         candidateAlerts = [officialTarget, ...candidateAlerts];
       const weatherRisk = riskFor(candidateAlerts, current);
-      const riskLevel = weatherRisk === "high" ? "high" : "unknown";
+      const riskLevel = alertLookupFailed
+        ? weatherRisk === "high"
+          ? "high"
+          : "unknown"
+        : weatherRisk;
       // Weather-only conditions cannot establish road access, escape options,
       // lightning exposure or terrain visibility. Never imply a safe location.
-      const score = photoScore(current, riskLevel);
+      const score = photoScore(current, weatherRisk === "high");
       const source = sourceMetadata({
         providerId: "landdraft-photography-analysis",
         providerName: "LandDraft decision support",
@@ -192,7 +206,8 @@ export async function buildPhotographyAssessment(
         qualityFlags: [
           "DECISION_SUPPORT",
           "NOT_A_SAFETY_DETERMINATION",
-          ...(lookupFailed ? ["ALERT_SCREEN_FAILED"] : ["OFFICIAL_ALERT_SCREEN"]),
+          ...(alertLookupFailed ? ["ALERT_SCREEN_FAILED"] : ["OFFICIAL_ALERT_SCREEN"]),
+          ...(conditionsLookupFailed ? ["MODEL_CONDITIONS_FAILED"] : []),
           "SAFETY_INPUTS_INCOMPLETE",
           ...(trackedTarget ? ["NOAA_TRACKED_STORM_TARGET", "NOT_AN_OFFICIAL_WARNING"] : []),
           ...(current ? ["MODEL_WEATHER_INPUT"] : []),
@@ -212,7 +227,13 @@ export async function buildPhotographyAssessment(
         targetBearingDeg: normalizeBearing(bearing(location, targetCenter)),
         reasons: [
           ...reasonsFor(current, score),
-          "Opportunity score unavailable: terrain, road access, escape routes and lightning screening are required.",
+          ...(score === null
+            ? [
+                "Viewing-conditions score unavailable because observations are missing or a significant official hazard is present.",
+              ]
+            : [
+                "Viewing-conditions score uses model cloud, wind and precipitation inputs; it is not a safety score.",
+              ]),
         ],
         cautions: [
           ...(trackedStorm?.analysis
@@ -222,9 +243,10 @@ export async function buildPhotographyAssessment(
             : []),
           ...cautionsFor(candidateAlerts, riskLevel),
           "Terrain, road access, escape routes and lightning are not verified.",
-          ...(lookupFailed
-            ? ["Candidate weather or official warning lookup failed; hazard status is unknown."]
+          ...(alertLookupFailed
+            ? ["Official warning lookup failed; hazard status is unknown."]
             : []),
+          ...(conditionsLookupFailed ? ["Candidate weather observations were unavailable."] : []),
         ],
         activeAlertCount: candidateAlerts.length,
         source,

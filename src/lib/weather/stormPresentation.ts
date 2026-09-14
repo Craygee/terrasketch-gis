@@ -24,6 +24,38 @@ export function stormStyleLegend(mode: StormStyleMode = "Intensity"): string {
   return "NOAA probability (%): green <25 · yellow 25–44 · orange 45–64 · red 65–84 · dark red 85–100 · gray unavailable";
 }
 
+export function stormStyleLegendEntries(mode: StormStyleMode = "Intensity") {
+  if (mode === "Intensity")
+    return [
+      { color: "#15803d", label: "0–19 Weak" },
+      { color: "#ca8a04", label: "20–39 Moderate" },
+      { color: "#ea580c", label: "40–59 Strong" },
+      { color: "#dc2626", label: "60–79 Severe" },
+      { color: "#7f1d1d", label: "80–100 Extreme" },
+      { color: "#6b7280", label: "Insufficient data" },
+    ];
+  if (mode === "Trend")
+    return [
+      { color: "#c2410c", label: "Strengthening" },
+      { color: "#2563eb", label: "Weakening" },
+      { color: "#6b7280", label: "Steady / unavailable" },
+    ];
+  if (mode === "Data quality")
+    return [
+      { color: "#2563eb", label: "Current" },
+      { color: "#a16207", label: "Partial / degraded" },
+      { color: "#6b7280", label: "Stale" },
+    ];
+  return [
+    { color: "#15803d", label: "0–24%" },
+    { color: "#ca8a04", label: "25–44%" },
+    { color: "#ea580c", label: "45–64%" },
+    { color: "#dc2626", label: "65–84%" },
+    { color: "#7f1d1d", label: "85–100%" },
+    { color: "#6b7280", label: "Unavailable" },
+  ];
+}
+
 export const STORM_STYLE_MODES = [
   "Intensity",
   "ProbSevere",

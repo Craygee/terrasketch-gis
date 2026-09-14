@@ -5,6 +5,9 @@ import {
 } from "@/lib/weather/nativeRadar";
 import type { WeatherBundle, WeatherWorkspaceState } from "@/lib/weather/types";
 import { useMapRef } from "@/lib/gis/mapRef";
+import { radarSiteDistanceKm } from "@/lib/weather/radar";
+
+const MAX_SITES = 6;
 
 export function NativeRadarControls({
   workspace,
@@ -22,9 +25,41 @@ export function NativeRadarControls({
   showProducts?: boolean;
 }) {
   const { map } = useMapRef();
-  const selectedSite =
-    bundle?.radarSites?.find((site) => site.id === workspace.radarSiteId) ??
-    bundle?.nativeRadarFrames?.[0]?.site;
+  const mode = workspace.radarSiteMode ?? (workspace.radarSiteId ? "manual" : "automatic");
+  const selectedIds = workspace.radarSiteIds?.length
+    ? workspace.radarSiteIds
+    : workspace.radarSiteId
+      ? [workspace.radarSiteId]
+      : [];
+  const loadedSites = Array.from(
+    new Map((bundle?.nativeRadarFrames ?? []).map((frame) => [frame.site.id, frame.site])).values(),
+  );
+  const focus = bundle?.request.radarFocus ?? bundle?.request.mapCenter;
+  const availableSites = [...(bundle?.radarSites ?? [])].sort((a, b) =>
+    focus
+      ? radarSiteDistanceKm(a, { longitude: focus[0], latitude: focus[1] }) -
+        radarSiteDistanceKm(b, { longitude: focus[0], latitude: focus[1] })
+      : a.id.localeCompare(b.id),
+  );
+  const updateMode = (radarSiteMode: "automatic" | "covering" | "manual") =>
+    (() => {
+      const radarSiteIds =
+        radarSiteMode === "manual"
+          ? selectedIds.length
+            ? selectedIds
+            : loadedSites[0]
+              ? [loadedSites[0].id]
+              : availableSites[0]
+                ? [availableSites[0].id]
+                : []
+          : [];
+      onWorkspace({
+        ...workspace,
+        radarSiteMode,
+        radarSiteIds,
+        radarSiteId: radarSiteMode === "manual" ? radarSiteIds[0] : undefined,
+      });
+    })();
   return (
     <details className="rounded-2xl border border-border bg-background" open>
       <summary className="cursor-pointer px-3 py-2 text-xs font-semibold">
@@ -35,30 +70,82 @@ export function NativeRadarControls({
           Public NOAA scans · LandDraft colors and inspection · no weather subscription
         </p>
         <label className="block space-y-1">
-          <span>Radar site</span>
+          <span>Radar coverage</span>
           <select
-            aria-label="Radar site"
+            aria-label="Radar coverage mode"
             className="w-full rounded-lg border bg-background p-2"
-            value={workspace.radarSiteId ?? ""}
-            onChange={(e) => onWorkspace({ ...workspace, radarSiteId: e.target.value })}
+            value={mode}
+            onChange={(e) => updateMode(e.target.value as "automatic" | "covering" | "manual")}
           >
-            <option value="">Automatic · follows map center</option>
-            {(bundle?.radarSites ?? []).map((site) => (
-              <option key={site.id} value={site.id}>
-                {site.id} · {site.name}
-              </option>
-            ))}
+            <option value="automatic">Closest site · follows active focus</option>
+            <option value="covering">All covering sites · composite</option>
+            <option value="manual">Choose multiple sites</option>
           </select>
         </label>
-        {selectedSite && (
-          <button
-            className="w-full rounded-lg border px-2 py-2 text-xs"
-            onClick={() =>
-              map?.flyTo({ center: [selectedSite.longitude, selectedSite.latitude], zoom: 8 })
-            }
-          >
-            Center map on {selectedSite.id}
-          </button>
+        <p className="text-[10px] text-muted-foreground">
+          Focus: {bundle?.request.radarFocusSource ?? "map"}. Automatic priority is selected storm,
+          target, GPS, inspection point, then map center. All covering sites uses up to {MAX_SITES}
+          nearby NOAA radars.
+        </p>
+        {mode === "manual" && (
+          <label className="block space-y-1">
+            <span>
+              Add radar site ({selectedIds.length}/{MAX_SITES})
+            </span>
+            <select
+              aria-label="Add radar site"
+              className="w-full rounded-lg border bg-background p-2"
+              value=""
+              onChange={(event) => {
+                const id = event.target.value;
+                if (!id || selectedIds.includes(id) || selectedIds.length >= MAX_SITES) return;
+                const radarSiteIds = [...selectedIds, id];
+                onWorkspace({
+                  ...workspace,
+                  radarSiteMode: "manual",
+                  radarSiteIds,
+                  radarSiteId: radarSiteIds[0],
+                });
+              }}
+            >
+              <option value="">Select a NOAA radar…</option>
+              {availableSites
+                .filter((site) => !selectedIds.includes(site.id))
+                .map((site) => (
+                  <option key={site.id} value={site.id}>
+                    {site.id} · {site.name}
+                  </option>
+                ))}
+            </select>
+          </label>
+        )}
+        {!!loadedSites.length && (
+          <div className="flex flex-wrap gap-1">
+            {loadedSites.map((site) => (
+              <span
+                key={site.id}
+                className="inline-flex items-center gap-1 rounded-full bg-secondary px-2 py-1"
+              >
+                <button
+                  onClick={() => map?.flyTo({ center: [site.longitude, site.latitude], zoom: 8 })}
+                  title={`Center map on ${site.name}`}
+                >
+                  {site.id}
+                </button>
+                {mode === "manual" && (
+                  <button
+                    aria-label={`Remove radar ${site.id}`}
+                    onClick={() => {
+                      const radarSiteIds = selectedIds.filter((id) => id !== site.id);
+                      onWorkspace({ ...workspace, radarSiteIds, radarSiteId: radarSiteIds[0] });
+                    }}
+                  >
+                    ×
+                  </button>
+                )}
+              </span>
+            ))}
+          </div>
         )}
         <label className="block space-y-1">
           <span>Elevation product</span>
@@ -87,7 +174,9 @@ export function NativeRadarControls({
               (bundle?.nativeRadarFrames ?? []).filter((f) => f.layerId === id),
               workspace.timeline.selectedTime,
             );
-            const reading = readings[id];
+            const layerReadings = Object.values(readings).filter((item) => item.layerId === id);
+            const reading =
+              layerReadings.find((item) => item.state === "ready") ?? layerReadings[0];
             const matches =
               frame &&
               reading?.timestamp &&
@@ -134,6 +223,12 @@ export function NativeRadarControls({
                           {reading.beamHeightM?.toFixed(0)} m MSL (estimated)
                         </p>
                       </>
+                    )}
+                    {loadedSites.length > 1 && (
+                      <p>
+                        {loadedSites.length} radar sites composited:{" "}
+                        {loadedSites.map((site) => site.id).join(", ")}
+                      </p>
                     )}
                   </div>
                 )}

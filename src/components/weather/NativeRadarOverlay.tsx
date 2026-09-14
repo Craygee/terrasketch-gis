@@ -88,11 +88,13 @@ export function NativeRadarOverlay({
         });
       } catch (error) {
         if (!abort.signal.aborted) {
-          for (const [layerId, frameId] of active.current) {
+          for (const [instanceId, frameId] of active.current) {
             if (frameId !== match[1]) continue;
-            failedTiles.current.add(layerId);
+            const [layerId, site] = instanceId.split("|");
+            failedTiles.current.add(instanceId);
             onReadingRef.current({
-              layerId,
+              layerId: layerId!,
+              site: site!,
               state: "error",
               message: error instanceof Error ? error.message : "Radar tile rendering failed",
             });
@@ -132,38 +134,46 @@ export function NativeRadarOverlay({
     if (!map) return;
     const { frames, workspace } = renderInput.current;
     let cancelled = false;
-    const remove = (layerId: string) => {
-      const id = nativeMapLayerId(layerId);
+    const remove = (instanceId: string) => {
+      const [layerId, siteId] = instanceId.split("|");
+      const id = nativeMapLayerId(layerId!, siteId);
       if (map.getLayer(id)) map.removeLayer(id);
       if (map.getSource(id)) map.removeSource(id);
-      const oldFrame = active.current.get(layerId);
+      const oldFrame = active.current.get(instanceId);
       if (oldFrame) completedTiles.current.delete(oldFrame);
-      active.current.delete(layerId);
-      decoded.current.delete(layerId);
-      failedTiles.current.delete(layerId);
+      active.current.delete(instanceId);
+      decoded.current.delete(instanceId);
+      failedTiles.current.delete(instanceId);
     };
     const reportRendered = () => {
-      for (const [layerId, reading] of decoded.current) {
-        const id = nativeMapLayerId(layerId);
+      for (const [instanceId, reading] of decoded.current) {
+        const [layerId, siteId] = instanceId.split("|");
+        const id = nativeMapLayerId(layerId!, siteId);
         if (
-          !completedTiles.current.has(active.current.get(layerId) ?? "") ||
-          failedTiles.current.has(layerId) ||
+          !completedTiles.current.has(active.current.get(instanceId) ?? "") ||
+          failedTiles.current.has(instanceId) ||
           !map.getSource(id) ||
           !map.isSourceLoaded(id)
         )
           continue;
         if (reading.state !== "ready") {
           const ready = { ...reading, state: "ready" as const };
-          decoded.current.set(layerId, ready);
+          decoded.current.set(instanceId, ready);
           onReadingRef.current(ready);
         }
       }
     };
     const reportError = (event: { sourceId?: string; error: { message: string } }) => {
-      for (const layerId of active.current.keys()) {
-        if (event.sourceId !== nativeMapLayerId(layerId)) continue;
-        failedTiles.current.add(layerId);
-        onReadingRef.current({ layerId, state: "error", message: event.error.message });
+      for (const instanceId of active.current.keys()) {
+        const [layerId, siteId] = instanceId.split("|");
+        if (event.sourceId !== nativeMapLayerId(layerId!, siteId)) continue;
+        failedTiles.current.add(instanceId);
+        onReadingRef.current({
+          layerId: layerId!,
+          site: siteId!,
+          state: "error",
+          message: event.error.message,
+        });
       }
     };
     const update = async () => {
@@ -178,20 +188,24 @@ export function NativeRadarOverlay({
       const grouped = new Map<string, NativeRadarFrame[]>();
       for (const frame of frames)
         if (workspace.layerSettings[frame.layerId]?.visible)
-          grouped.set(frame.layerId, [...(grouped.get(frame.layerId) ?? []), frame]);
+          grouped.set(`${frame.layerId}|${frame.site.id}`, [
+            ...(grouped.get(`${frame.layerId}|${frame.site.id}`) ?? []),
+            frame,
+          ]);
       for (const layer of active.current.keys())
         if (!grouped.has(layer) || workspace.timeline.mode === "forecast") remove(layer);
       if (workspace.timeline.mode === "forecast") return;
-      for (const [layerId, candidates] of grouped) {
+      for (const [instanceId, candidates] of grouped) {
+        const [layerId, siteId] = instanceId.split("|");
         const frame = nativeFrameAt(candidates, workspace.timeline.selectedTime);
         if (!frame) {
-          remove(layerId);
+          remove(instanceId);
           continue;
         }
-        const id = nativeMapLayerId(layerId);
-        if (active.current.get(layerId) !== frame.id) {
-          remove(layerId);
-          onReadingRef.current({ layerId, state: "loading" });
+        const id = nativeMapLayerId(layerId!, siteId);
+        if (active.current.get(instanceId) !== frame.id) {
+          remove(instanceId);
+          onReadingRef.current({ layerId: layerId!, site: siteId!, state: "loading" });
         }
         try {
           const reading = (await requestRef.current({
@@ -207,7 +221,7 @@ export function NativeRadarOverlay({
           }
           if (!map.getSource(id)) {
             completedTiles.current.delete(frame.id);
-            failedTiles.current.delete(layerId);
+            failedTiles.current.delete(instanceId);
             map.addSource(id, {
               type: "raster",
               tiles: [`landdraft-radar://${frame.id}/{z}/{x}/{y}`],
@@ -221,7 +235,7 @@ export function NativeRadarOverlay({
               type: "raster",
               source: id,
               paint: {
-                "raster-opacity": workspace.layerSettings[layerId]?.opacity ?? 0.78,
+                "raster-opacity": workspace.layerSettings[layerId!]?.opacity ?? 0.78,
                 "raster-resampling": "nearest",
                 "raster-fade-duration": 0,
               },
@@ -230,19 +244,25 @@ export function NativeRadarOverlay({
             map.setPaintProperty(
               id,
               "raster-opacity",
-              workspace.layerSettings[layerId]?.opacity ?? 0.78,
+              workspace.layerSettings[layerId!]?.opacity ?? 0.78,
             );
-          active.current.set(layerId, frame.id);
-          orderNativeLayers(map, workspace);
-          const next = { ...reading, state: "rendering" as const };
-          decoded.current.set(layerId, next);
+          active.current.set(instanceId, frame.id);
+          orderNativeLayers(map, workspace, active.current.keys());
+          const next = {
+            ...reading,
+            layerId: layerId!,
+            site: siteId!,
+            state: "rendering" as const,
+          };
+          decoded.current.set(instanceId, next);
           onReadingRef.current(next);
           reportRendered();
         } catch (error) {
           if (!cancelled) {
-            remove(layerId);
+            remove(instanceId);
             onReadingRef.current({
-              layerId,
+              layerId: layerId!,
+              site: siteId!,
               state: "error",
               message: error instanceof Error ? error.message : "Radar unavailable",
             });
@@ -266,8 +286,9 @@ export function NativeRadarOverlay({
     const current = active.current;
     return () => {
       if (!map) return;
-      for (const layerId of current.keys()) {
-        const id = nativeMapLayerId(layerId);
+      for (const instanceId of current.keys()) {
+        const [layerId, siteId] = instanceId.split("|");
+        const id = nativeMapLayerId(layerId!, siteId);
         if (map.getLayer(id)) map.removeLayer(id);
         if (map.getSource(id)) map.removeSource(id);
       }
@@ -277,12 +298,22 @@ export function NativeRadarOverlay({
   return null;
 }
 
-function orderNativeLayers(map: RadarMap, workspace: WeatherWorkspaceState) {
+function orderNativeLayers(
+  map: RadarMap,
+  workspace: WeatherWorkspaceState,
+  instances: IterableIterator<string>,
+) {
   // Existing weather overlay establishes the complete order on its next update.
   // Put native imagery below official warnings immediately after creation.
   const alert = "landdraft-weather-alert-fill";
-  for (const id of [...workspace.layerOrder].reverse()) {
-    const rendered = nativeMapLayerId(id);
-    if (map.getLayer(rendered) && map.getLayer(alert)) map.moveLayer(rendered, alert);
+  const order = new Map(workspace.layerOrder.map((id, index) => [id, index]));
+  const rendered = [...instances]
+    .map((instanceId) => {
+      const [layerId, siteId] = instanceId.split("|");
+      return { layerId: layerId!, id: nativeMapLayerId(layerId!, siteId) };
+    })
+    .sort((a, b) => (order.get(b.layerId) ?? 0) - (order.get(a.layerId) ?? 0));
+  for (const item of rendered) {
+    if (map.getLayer(item.id) && map.getLayer(alert)) map.moveLayer(item.id, alert);
   }
 }

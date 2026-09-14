@@ -388,6 +388,8 @@ export interface WeatherPreset {
 export interface WeatherWorkspaceState {
   stormStyle?: import("./stormPresentation").StormStyleMode;
   nativeLayerCatalogVersion?: 1;
+  radarSiteMode?: "automatic" | "covering" | "manual";
+  radarSiteIds?: string[] | undefined;
   radarSiteId?: string | undefined;
   radarTilt?: number | undefined;
   version: 1;
@@ -407,6 +409,11 @@ export interface WeatherWorkspaceState {
 export interface WeatherPointRequest {
   /** Visible map center for automatic radar selection; separate from the inspection point. */
   mapCenter?: [number, number];
+  /** Highest-priority point used to select native radar coverage. */
+  radarFocus?: [number, number];
+  radarFocusSource?: "storm" | "target" | "gps" | "inspection" | "map";
+  radarSiteMode?: "automatic" | "covering" | "manual";
+  radarSiteIds?: string[] | undefined;
   photographyStormId?: string | undefined;
   radarSiteId?: string | undefined;
   radarTilt?: number | undefined;
