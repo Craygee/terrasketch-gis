@@ -14,18 +14,22 @@ export const NATIVE_RADAR_BUCKET = "https://unidata-nexrad-level3.s3.amazonaws.c
 const binaryCache = new Map<string, { bytes: Uint8Array; expires: number }>();
 const catalogCache = new Map<string, { keys: string[]; expires: number }>();
 
+export function selectNativeRadarSite(request: WeatherPointRequest, sites: WeatherRadarSite[]) {
+  sites = nativeRadarSites(sites);
+  if (request.radarSiteId) return sites.find((site) => site.id === request.radarSiteId);
+  const point = request.mapCenter
+    ? { longitude: request.mapCenter[0], latitude: request.mapCenter[1] }
+    : request;
+  const nearest = nearestWeatherRadarSite(sites, point);
+  return nearest && nearest.distanceKm <= 460 ? nearest.site : undefined;
+}
+
 export async function discoverNativeRadar(
   request: WeatherPointRequest,
   sites: WeatherRadarSite[],
   signal: AbortSignal,
 ): Promise<NativeRadarFrame[]> {
-  sites = nativeRadarSites(sites);
-  const nearest = nearestWeatherRadarSite(sites, request);
-  const site = request.radarSiteId
-    ? sites.find((s) => s.id === request.radarSiteId)
-    : nearest && nearest.distanceKm <= 460
-      ? nearest.site
-      : undefined;
+  const site = selectNativeRadarSite(request, sites);
   if (!site || !/^[A-Z0-9]{4}$/.test(site.id)) return [];
   const now = Date.now();
   const days = [

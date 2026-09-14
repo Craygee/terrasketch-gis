@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { defaultWeatherWorkspace, normalizeWeatherWorkspace } from "./model.ts";
-import { followsLatestScan } from "./landdraftLayers.ts";
+import { followsLatestScan, timelineForLayerActivation } from "./landdraftLayers.ts";
 import type { WeatherBundle } from "./types.ts";
 
 test("restoration preserves public and native layer selections and controls", () => {
@@ -77,4 +77,28 @@ test("future forecast overlays cannot freeze live radar and rainfall refresh", (
   assert.equal(followsLatestScan(state, previous), true);
   state.timeline.selectedTime = "2026-09-13T20:00:00Z";
   assert.equal(followsLatestScan(state, previous), false);
+});
+
+test("activating native radar and rainfall starts at live time even after forecast/history use", () => {
+  const timeline = {
+    ...defaultWeatherWorkspace().timeline,
+    mode: "forecast" as const,
+    playing: true,
+    selectedTime: "2026-09-12T10:00:00Z",
+  };
+  const now = Date.parse("2026-09-14T00:00:00Z");
+  for (const id of [
+    "weather.radar.pro.reflectivity",
+    "weather.rainfall.1h",
+    "weather.rainfall.72h",
+  ]) {
+    const actual = timelineForLayerActivation(id, timeline, now);
+    assert.equal(actual.mode, "observed");
+    assert.equal(actual.playing, false);
+    assert.equal(actual.selectedTime, new Date(now).toISOString());
+  }
+  assert.equal(
+    timelineForLayerActivation("weather.forecast.precipitation", timeline, now),
+    timeline,
+  );
 });

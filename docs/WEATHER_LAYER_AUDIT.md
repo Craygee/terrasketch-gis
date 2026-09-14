@@ -95,3 +95,15 @@ The isolated `tools/weather-db/chaser.test.mjs` check passed authenticated upser
 - Added LandDraft tools as an additional category for the six native radar fields, seven rainfall durations, predictive model, photography and opt-in chasers; original categories and shared settings are retained.
 - Added a 45-second client request timeout so an interrupted transport does not leave the module indefinitely loading.
 - Automated weather tests: 96 passing. Public-source and proxy success must not be represented as complete interactive browser verification.
+
+## Blank-map reproduction and repair — 2026-09-14
+
+The user confirmed layers turn on but the map remains blank. The previous endpoint audit did not establish rendering correctness.
+
+- Reproduced all six native fields with fixed NOAA scans using the actual `NativeRadarOverlay` in an isolated browser page. Each reached `ready`; reflectivity and classification pixels were visually confirmed.
+- Found automatic radar selection used a saved inspection coordinate even when the displayed map was over a distant storm. Added separately validated `mapCenter`, automatic selection on map-center changes, and a fresh location check when enabling a native field. Explicit site selection is preserved.
+- Photography's automatic storm selection now uses the visible map center too; an explicitly selected storm still takes precedence.
+- Turning on native radar or rainfall now selects observed/live time instead of leaving the new layer hidden by an earlier or forecast timeline selection.
+- Added a stable, bounded JSON weather endpoint using the same provider policy/context and point validation. The previous hosted server-function probe returned ~3.1 MB of transport data (~1.9 MB plain JSON); browser requests had timed out. This removes the serialization envelope and hashed transport identifier from weather loads.
+- Native cards show loading, decoded scan state, or the worker error instead of using source availability alone. Ready reporting occurs after attaching the map layer.
+- 100 weather tests pass, including distant-inspection/map-center regression tests and activation timeline tests. Typecheck and scoped lint pass.

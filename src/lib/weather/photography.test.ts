@@ -167,3 +167,13 @@ test("photography uses the selected current storm and rejects expired or missing
   );
   assert.equal(selectPhotographyStorm(storms, { latitude: 0, longitude: 0 }), undefined);
 });
+
+test("photography finds storms near the visible map even with a distant saved inspection point", () => {
+  const storm = tracked("visible");
+  const selected = selectPhotographyStorm([storm], {
+    latitude: 0,
+    longitude: 0,
+    mapCenter: storm.centroid.geometry.coordinates as [number, number],
+  });
+  assert.equal(selected?.id, "visible");
+});

@@ -1,9 +1,10 @@
 import { NativeRadarControls } from "./NativeRadarControls";
+import { nearestWeatherRadarSite } from "@/lib/weather/radar";
 import { nativeProduct } from "@/lib/weather/nativeRadar";
 import { hasWeatherCapability } from "@/lib/weather/entitlements";
 import { weatherProviderRegistry } from "@/lib/weather/providerRegistry";
 import { weatherProduct } from "@/lib/weather/productRegistry";
-import { followsLatestScan } from "@/lib/weather/landdraftLayers";
+import { followsLatestScan, timelineForLayerActivation } from "@/lib/weather/landdraftLayers";
 import type { NativeRadarReading } from "@/lib/weather/nativeRadar";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MapMouseEvent, MapMovementEvent } from "maplibre-gl";
@@ -288,6 +289,7 @@ export function WeatherWorkspace() {
 
   const loadPoint = useCallback(
     async (point: [number, number], quietly = false, layers: string[] = requestedLayerIds) => {
+      const mapCenter = map?.getCenter();
       const requestId = ++latestWeatherRequest.current;
       activePointRequest.current?.abort();
       const controller = new AbortController();
@@ -309,6 +311,7 @@ export function WeatherWorkspace() {
             latitude: point[1],
             requestedLayerIds: layers,
             photographyStormId: photographyStormId.current ?? undefined,
+            mapCenter: mapCenter ? [mapCenter.wrap().lng, mapCenter.lat] : point,
             radarSiteId: workspace.radarSiteId,
             radarTilt: workspace.radarTilt,
           },
@@ -340,7 +343,7 @@ export function WeatherWorkspace() {
         if (requestId === latestWeatherRequest.current) setLoading(false);
       }
     },
-    [requestedLayerIds, workspace.radarSiteId, workspace.radarTilt],
+    [requestedLayerIds, workspace.radarSiteId, workspace.radarTilt, map],
   );
 
   useEffect(() => {
@@ -359,6 +362,31 @@ export function WeatherWorkspace() {
     bundle,
     loadPoint,
   ]);
+
+  useEffect(() => {
+    if (!map) return;
+    const followRadar = () => {
+      const current = latestWorkspace.current;
+      if (
+        current.radarSiteId ||
+        !Object.entries(current.layerSettings).some(
+          ([id, setting]) => nativeProduct(id) && setting.visible,
+        )
+      )
+        return;
+      const center = map.getCenter().wrap();
+      const nextSite = nearestWeatherRadarSite(latestBundle.current?.radarSites ?? [], {
+        longitude: center.lng,
+        latitude: center.lat,
+      });
+      if (nextSite?.site.id === latestBundle.current?.nativeRadarFrames?.[0]?.site.id) return;
+      void loadPoint(current.lastInspectionPoint ?? [center.lng, center.lat], true);
+    };
+    map.on("moveend", followRadar);
+    return () => {
+      map.off("moveend", followRadar);
+    };
+  }, [map, loadPoint]);
 
   const loadCommunityChasers = useCallback(async () => {
     const point = chaserLocation ?? workspace.lastInspectionPoint ?? wb.mapView.center;
@@ -576,8 +604,8 @@ export function WeatherWorkspace() {
       }
       if (change.visible && !initial.visible && id !== "weather.storm_chaser.spotters") {
         let availability = layerAvailability(id, bundle, publicAccess);
-        if (!availability.ready) {
-          if (!availability.canCheck) {
+        if (!availability.ready || nativeProduct(id)) {
+          if (!availability.ready && !availability.canCheck) {
             toast.info(availability.label, { description: "See Data Sources for requirements." });
             return;
           }
@@ -600,6 +628,10 @@ export function WeatherWorkspace() {
       if (!setting) return;
       wb.setWeatherWorkspace({
         ...latest,
+        timeline:
+          change.visible && !initial.visible
+            ? timelineForLayerActivation(id, latest.timeline)
+            : latest.timeline,
         layerSettings: {
           ...latest.layerSettings,
           [id]: {
@@ -1497,6 +1529,16 @@ function WeatherLayerPanel({
     const setting = workspace.layerSettings[layer.id];
     if (!setting || !hasWeatherCapability(layer.capability)) return null;
     const status = layerStatus(layer.id);
+    const radarReading =
+      setting.visible && nativeProduct(layer.id) ? nativeReadings[layer.id] : undefined;
+    const displayStatus =
+      setting.visible && status.ready && nativeProduct(layer.id)
+        ? radarReading?.state === "error"
+          ? (radarReading.message ?? "Radar rendering failed")
+          : radarReading?.state === "ready"
+            ? "Scan loaded · tap map to inspect"
+            : "Loading radar scan…"
+        : status.label;
     return (
       <div
         key={layer.id}
@@ -1544,10 +1586,12 @@ function WeatherLayerPanel({
             <span
               className={cn(
                 "mt-1 inline-flex rounded-full px-1.5 py-0.5 text-[8px] font-semibold",
-                status.ready ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800",
+                status.ready && radarReading?.state !== "error"
+                  ? "bg-emerald-100 text-emerald-800"
+                  : "bg-amber-100 text-amber-800",
               )}
             >
-              {status.label}
+              {displayStatus}
             </span>
             {requirementLayer === layer.id && !status.ready && (
               <div className="mt-2 rounded-xl border border-border p-2 text-[10px]">

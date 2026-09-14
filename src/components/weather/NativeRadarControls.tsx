@@ -42,7 +42,7 @@ export function NativeRadarControls({
             value={workspace.radarSiteId ?? ""}
             onChange={(e) => onWorkspace({ ...workspace, radarSiteId: e.target.value })}
           >
-            <option value="">Nearest site to inspected point</option>
+            <option value="">Automatic · follows map center</option>
             {(bundle?.radarSites ?? []).map((site) => (
               <option key={site.id} value={site.id}>
                 {site.id} · {site.name}

@@ -1,4 +1,5 @@
-import type { WeatherBundle, WeatherWorkspaceState } from "./types.ts";
+import { nativeProduct } from "./nativeRadar.ts";
+import type { WeatherBundle, WeatherWorkspaceState, WeatherTimelineState } from "./types.ts";
 
 export function followsLatestScan(
   workspace: WeatherWorkspaceState,
@@ -17,4 +18,20 @@ export function followsLatestScan(
     .map((frame) => Date.parse(frame.timestamp))
     .filter(Number.isFinite);
   return !times.length || Date.parse(workspace.timeline.selectedTime) >= Math.max(...times);
+}
+
+/** Turning on a live local radar/rainfall product must not silently leave it before its first frame. */
+export function timelineForLayerActivation(
+  id: string,
+  timeline: WeatherTimelineState,
+  now = Date.now(),
+) {
+  return nativeProduct(id) || id.startsWith("weather.rainfall.")
+    ? {
+        ...timeline,
+        mode: "observed" as const,
+        selectedTime: new Date(now).toISOString(),
+        playing: false,
+      }
+    : timeline;
 }

@@ -403,9 +403,11 @@ export interface WeatherWorkspaceState {
 }
 
 export interface WeatherPointRequest {
-  photographyStormId?: string;
-  radarSiteId?: string;
-  radarTilt?: number;
+  /** Visible map center for automatic radar selection; separate from the inspection point. */
+  mapCenter?: [number, number];
+  photographyStormId?: string | undefined;
+  radarSiteId?: string | undefined;
+  radarTilt?: number | undefined;
   latitude: number;
   longitude: number;
   requestedLayerIds?: string[] | undefined;

@@ -147,7 +147,6 @@ export function NativeRadarOverlay({
             point: workspace.lastInspectionPoint ?? [frame.site.longitude, frame.site.latitude],
           })) as NativeRadarReading;
           if (cancelled) return;
-          onReadingRef.current(reading);
           if (!map.getStyle()) return;
           if (!map.getSource(id)) {
             map.addSource(id, {
@@ -176,6 +175,7 @@ export function NativeRadarOverlay({
             );
           active.current.set(layerId, frame.id);
           orderNativeLayers(map, workspace);
+          onReadingRef.current(reading);
         } catch (error) {
           if (!cancelled) {
             remove(layerId);

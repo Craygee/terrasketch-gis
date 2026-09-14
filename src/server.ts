@@ -63,6 +63,11 @@ export default {
   async fetch(request: Request, env: unknown, ctx: unknown) {
     return runWithWeatherContext(env, request, async () => {
       try {
+        if (new URL(request.url).pathname === "/api/weather/point") {
+          const { handleWeatherPointRequest } = await import("./lib/weather/pointRequest.server");
+          const response = await handleWeatherPointRequest(request);
+          if (response) return applyEnvironmentHeaders(response);
+        }
         const nativeRadar = await handleNativeRadarProxy(request, env);
         if (nativeRadar) return applyEnvironmentHeaders(nativeRadar);
         if (new URL(request.url).pathname.startsWith("/api/weather/xweather/"))

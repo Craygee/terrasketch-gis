@@ -10,7 +10,7 @@ import {
   type NativeRadarLayer,
 } from "./nativeRadar.ts";
 import { renderNativeRadarTile } from "./nativeRadarRender.ts";
-import { nativeRadarSites } from "./nativeRadar.server.ts";
+import { nativeRadarSites, selectNativeRadarSite } from "./nativeRadar.server.ts";
 
 test("native selection excludes airport radars without WSR-88D dual polarization products", () => {
   const sites = ["KTLX", "TOKC", "TJUA", "PHKI", "KCRI"].map((id) => ({
@@ -128,4 +128,19 @@ test("tile rendering remains transparent outside coverage and rejects invalid co
   const scan = decodeNativeRadar(fixture().bytes, reflectivity);
   assert.throws(() => renderNativeRadarTile(scan, 3, 8, 0), /Invalid/);
   assert.ok(renderNativeRadarTile(scan, 3, 0, 0).every((v) => v === 0));
+});
+
+test("automatic radar follows the visible storm, not a distant saved inspection point", () => {
+  const sites = [
+    { id: "KGRK", name: "Texas", longitude: -97.38, latitude: 30.72 },
+    { id: "KENX", name: "New York", longitude: -74.06, latitude: 42.59 },
+  ];
+  const request = {
+    longitude: -97.4,
+    latitude: 31,
+    mapCenter: [-74.2, 42.8] as [number, number],
+  };
+  assert.equal(selectNativeRadarSite(request, sites)?.id, "KENX");
+  assert.equal(selectNativeRadarSite({ ...request, radarSiteId: "KGRK" }, sites)?.id, "KGRK");
+  assert.equal(selectNativeRadarSite({ ...request, mapCenter: [0, 0] }, sites), undefined);
 });

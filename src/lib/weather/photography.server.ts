@@ -20,7 +20,7 @@ export function selectPhotographyStorm(storms: StormObject[], request: WeatherPo
   );
   if (request.photographyStormId)
     return fresh.find((storm) => storm.id === request.photographyStormId);
-  const location = point([request.longitude, request.latitude]);
+  const location = point(request.mapCenter ?? [request.longitude, request.latitude]);
   return fresh
     .map((storm) => ({ storm, km: distance(location, storm.centroid) }))
     .filter((item) => item.km <= 300)
