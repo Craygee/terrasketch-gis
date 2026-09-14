@@ -1,4 +1,5 @@
 import "./lib/error-capture";
+import { accessMiddleware } from "./lib/access.server";
 
 import { LANDDRAFT_APP_CHANNEL } from "./lib/appVersion";
 import { consumeLastCapturedError } from "./lib/error-capture";
@@ -63,6 +64,12 @@ export default {
   async fetch(request: Request, env: unknown, ctx: unknown) {
     return runWithWeatherContext(env, request, async () => {
       try {
+        const access = await accessMiddleware(request, {
+          enabled: import.meta.env["VITE_LANDDRAFT_ACCESS_ENFORCEMENT"] === "true",
+          url: import.meta.env["VITE_SUPABASE_URL"],
+          key: import.meta.env["VITE_SUPABASE_PUBLISHABLE_KEY"] || import.meta.env["VITE_SUPABASE_ANON_KEY"],
+        });
+        if (access) return access;
         if (new URL(request.url).pathname === "/api/weather/point") {
           const { handleWeatherPointRequest } = await import("./lib/weather/pointRequest.server");
           const response = await handleWeatherPointRequest(request);

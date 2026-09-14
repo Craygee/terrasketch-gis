@@ -1,3 +1,4 @@
+import { checkAccess } from '../access.server';
 const usage = new Map<string, { count: number; until: number }>();
 
 export function consumeWaterRequest(userId: string, now = Date.now()) {
@@ -22,6 +23,8 @@ export async function requireWaterAccess(token: string) {
     signal: AbortSignal.timeout(10_000),
   });
   if (!response.ok) throw new Error("Your session expired. Sign in again.");
+  if (!(await checkAccess({enabled: env?.['VITE_LANDDRAFT_ACCESS_ENFORCEMENT']==='true',url,key},token,'water.hydrogeology')).allowed)
+    throw new Error('Water module access is restricted. Contact LandDraft support.');
   const user = (await response.json()) as { id?: string };
   if (!user.id || !consumeWaterRequest(user.id))
     throw new Error("Water request limit reached. Retry in one minute.");
