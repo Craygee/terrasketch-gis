@@ -108,6 +108,36 @@ export function layerAvailability(
       : id === "weather.radar.simple"
         ? bundle.radarFrames.map((frame) => frame.source)
         : bundle.rasterFrames.filter((frame) => frame.layerId === id).map((frame) => frame.source);
+  if (id === "weather.severe.probsevere") {
+    const time = Date.parse(bundle.probSevereSource?.timestamp ?? "");
+    if (!Number.isFinite(time) || time > now + 60000 || now - time > 30 * 60000)
+      return no("stale", "NOAA ProbSevere source is stale — refresh", true);
+    if (now - time > 6 * 60000)
+      return {
+        ready: true,
+        state: "available",
+        canCheck: true,
+        label: `Delayed NOAA guidance · ${Math.floor((now - time) / 60000)} min old`,
+      };
+  }
+  if (id === "weather.severe.intelligence" && bundle.stormObjects.length) {
+    if (
+      !bundle.stormObjects.some((storm) => {
+        const time = Date.parse(storm.observedAt);
+        return Number.isFinite(time) && time <= now + 60000 && now - time <= 30 * 60000;
+      })
+    )
+      return no("stale", "Storm guidance expired — refresh", true);
+    const healthy = bundle.providerHealth.some(
+      (p) => p.providerId === "noaa-probsevere-v3" && p.status === "up",
+    );
+    return {
+      ready: true,
+      state: "available",
+      canCheck: true,
+      label: healthy ? "Available" : "NOAA feed delayed · displaying available storm guidance",
+    };
+  }
   if (
     sources.length &&
     sources.every(
@@ -158,7 +188,9 @@ export function layerHasUsableData(bundle: WeatherBundle | null, id: string): bo
         (provider) => provider.providerId === "nws-alerts" && provider.status === "down",
       )
     );
-  if (id === "weather.severe.intelligence") return healthy("noaa-probsevere-v3");
+  if (id === "weather.severe.intelligence")
+    return bundle.stormObjects.length > 0 || healthy("noaa-probsevere-v3");
+  if (id === "weather.severe.probsevere") return !!bundle.probSevereSource;
   if (id === "weather.severe.reports") return healthy("iem-nws-lsr");
   if (id === "weather.storm_chaser.spotters") return healthy("landdraft-chaser-presence");
   if (id === "weather.metar") return bundle.stationObservations.length > 0;

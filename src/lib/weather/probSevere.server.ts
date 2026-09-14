@@ -445,6 +445,13 @@ export async function loadProbSevereStormObjects(
   return normalizeProbSevereFrames(frames, request);
 }
 
+/** Latest provider polygons and attributes, without LandDraft history or projections. */
+export async function loadProbSevereSource(signal: AbortSignal) {
+  const filename = (await recentFrameNames(signal)).at(-1);
+  if (!filename) throw new Error("ProbSevere published no current frame");
+  return { timestamp: frameTime(filename)!, data: await fetchFrame(filename, signal) };
+}
+
 /** Pure normalizer used by the gateway and deterministic fixture tests. */
 export function normalizeProbSevereFrames(
   frames: ProbSevereInputFrame[],

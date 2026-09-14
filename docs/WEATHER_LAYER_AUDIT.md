@@ -119,3 +119,11 @@ Fetched all six KNQA products from the deployed API (00:39 UTC), rendered them t
 ## Stalled-source regression — 2026-09-14
 
 The previous readiness guard was too broad. MapLibre `isStyleLoaded()` includes all source loading, whereas `getStyle()` is undefined only until the stylesheet can accept mutations (verified against installed MapLibre `Style.serialize()`). A never-resolving unrelated GeoJSON source reproduced six enabled native products with no imagery. Changing weather/native/edit guards to stylesheet readiness rendered the same six KNQA scans despite that source remaining stalled. This is a reproduced regression introduced by the previous repair, not evidence that every earlier mobile failure had this cause. Mobile layer-stack rows now expose radar tile loading/errors/site instead of showing only enabled-eye icons.
+
+## Original source layers and predictive status — 2026-09-14
+
+Added Source data navigation membership for public-data products, retaining their previous categories and shared controls. Added independent weather.severe.probsevere: latest NOAA polygons/properties passed through unchanged, no LandDraft centroids/history/motion/corridors, no 150-object analysis truncation. Separate fill/outline/opacity and tap-to-inspect provider attributes. Existing radar/rainfall products already display source field values through LandDraft renderers; source navigation does not apply predictive processing.
+
+Predictive status now uses the displayed storm objects as evidence and explicitly labels a delayed NOAA feed. Objects older than the existing 30-minute rolling analysis limit are unavailable. The map now respects that same visibility/availability result instead of forcing storm geometry on in Storm Chaser despite the unavailable card. Source-only guidance shows delay/age after six minutes and expires after 30 minutes; future/invalid times are unavailable.
+
+Fetched 146 original NOAA polygons at source time 01:02:40 UTC (approximately 18 minutes old during verification). Browser-verified source polygons, original-attribute popup, and independent hide action. All 105 weather tests pass, including unchanged source properties/geometries, no history requests for source-only loading, category membership, delayed model data and expired source handling. TypeScript and scoped lint passed.

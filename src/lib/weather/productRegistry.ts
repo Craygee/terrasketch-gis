@@ -44,6 +44,7 @@ const publicProducts: Record<string, [string, string, number]> = {
   "weather.lightning.recent": ["nowcoast-lightning", "strike-density", 1800],
   "weather.severe.alerts": ["nws", "alerts", 300],
   "weather.severe.intelligence": ["mrms", "probsevere-v3", 600],
+  "weather.severe.probsevere": ["mrms", "probsevere-v3-source", 600],
   "weather.severe.reports": ["iem", "nws-local-storm-reports", 1800],
   "weather.metar": ["awc", "metar", 7200],
   "weather.forecast.precipitation": ["nws", "ndfd-qpf", 14400],

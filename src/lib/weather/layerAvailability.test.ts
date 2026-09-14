@@ -250,3 +250,54 @@ test("reviewed latest-image fallback remains usable with its missing timestamp d
     false,
   );
 });
+
+test("predictive availability uses displayed storm data while reporting degraded feed health", () => {
+  const now = Date.parse(empty.generatedAt);
+  const bundle = {
+    ...empty,
+    stormObjects: [{ observedAt: empty.generatedAt }],
+    providerHealth: [{ providerId: "noaa-probsevere-v3", status: "degraded" }],
+  } as WeatherBundle;
+  const state = layerAvailability("weather.severe.intelligence", bundle, { connected: false }, now);
+  assert.equal(state.ready, true);
+  assert.match(state.label, /delayed/);
+  assert.equal(
+    layerAvailability(
+      "weather.severe.intelligence",
+      { ...bundle, stormObjects: [{ observedAt: "2026-09-13T10:00:00Z" }] } as WeatherBundle,
+      { connected: false },
+      now,
+    ).state,
+    "stale",
+  );
+});
+test("source ProbSevere empty results are valid and expired source times are not ready", () => {
+  const bundle = {
+    ...empty,
+    probSevereSource: {
+      timestamp: empty.generatedAt,
+      data: { type: "FeatureCollection" as const, features: [] },
+    },
+  };
+  assert.equal(
+    layerAvailability(
+      "weather.severe.probsevere",
+      bundle,
+      { connected: false },
+      Date.parse(empty.generatedAt),
+    ).ready,
+    true,
+  );
+  assert.equal(
+    layerAvailability(
+      "weather.severe.probsevere",
+      {
+        ...bundle,
+        probSevereSource: { ...bundle.probSevereSource, timestamp: "2026-09-13T10:00:00Z" },
+      },
+      { connected: false },
+      Date.parse(empty.generatedAt),
+    ).state,
+    "stale",
+  );
+});

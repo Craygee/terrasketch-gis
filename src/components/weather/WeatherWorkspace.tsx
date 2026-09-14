@@ -1119,10 +1119,9 @@ export function WeatherWorkspace() {
                 });
                 if (window.innerWidth < 1024) setMobileSheet("weather");
               }}
-              stormObjectsVisible={
-                workspaceView === "storm-chaser" &&
-                Boolean(workspace.layerSettings["weather.severe.intelligence"]?.visible)
-              }
+              stormObjectsVisible={Boolean(
+                renderedWorkspace.layerSettings["weather.severe.intelligence"]?.visible,
+              )}
               selectedStormId={activeStorm?.id ?? null}
               forecastReferenceTime={forecastReferenceTime}
               chaserLocation={chaserLocation}

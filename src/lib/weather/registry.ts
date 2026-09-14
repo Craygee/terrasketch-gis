@@ -5,6 +5,7 @@ import { SPC_PRODUCTS } from "./spcCatalog.ts";
 
 export const WEATHER_LAYER_GROUPS = [
   "LandDraft tools",
+  "Source data",
   "Current",
   "Radar",
   "Satellite & clouds",
@@ -295,6 +296,26 @@ export const weatherLayerRegistry: WeatherLayerDefinition[] = [
     ],
   },
   {
+    id: "weather.severe.probsevere",
+    name: "NOAA ProbSevere · source polygons",
+    group: "Severe weather",
+    description:
+      "Original NOAA/CIMSS ProbSevere polygons and published attributes. NOAA next-hour probability guidance; no LandDraft motion paths, corridors, or analysis. Not official warnings.",
+    capability: "weather.severe",
+    dataType: "geojson",
+    providerProducts: ["probsevere-v3-source"],
+    defaultOpacity: 0.25,
+    minZoom: 0,
+    maxZoom: 24,
+    animationSupport: false,
+    timeSupport: false,
+    inspectSupport: true,
+    mobileVisibility: "primary",
+    audience: "basic",
+    attribution: "NOAA / CIMSS ProbSevere v3 via NCEP MRMS",
+    legend: [{ color: "#7c3aed", label: "NOAA source storm polygon" }],
+  },
+  {
     id: "weather.severe.intelligence",
     name: "LandDraft Predictive Model",
     group: "Severe weather",
@@ -448,6 +469,12 @@ export function isLandDraftTool(id: string) {
   );
 }
 export function weatherLayerInGroup(layer: WeatherLayerDefinition, group: string) {
+  if (group === "Source data")
+    return ![
+      "weather.severe.intelligence",
+      "weather.photo",
+      "weather.storm_chaser.spotters",
+    ].includes(layer.id);
   return group === "LandDraft tools" ? isLandDraftTool(layer.id) : layer.group === group;
 }
 export function weatherLayersInGroup(group: string) {

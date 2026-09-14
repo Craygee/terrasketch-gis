@@ -1,4 +1,6 @@
 import { NativeRadarOverlay } from "./NativeRadarOverlay";
+import { ProbSevereSourceOverlay } from "./ProbSevereSourceOverlay";
+import { probSevereSourceLayerIds } from "@/lib/weather/probSevereSource";
 import {
   nativeProduct,
   nativeMapLayerId,
@@ -1111,6 +1113,7 @@ function ensureRasterProducts(
 }
 
 function renderedLayerIds(weatherLayerId: string) {
+  if (weatherLayerId === "weather.severe.probsevere") return probSevereSourceLayerIds;
   if (nativeProduct(weatherLayerId)) return [nativeMapLayerId(weatherLayerId)];
   const spc = SPC_PRODUCTS.find((product) => product.layerId === weatherLayerId);
   if (spc) return [`landdraft-spc-${spc.productId}-fill`, `landdraft-spc-${spc.productId}-line`];
@@ -1608,10 +1611,17 @@ export function WeatherMapOverlay({
   ]);
 
   return (
-    <NativeRadarOverlay
-      frames={bundle?.nativeRadarFrames ?? EMPTY_NATIVE_FRAMES}
-      workspace={workspace}
-      onReading={onNativeReading}
-    />
+    <>
+      <NativeRadarOverlay
+        frames={bundle?.nativeRadarFrames ?? EMPTY_NATIVE_FRAMES}
+        workspace={workspace}
+        onReading={onNativeReading}
+      />
+      <ProbSevereSourceOverlay
+        data={bundle?.probSevereSource}
+        visible={!!workspace.layerSettings["weather.severe.probsevere"]?.visible}
+        opacity={workspace.layerSettings["weather.severe.probsevere"]?.opacity ?? 0.25}
+      />
+    </>
   );
 }

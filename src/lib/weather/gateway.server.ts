@@ -38,7 +38,7 @@ import { SPC_PRODUCTS } from "./spcCatalog.ts";
 import { measurementValue, nwsWindMetersPerSecond } from "./nwsMeasurement.ts";
 import { nearestWeatherRadarSite, type WeatherRadarSite } from "./radar";
 import { buildStormObjectsFromAlerts } from "./stormIntelligence";
-import { loadProbSevereStormObjects } from "./probSevere.server";
+import { loadProbSevereStormObjects, loadProbSevereSource } from "./probSevere.server";
 import { loadIemStormReports } from "./iemStormReports.server";
 import { discoverNativeRadar, nativeRadarSites } from "./nativeRadar.server.ts";
 import { nativeProduct } from "./nativeRadar.ts";
@@ -1162,6 +1162,7 @@ export async function loadWeatherBundle(request: WeatherPointRequest): Promise<W
   const chaserPositions: WeatherChaserPosition[] = [];
   let stormReports: WeatherStormReport[] = [];
   let probSevereObjects: StormObject[] = [];
+  let probSevereSource: WeatherBundle["probSevereSource"];
   let photography: WeatherBundle["photography"] = null;
   let nwsCovered = false;
   // Separate bounded requests: SPC failure cannot interrupt official warnings.
@@ -1602,6 +1603,14 @@ export async function loadWeatherBundle(request: WeatherPointRequest): Promise<W
       }
     }
 
+    if (requestedLayers.has("weather.severe.probsevere") && weatherProviderEnabled("mrms")) {
+      try {
+        probSevereSource = await loadProbSevereSource(AbortSignal.timeout(12_000));
+      } catch {
+        warnings.push("The NOAA ProbSevere source layer could not be refreshed.");
+      }
+    }
+
     if (requestedLayers.has("weather.photo")) {
       photography = await buildPhotographyAssessment(
         request,
@@ -1711,6 +1720,7 @@ export async function loadWeatherBundle(request: WeatherPointRequest): Promise<W
     current,
     forecast,
     alerts,
+    ...(probSevereSource ? { probSevereSource } : {}),
     stormObjects: [
       ...probSevereObjects,
       ...buildStormObjectsFromAlerts(alerts, [request.longitude, request.latitude]),
