@@ -25,6 +25,9 @@ export function NativeRadarOverlay({
     pending = useRef(new Map<number, Pending>()),
     sequence = useRef(0);
   const active = useRef(new Map<string, string>());
+  const decoded = useRef(new Map<string, NativeRadarReading>());
+  const failedTiles = useRef(new Set<string>());
+  const completedTiles = useRef(new Set<string>());
   const onReadingRef = useRef(onReading);
   onReadingRef.current = onReading;
   const requestRef = useRef<(data: Record<string, unknown>) => Promise<unknown>>(() =>
@@ -74,14 +77,31 @@ export function NativeRadarOverlay({
       if (abort.signal.aborted) throw new Error("Radar tile cancelled");
       const match = /^landdraft-radar:\/\/([^/]+)\/(\d+)\/(\d+)\/(\d+)$/.exec(params.url);
       if (!match) throw new Error("Invalid radar tile URL");
-      const data = await requestRef.current({
-        kind: "tile",
-        key: match[1],
-        z: Number(match[2]),
-        x: Number(match[3]),
-        y: Number(match[4]),
-      });
+      let data: unknown;
+      try {
+        data = await requestRef.current({
+          kind: "tile",
+          key: match[1],
+          z: Number(match[2]),
+          x: Number(match[3]),
+          y: Number(match[4]),
+        });
+      } catch (error) {
+        if (!abort.signal.aborted) {
+          for (const [layerId, frameId] of active.current) {
+            if (frameId !== match[1]) continue;
+            failedTiles.current.add(layerId);
+            onReadingRef.current({
+              layerId,
+              state: "error",
+              message: error instanceof Error ? error.message : "Radar tile rendering failed",
+            });
+          }
+        }
+        throw error;
+      }
       if (abort.signal.aborted) throw new Error("Radar tile cancelled");
+      completedTiles.current.add(match[1]!);
       return { data: data as ArrayBuffer };
     });
     const currentPending = pending.current;
@@ -116,12 +136,43 @@ export function NativeRadarOverlay({
       const id = nativeMapLayerId(layerId);
       if (map.getLayer(id)) map.removeLayer(id);
       if (map.getSource(id)) map.removeSource(id);
+      const oldFrame = active.current.get(layerId);
+      if (oldFrame) completedTiles.current.delete(oldFrame);
       active.current.delete(layerId);
+      decoded.current.delete(layerId);
+      failedTiles.current.delete(layerId);
+    };
+    const reportRendered = () => {
+      for (const [layerId, reading] of decoded.current) {
+        const id = nativeMapLayerId(layerId);
+        if (
+          !completedTiles.current.has(active.current.get(layerId) ?? "") ||
+          failedTiles.current.has(layerId) ||
+          !map.getSource(id) ||
+          !map.isSourceLoaded(id)
+        )
+          continue;
+        if (reading.state !== "ready") {
+          const ready = { ...reading, state: "ready" as const };
+          decoded.current.set(layerId, ready);
+          onReadingRef.current(ready);
+        }
+      }
+    };
+    const reportError = (event: { sourceId?: string; error: { message: string } }) => {
+      for (const layerId of active.current.keys()) {
+        if (event.sourceId !== nativeMapLayerId(layerId)) continue;
+        failedTiles.current.add(layerId);
+        onReadingRef.current({ layerId, state: "error", message: event.error.message });
+      }
     };
     const update = async () => {
       if (cancelled) return;
-      // getStyle() is absent until the style is initialized; unrelated tile loads must not block radar.
-      if (!map.getStyle()) return;
+      if (!map.isStyleLoaded()) {
+        map.off("idle", update);
+        map.once("idle", update);
+        return;
+      }
       const grouped = new Map<string, NativeRadarFrame[]>();
       for (const frame of frames)
         if (workspace.layerSettings[frame.layerId]?.visible)
@@ -147,8 +198,14 @@ export function NativeRadarOverlay({
             point: workspace.lastInspectionPoint ?? [frame.site.longitude, frame.site.latitude],
           })) as NativeRadarReading;
           if (cancelled) return;
-          if (!map.getStyle()) return;
+          if (!map.isStyleLoaded()) {
+            map.off("idle", update);
+            map.once("idle", update);
+            return;
+          }
           if (!map.getSource(id)) {
+            completedTiles.current.delete(frame.id);
+            failedTiles.current.delete(layerId);
             map.addSource(id, {
               type: "raster",
               tiles: [`landdraft-radar://${frame.id}/{z}/{x}/{y}`],
@@ -175,7 +232,10 @@ export function NativeRadarOverlay({
             );
           active.current.set(layerId, frame.id);
           orderNativeLayers(map, workspace);
-          onReadingRef.current(reading);
+          const next = { ...reading, state: "rendering" as const };
+          decoded.current.set(layerId, next);
+          onReadingRef.current(next);
+          reportRendered();
         } catch (error) {
           if (!cancelled) {
             remove(layerId);
@@ -190,10 +250,14 @@ export function NativeRadarOverlay({
     };
     void update();
     map.on("style.load", update);
+    map.on("sourcedata", reportRendered);
+    map.on("error", reportError);
     return () => {
       cancelled = true;
       map.off("style.load", update);
       map.off("idle", update);
+      map.off("sourcedata", reportRendered);
+      map.off("error", reportError);
     };
   }, [map, renderKey]);
   useEffect(() => {

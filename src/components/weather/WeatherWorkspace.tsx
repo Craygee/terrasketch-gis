@@ -1536,8 +1536,10 @@ function WeatherLayerPanel({
         ? radarReading?.state === "error"
           ? (radarReading.message ?? "Radar rendering failed")
           : radarReading?.state === "ready"
-            ? "Scan loaded · tap map to inspect"
-            : "Loading radar scan…"
+            ? `Radar tiles loaded · ${radarReading.site ?? "NOAA"}`
+            : radarReading?.state === "rendering"
+              ? "Drawing radar tiles…"
+              : "Loading radar scan…"
         : status.label;
     return (
       <div

@@ -1220,7 +1220,11 @@ export function WeatherMapOverlay({
   useEffect(() => {
     if (!map) return;
     const update = () => {
-      if (!map.getStyle()) return;
+      if (!map.isStyleLoaded()) {
+        map.off("idle", update);
+        map.once("idle", update);
+        return;
+      }
       ensureRadar(map, frame);
       ensureRasterProducts(map, rasterProducts);
       ensureVectorLayers(map);
@@ -1405,6 +1409,7 @@ export function WeatherMapOverlay({
     map.on("style.load", update);
     return () => {
       map.off("style.load", update);
+      map.off("idle", update);
     };
   }, [
     alertsVisible,

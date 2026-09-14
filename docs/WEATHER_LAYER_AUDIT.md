@@ -107,3 +107,11 @@ The user confirmed layers turn on but the map remains blank. The previous endpoi
 - Added a stable, bounded JSON weather endpoint using the same provider policy/context and point validation. The previous hosted server-function probe returned ~3.1 MB of transport data (~1.9 MB plain JSON); browser requests had timed out. This removes the serialization envelope and hashed transport identifier from weather loads.
 - Native cards show loading, decoded scan state, or the worker error instead of using source availability alone. Ready reporting occurs after attaching the map layer.
 - 100 weather tests pass, including distant-inspection/map-center regression tests and activation timeline tests. Typecheck and scoped lint pass.
+
+## Mobile blank radar follow-up — 2026-09-14
+
+User screenshot still showed blank Memphis-area imagery with all native cards reporting decoded scans. Captured a separate hosted crash (`Style is not done loading`) in the feature-edit overlay while a replacement basemap initialized. Guarded that source creation and deferred weather/native additions until style readiness, with idle/style-load retries.
+
+Replaced worker OffscreenCanvas PNG encoding with a canvas-independent RGBA PNG encoder. This removes an unverified mobile-worker capability dependency; the user's exact Safari failure cannot be proved from the screenshot alone. Tile/protocol and map-source errors now reach the card, and ready requires a completed tile plus a loaded MapLibre source rather than only a decoded NOAA scan. Cards show the radar site.
+
+Fetched all six KNQA products from the deployed API (00:39 UTC), rendered them together in the actual WeatherMapOverlay, and visually confirmed Memphis-area echoes before and after basemap replacement. No browser errors in that check. Added exact-pixel PNG/zlib round-trip tests; 101 weather tests pass.

@@ -526,12 +526,22 @@ export function MapCanvas() {
   useEffect(() => {
     const map = mapObj.current;
     if (!map || !ready) return;
-    ensureEditLayers(map);
-    const source = map.getSource("feature-edit") as GeoJSONSource | undefined;
-    source?.setData(
-      editableFeature ? editFeatureCollection(editableFeature) : emptyFeatureCollection(),
-    );
-    if (editEnabled && !editableFeature) setEditEnabled(false);
+    const sync = () => {
+      if (!map.isStyleLoaded()) {
+        map.once("idle", sync);
+        return;
+      }
+      ensureEditLayers(map);
+      const source = map.getSource("feature-edit") as GeoJSONSource | undefined;
+      source?.setData(
+        editableFeature ? editFeatureCollection(editableFeature) : emptyFeatureCollection(),
+      );
+      if (editEnabled && !editableFeature) setEditEnabled(false);
+    };
+    sync();
+    return () => {
+      map.off("idle", sync);
+    };
   }, [editEnabled, editableFeature, ready, setEditEnabled, styleRevision]);
 
   useEffect(() => {

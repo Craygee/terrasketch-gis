@@ -76,7 +76,7 @@ export interface NativeRadarScan {
 }
 export interface NativeRadarReading {
   layerId: string;
-  state: "loading" | "ready" | "error";
+  state: "loading" | "rendering" | "ready" | "error";
   message?: string;
   site?: string;
   timestamp?: string;

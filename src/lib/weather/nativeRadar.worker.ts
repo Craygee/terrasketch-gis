@@ -1,5 +1,6 @@
 import { decodeNativeRadar } from "./nativeRadarDecoder.ts";
 import { renderNativeRadarTile } from "./nativeRadarRender.ts";
+import { radarTilePng } from "./radarPng.ts";
 import {
   radarSample,
   HYDROMETEORS,
@@ -59,11 +60,7 @@ scope.onmessage = async ({ data: task }) => {
       const scan = scans.get(task.key);
       if (!scan) throw new Error("Radar scan expired from the local cache");
       const pixels = renderNativeRadarTile(scan, task.z, task.x, task.y);
-      const canvas = new OffscreenCanvas(256, 256),
-        ctx = canvas.getContext("2d");
-      if (!ctx) throw new Error("Radar rendering is not supported in this browser");
-      ctx.putImageData(new ImageData(pixels, 256, 256), 0, 0);
-      const binary = await (await canvas.convertToBlob({ type: "image/png" })).arrayBuffer();
+      const binary = radarTilePng(pixels);
       scope.postMessage({ id: task.id, result: binary }, [binary]);
     }
   } catch (error) {
