@@ -355,8 +355,12 @@
   }
 
   .mobile-field-mode .landdraft-map-lock-controls {
-    right: max(0.75rem, env(safe-area-inset-right, 0px));
-    bottom: calc(17.25rem + env(safe-area-inset-bottom, 0px));
+    /* Field mode has a taller action dock. Keep the lock buttons in their own
+       left-hand row above the scale, clear of the native zoom/compass stack. */
+    right: auto;
+    bottom: calc(13rem + env(safe-area-inset-bottom, 0px));
+    left: max(0.75rem, env(safe-area-inset-left, 0px));
+    flex-direction: row;
   }
 
   .weather-workspace .maplibregl-ctrl-bottom-right,
