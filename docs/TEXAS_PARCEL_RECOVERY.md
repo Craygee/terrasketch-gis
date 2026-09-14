@@ -48,3 +48,5 @@ Public storage publication: 219 indexed FlatGeobuf parts plus 91 missing-geometr
 The weekly workflow was manually executed successfully: https://github.com/Craygee/terrasketch-gis/actions/runs/34865511301 . It verified catalog/license, server-side publisher credentials, multipart write/readback and unchanged-edition detection. The future full changed-edition Linux job has not yet encountered a new publisher release; the first complete index was produced locally and uploaded with the same version/manifest scheme.
 
 Live application release commit: `be2edcd2` (Publish LandDraft 0.9.160 public Texas parcels), pushed normally to the deployment repository main branch after validation. Browser was signed out, so authenticated desktop/iPad/mobile UI verification remains outstanding. No database migrations were applied for this statewide implementation.
+
+Production verification: landdraft.net publicly serves version 0.9.160+be2edcd2 in its Workbench and RemoteLayerManager bundles. Lovable production deployment d5e70c27-62d3-4d03-b3ac-5f4472fa7170 was requested after the synced build was ready.
