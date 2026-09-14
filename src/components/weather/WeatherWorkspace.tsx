@@ -370,6 +370,7 @@ export function WeatherWorkspace() {
           writeWorkspace.current(liveWorkspace);
         }
         latestBundle.current = next;
+        setNativeReadings({});
         setBundle(next);
         return next;
       } catch (nextError) {
@@ -1611,8 +1612,15 @@ function WeatherLayerPanel({
     const setting = workspace.layerSettings[layer.id];
     if (!setting || !hasWeatherCapability(layer.capability)) return null;
     const status = layerStatus(layer.id);
+    const layerRadarReadings = Object.values(nativeReadings).filter(
+      (reading) => reading.layerId === layer.id,
+    );
     const radarReading =
-      setting.visible && nativeProduct(layer.id) ? nativeReadings[layer.id] : undefined;
+      setting.visible && nativeProduct(layer.id)
+        ? (layerRadarReadings.find((reading) => reading.state === "ready") ??
+          layerRadarReadings.find((reading) => reading.state === "error") ??
+          layerRadarReadings[0])
+        : undefined;
     const displayStatus =
       setting.visible && status.ready && nativeProduct(layer.id)
         ? radarReading?.state === "error"

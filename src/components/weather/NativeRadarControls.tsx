@@ -177,10 +177,13 @@ export function NativeRadarControls({
             const layerReadings = Object.values(readings).filter((item) => item.layerId === id);
             const reading =
               layerReadings.find((item) => item.state === "ready") ?? layerReadings[0];
+            const readingFrame = (bundle?.nativeRadarFrames ?? []).find(
+              (candidate) => candidate.layerId === id && candidate.site.id === reading?.site,
+            );
             const matches =
-              frame &&
+              readingFrame &&
               reading?.timestamp &&
-              Math.abs(Date.parse(frame.timestamp) - Date.parse(reading.timestamp)) < 60000;
+              Math.abs(Date.parse(readingFrame.timestamp) - Date.parse(reading.timestamp)) < 60000;
             const value =
               reading?.category ??
               (reading?.value === null || reading?.value === undefined
