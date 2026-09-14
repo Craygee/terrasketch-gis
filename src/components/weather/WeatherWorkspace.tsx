@@ -267,6 +267,13 @@ export function WeatherWorkspace() {
   const chaseFollowRef = useRef(true);
   const stormAutoCenterPending = useRef(false);
   const initialWorkspaceApplied = useRef(false);
+  const replaceWorkspace = useCallback(
+    (next: WeatherWorkspaceState) => {
+      latestWorkspace.current = next;
+      wb.setWeatherWorkspace(next);
+    },
+    [wb],
+  );
 
   useEffect(
     () => () => {
@@ -289,8 +296,12 @@ export function WeatherWorkspace() {
   }, [wb, workspace]);
 
   const updateWorkspace = useCallback(
-    (change: Partial<WeatherWorkspaceState>) => wb.setWeatherWorkspace({ ...workspace, ...change }),
-    [wb, workspace],
+    (change: Partial<WeatherWorkspaceState>) => {
+      const next = { ...latestWorkspace.current, ...change };
+      latestWorkspace.current = next;
+      replaceWorkspace(next);
+    },
+    [replaceWorkspace],
   );
 
   const updateTimeline = useCallback(
@@ -302,7 +313,7 @@ export function WeatherWorkspace() {
   const loadPoint = useCallback(
     async (point: [number, number], quietly = false, layers: string[] = requestedLayerIds) => {
       const mapCenter = map?.getCenter();
-      const currentWorkspace = latestWorkspace.current;
+      const requestWorkspace = latestWorkspace.current;
       const selectedStorm = latestBundle.current?.stormObjects.find(
         (storm) => storm.id === photographyStormId.current,
       );
@@ -312,7 +323,7 @@ export function WeatherWorkspace() {
         stormFocus ??
         navigationTargetRef.current ??
         chaserLocationRef.current ??
-        currentWorkspace.lastInspectionPoint ??
+        requestWorkspace.lastInspectionPoint ??
         (mapCenter ? [mapCenter.wrap().lng, mapCenter.lat] : point);
       const radarFocusSource = stormFocus
         ? "storm"
@@ -320,7 +331,7 @@ export function WeatherWorkspace() {
           ? "target"
           : chaserLocationRef.current
             ? "gps"
-            : currentWorkspace.lastInspectionPoint
+            : requestWorkspace.lastInspectionPoint
               ? "inspection"
               : "map";
       const requestId = ++latestWeatherRequest.current;
@@ -347,19 +358,20 @@ export function WeatherWorkspace() {
             mapCenter: mapCenter ? [mapCenter.wrap().lng, mapCenter.lat] : point,
             radarFocus,
             radarFocusSource,
-            ...(currentWorkspace.radarSiteMode
-              ? { radarSiteMode: currentWorkspace.radarSiteMode }
+            ...(requestWorkspace.radarSiteMode
+              ? { radarSiteMode: requestWorkspace.radarSiteMode }
               : {}),
-            ...(currentWorkspace.radarSiteIds?.length
-              ? { radarSiteIds: currentWorkspace.radarSiteIds }
+            ...(requestWorkspace.radarSiteIds?.length
+              ? { radarSiteIds: requestWorkspace.radarSiteIds }
               : {}),
-            ...(currentWorkspace.radarSiteId ? { radarSiteId: currentWorkspace.radarSiteId } : {}),
-            ...(currentWorkspace.radarTilt === undefined
+            ...(requestWorkspace.radarSiteId ? { radarSiteId: requestWorkspace.radarSiteId } : {}),
+            ...(requestWorkspace.radarTilt === undefined
               ? {}
-              : { radarTilt: currentWorkspace.radarTilt }),
+              : { radarTilt: requestWorkspace.radarTilt }),
           },
         });
         if (requestId !== latestWeatherRequest.current) return null;
+        const currentWorkspace = latestWorkspace.current;
         if (followsLatestScan(currentWorkspace, latestBundle.current)) {
           const liveWorkspace = {
             ...currentWorkspace,
@@ -474,9 +486,9 @@ export function WeatherWorkspace() {
     loadedProject.current = wb.projectId;
     const point = workspace.lastInspectionPoint ?? wb.mapView.center;
     if (!workspace.lastInspectionPoint)
-      wb.setWeatherWorkspace({ ...workspace, lastInspectionPoint: point });
+      replaceWorkspace({ ...workspace, lastInspectionPoint: point });
     void loadPoint(point);
-  }, [loadPoint, map, wb, workspace]);
+  }, [loadPoint, map, replaceWorkspace, wb.mapView.center, wb.projectId, workspace]);
 
   useEffect(() => {
     if (!wb.projectReady || !bundle) return;
@@ -681,7 +693,7 @@ export function WeatherWorkspace() {
       const latest = latestWorkspace.current;
       const setting = latest.layerSettings[id];
       if (!setting) return;
-      wb.setWeatherWorkspace({
+      const nextWorkspace: WeatherWorkspaceState = {
         ...latest,
         timeline:
           change.visible && !initial.visible
@@ -695,9 +707,18 @@ export function WeatherWorkspace() {
             ...(change.visible ? { lastUsedAt: new Date().toISOString() } : {}),
           },
         },
-      });
+      };
+      replaceWorkspace(nextWorkspace);
     },
-    [bundle, loadPoint, requestedLayerIds, wb, publicAccess, loadCommunityChasers],
+    [
+      bundle,
+      loadPoint,
+      requestedLayerIds,
+      wb.mapView.center,
+      publicAccess,
+      loadCommunityChasers,
+      replaceWorkspace,
+    ],
   );
   const selectLayerCategory = (selectedCategory: string) => {
     updateWorkspace({ selectedCategory });
@@ -1146,7 +1167,7 @@ export function WeatherWorkspace() {
               onCategory={selectLayerCategory}
               onLayer={setLayer}
               onLayerOrder={reorderWeatherLayer}
-              onWorkspace={(next) => wb.setWeatherWorkspace(next)}
+              onWorkspace={replaceWorkspace}
               publicAccess={publicAccess}
               onOpenSources={() => setMobileSheet("sources")}
             />
@@ -1351,7 +1372,7 @@ export function WeatherWorkspace() {
                       onCategory={selectLayerCategory}
                       onLayer={setLayer}
                       onLayerOrder={reorderWeatherLayer}
-                      onWorkspace={(next) => wb.setWeatherWorkspace(next)}
+                      onWorkspace={replaceWorkspace}
                       publicAccess={publicAccess}
                       onOpenSources={() => setMobileSheet("sources")}
                     />
@@ -1607,20 +1628,21 @@ function WeatherLayerPanel({
     onPresetName("");
     toast.success("Weather preset saved");
   };
+  const radarReadingForLayer = (id: string) => {
+    const readings = Object.values(nativeReadings).filter((reading) => reading.layerId === id);
+    return (
+      readings.find((reading) => reading.state === "ready") ??
+      readings.find((reading) => reading.state === "error") ??
+      readings[0]
+    );
+  };
 
   const renderLayer = (layer: (typeof weatherLayerRegistry)[number]) => {
     const setting = workspace.layerSettings[layer.id];
     if (!setting || !hasWeatherCapability(layer.capability)) return null;
     const status = layerStatus(layer.id);
-    const layerRadarReadings = Object.values(nativeReadings).filter(
-      (reading) => reading.layerId === layer.id,
-    );
     const radarReading =
-      setting.visible && nativeProduct(layer.id)
-        ? (layerRadarReadings.find((reading) => reading.state === "ready") ??
-          layerRadarReadings.find((reading) => reading.state === "error") ??
-          layerRadarReadings[0])
-        : undefined;
+      setting.visible && nativeProduct(layer.id) ? radarReadingForLayer(layer.id) : undefined;
     const displayStatus =
       setting.visible && status.ready && nativeProduct(layer.id)
         ? radarReading?.state === "error"
@@ -2112,11 +2134,11 @@ function WeatherLayerPanel({
                     <span className="block whitespace-normal text-[10px] font-normal text-muted-foreground">
                       {workspace.timeline.mode === "forecast"
                         ? "Hidden in forecast mode"
-                        : nativeReadings[layer.id]?.state === "error"
-                          ? (nativeReadings[layer.id]?.message ?? "Radar rendering failed")
-                          : nativeReadings[layer.id]?.state === "ready"
-                            ? `Tiles loaded · ${nativeReadings[layer.id]?.site ?? "NOAA"}`
-                            : nativeReadings[layer.id]?.state === "rendering"
+                        : radarReadingForLayer(layer.id)?.state === "error"
+                          ? (radarReadingForLayer(layer.id)?.message ?? "Radar rendering failed")
+                          : radarReadingForLayer(layer.id)?.state === "ready"
+                            ? `Tiles loaded · ${radarReadingForLayer(layer.id)?.site ?? "NOAA"}`
+                            : radarReadingForLayer(layer.id)?.state === "rendering"
                               ? "Drawing radar tiles…"
                               : "Loading radar…"}
                     </span>
