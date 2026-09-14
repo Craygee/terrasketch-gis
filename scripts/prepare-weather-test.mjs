@@ -76,7 +76,7 @@ await writeFile(
       branch,
       revision: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
       scope:
-        "LandDraft native NOAA Level III radar (six fields, four elevation products) and seven public rainfall accumulations; test beta",
+        "LandDraft Weather public-source layers, native radar/rainfall, and versioned storm intensity, trend, confidence, quality and explainability analysis; test beta",
       commercialProvidersEnabled: false,
     },
     null,
