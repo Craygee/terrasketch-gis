@@ -1978,6 +1978,19 @@ function WeatherLayerPanel({
                 <GripVertical className="size-3.5 shrink-0 cursor-grab text-muted-foreground" />
                 <span className="min-w-0 flex-1 text-[10px] font-semibold" title={layer.name}>
                   {layer.name}
+                  {nativeProduct(layer.id) && layerStatus(layer.id).ready && (
+                    <span className="block whitespace-normal text-[10px] font-normal text-muted-foreground">
+                      {workspace.timeline.mode === "forecast"
+                        ? "Hidden in forecast mode"
+                        : nativeReadings[layer.id]?.state === "error"
+                          ? (nativeReadings[layer.id]?.message ?? "Radar rendering failed")
+                          : nativeReadings[layer.id]?.state === "ready"
+                            ? `Tiles loaded · ${nativeReadings[layer.id]?.site ?? "NOAA"}`
+                            : nativeReadings[layer.id]?.state === "rendering"
+                              ? "Drawing radar tiles…"
+                              : "Loading radar…"}
+                    </span>
+                  )}
                   {!layerStatus(layer.id).ready && (
                     <span className="block whitespace-normal text-[10px] font-normal text-muted-foreground">
                       Paused · {layerStatus(layer.id).label}

@@ -527,7 +527,7 @@ export function MapCanvas() {
     const map = mapObj.current;
     if (!map || !ready) return;
     const sync = () => {
-      if (!map.isStyleLoaded()) {
+      if (!map.getStyle()) {
         map.once("idle", sync);
         return;
       }

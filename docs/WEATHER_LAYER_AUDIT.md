@@ -115,3 +115,7 @@ User screenshot still showed blank Memphis-area imagery with all native cards re
 Replaced worker OffscreenCanvas PNG encoding with a canvas-independent RGBA PNG encoder. This removes an unverified mobile-worker capability dependency; the user's exact Safari failure cannot be proved from the screenshot alone. Tile/protocol and map-source errors now reach the card, and ready requires a completed tile plus a loaded MapLibre source rather than only a decoded NOAA scan. Cards show the radar site.
 
 Fetched all six KNQA products from the deployed API (00:39 UTC), rendered them together in the actual WeatherMapOverlay, and visually confirmed Memphis-area echoes before and after basemap replacement. No browser errors in that check. Added exact-pixel PNG/zlib round-trip tests; 101 weather tests pass.
+
+## Stalled-source regression — 2026-09-14
+
+The previous readiness guard was too broad. MapLibre `isStyleLoaded()` includes all source loading, whereas `getStyle()` is undefined only until the stylesheet can accept mutations (verified against installed MapLibre `Style.serialize()`). A never-resolving unrelated GeoJSON source reproduced six enabled native products with no imagery. Changing weather/native/edit guards to stylesheet readiness rendered the same six KNQA scans despite that source remaining stalled. This is a reproduced regression introduced by the previous repair, not evidence that every earlier mobile failure had this cause. Mobile layer-stack rows now expose radar tile loading/errors/site instead of showing only enabled-eye icons.

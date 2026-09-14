@@ -168,7 +168,9 @@ export function NativeRadarOverlay({
     };
     const update = async () => {
       if (cancelled) return;
-      if (!map.isStyleLoaded()) {
+      // getStyle() means the style can accept sources. isStyleLoaded() also
+      // waits for every unrelated source and can block radar indefinitely.
+      if (!map.getStyle()) {
         map.off("idle", update);
         map.once("idle", update);
         return;
@@ -198,7 +200,7 @@ export function NativeRadarOverlay({
             point: workspace.lastInspectionPoint ?? [frame.site.longitude, frame.site.latitude],
           })) as NativeRadarReading;
           if (cancelled) return;
-          if (!map.isStyleLoaded()) {
+          if (!map.getStyle()) {
             map.off("idle", update);
             map.once("idle", update);
             return;

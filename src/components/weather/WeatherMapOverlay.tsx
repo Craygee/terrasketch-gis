@@ -1220,7 +1220,8 @@ export function WeatherMapOverlay({
   useEffect(() => {
     if (!map) return;
     const update = () => {
-      if (!map.isStyleLoaded()) {
+      // A stalled optional feed must not prevent other overlays from mounting.
+      if (!map.getStyle()) {
         map.off("idle", update);
         map.once("idle", update);
         return;
