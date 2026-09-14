@@ -446,6 +446,11 @@ export async function findConnectionReplacement(
   clueUrl = "",
   clueNotes = "",
 ): Promise<ConnectionReplacement> {
+  if (result.id === "catalog:tx-parcels" || /2019_Texas_Parcels_StratMap/i.test(result.url)) {
+    throw new Error(
+      "Texas parcel replacement requires a verified operational source and license review. Use the official TxGIO download page for available county editions.",
+    );
+  }
   if (result.kind === "basemap") {
     const candidates = (trustedBasemapCandidates[result.basemapId ?? ""] ?? []).map(
       (candidate, index) => ({ ...candidate, score: 1_000 - index }),

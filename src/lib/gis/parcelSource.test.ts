@@ -2,12 +2,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { normalizeArcgisLayerUrl, fetchRemoteGeoJSONPaged } from "./arcgis.ts";
 import { SOURCE_URL } from "../../../supabase/functions/parcel-cache/model.ts";
-test("repair only the known retired parcel service", () => {
-  assert.equal(
-    normalizeArcgisLayerUrl(
-      "https://services1.arcgis.com/1mtXwieMId59thmg/ArcGIS/rest/services/2019_Texas_Parcels_StratMap/FeatureServer/0",
-    ),
-    SOURCE_URL,
+test("retired parcel source cannot silently activate a replacement", () => {
+  assert.throws(
+    () =>
+      normalizeArcgisLayerUrl(
+        "https://services1.arcgis.com/1mtXwieMId59thmg/ArcGIS/rest/services/2019_Texas_Parcels_StratMap/FeatureServer/0",
+      ),
+    /license review/,
   );
   const custom = "https://example.org/custom/FeatureServer/7";
   assert.equal(normalizeArcgisLayerUrl(custom), custom);

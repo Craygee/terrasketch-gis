@@ -65,8 +65,16 @@ determine the download footprint. The first release caps each area at 5,000 parc
 The TxDOT source works using **spatial object-ID lookup followed by ID batches**.
 Live verification returned 26 parcels for the previously failing Austin viewport and
 4 parcels for a San Antonio viewport. Ordinary spatial feature pagination remains
-unreliable. `arcgis.ts` now uses the ID-first adapter for this exact source and maps
-only the known retired 2019 URL to it; unrelated/custom URLs remain unchanged.
+unreliable. The ID-first adapter is implemented for this exact source, but is NOT an
+approved automatic replacement. The retired source explains the blockage, and the
+catalog points to official downloads. Unrelated/custom URLs remain unchanged.
+
+**Release blocker found during final licensing review:** TxDOT's GIS Metadata
+Standards prescribe terms restricting commercial use and third-party distribution:
+https://www.txdot.gov/content/dam/docs/division/tpp/txdot-gis-metadata-standard-nov24.pdf
+The parcel item instead contains only an accuracy disclaimer. This conflict requires
+dataset-specific confirmation or a permitted direct TxGIO/county source. No live
+replacement, cache policy activation, or production release has been performed.
 
 Layer settings now offer fixed-project-area download and weekly-check controls.
 They remain unavailable until the server policy and scheduler are enabled. The new

@@ -27,7 +27,9 @@ export function normalizeArcgisLayerUrl(raw: string): string {
       url,
     )
   )
-    return SOURCE_URL;
+    throw new Error(
+      "The retired Texas parcel service is unavailable. A replacement requires license review; official downloads are available from TxGIO.",
+    );
   if (ARCGIS_LAYER_RE.test(url)) return url;
   if (ARCGIS_SERVICE_RE.test(url)) return `${url.replace(/\/$/, "")}/0`;
   return url;
