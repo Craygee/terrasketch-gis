@@ -1,0 +1,11 @@
+{
+  "name": "landdraft-weather-db-validation",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test governance.test.mjs"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "0.5.8"
+  }
+}

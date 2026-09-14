@@ -1,37 +1,23 @@
-import { createServerFn } from "@tanstack/react-start";
-import { WEATHER_LAYER_ID_PATTERN, type WeatherPointRequest } from "./types";
-
-function validatePoint(input: unknown): WeatherPointRequest {
-  if (!input || typeof input !== "object") throw new Error("A map point is required");
-  const value = input as Record<string, unknown>;
-  const latitude = Number(value["latitude"]);
-  const longitude = Number(value["longitude"]);
-  if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90)
-    throw new Error("Latitude must be between -90 and 90");
-  if (!Number.isFinite(longitude) || longitude < -180 || longitude > 180)
-    throw new Error("Longitude must be between -180 and 180");
-  const requestedLayerIds = Array.isArray(value["requestedLayerIds"])
-    ? value["requestedLayerIds"]
-        .filter(
-          (id): id is string =>
-            typeof id === "string" && WEATHER_LAYER_ID_PATTERN.test(id) && id.length <= 100,
-        )
-        .slice(0, 30)
-    : undefined;
-  const xweatherConnected = value["xweatherConnected"] === true;
-  return {
-    latitude,
-    longitude,
-    ...(requestedLayerIds?.length ? { requestedLayerIds } : {}),
-    ...(xweatherConnected ? { xweatherConnected: true } : {}),
-  };
-}
-
-// POST preserves the requested layer array consistently across the local Vite
-// server and Cloudflare's server-function transport.
-export const getWeatherAtPoint = createServerFn({ method: "POST" })
-  .validator(validatePoint)
-  .handler(async ({ data }) => {
-    const { loadWeatherBundle } = await import("./gateway.server");
-    return loadWeatherBundle(data);
+import type { WeatherBundle, WeatherPointRequest } from "./types";
+/** Stable JSON transport avoids stale server-function identifiers and an extra serialization pass. */
+export async function getWeatherAtPoint({
+  data,
+  signal,
+}: {
+  data: WeatherPointRequest;
+  signal?: AbortSignal;
+}): Promise<WeatherBundle> {
+  const response = await fetch("/api/weather/point", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+    signal: signal ?? null,
   });
+  if (!response.ok)
+    throw new Error(
+      response.status === 429
+        ? "Weather requests are temporarily limited. Try again shortly."
+        : "Weather data did not load. Use Refresh weather to retry.",
+    );
+  return response.json() as Promise<WeatherBundle>;
+}

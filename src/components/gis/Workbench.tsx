@@ -1,3 +1,4 @@
+import { WorkspaceLoading, WorkspaceRecoveryNotice } from "./WorkspaceLoading";
 import { lazy, Suspense, useEffect, useState } from "react";
 import { Toaster } from "@/components/ui/sonner";
 import { WorkbenchProvider, useWorkbench } from "@/lib/gis/store";
@@ -61,28 +62,11 @@ function WorkbenchShell() {
     if (window.innerWidth < 768) setPanelOpen(false);
   }, []);
 
-  if (!wb.projectReady)
-    return (
-      <div className="app-viewport flex items-center justify-center bg-background px-4 text-sm text-muted-foreground">
-        {wb.projectError ? (
-          <div className="max-w-md rounded-2xl border border-border bg-card p-5 text-center shadow-panel">
-            <p className="font-semibold text-foreground">Cloud workspace could not open</p>
-            <p className="mt-1 text-xs">{wb.projectError}</p>
-            <button
-              onClick={() => window.location.reload()}
-              className="mt-4 rounded-xl bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground"
-            >
-              Try again
-            </button>
-          </div>
-        ) : (
-          "Opening your latest project…"
-        )}
-      </div>
-    );
+  if (!wb.projectReady) return <WorkspaceLoading />;
 
   return (
     <div className="app-safe-frame app-viewport flex flex-col bg-background">
+      <WorkspaceRecoveryNotice />
       <TopBar onTogglePanel={() => setPanelOpen((o) => !o)} panelOpen={panelOpen} />
 
       <div className="relative flex min-h-0 flex-1">

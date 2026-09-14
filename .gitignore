@@ -38,3 +38,6 @@ supabase/.temp/
 *.njsproj
 *.sln
 *.sw?
+
+# Local public weather validation images
+.weather-validation/

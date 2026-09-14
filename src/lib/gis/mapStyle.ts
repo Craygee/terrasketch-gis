@@ -222,7 +222,7 @@ export function buildLayerSpecs(layer: GisLayer, map: MlMap): LayerSpecification
       paint: {
         "circle-radius": s.pointSize,
         "circle-color": categoryMatch(categorized?.fallbackColor ?? s.fillColor) as never,
-        "circle-opacity": categoryOpacity(Math.max(0.5, s.fillOpacity + 0.4)) as never,
+        "circle-opacity": categoryOpacity(Math.min(1, Math.max(0.5, s.fillOpacity + 0.4))) as never,
         "circle-stroke-color": categoryMatch(categorized?.fallbackColor ?? s.strokeColor) as never,
         "circle-stroke-width": Math.min(3, s.strokeWidth),
       },

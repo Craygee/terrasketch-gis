@@ -1,3 +1,9 @@
+import { approvedXweatherProducts } from "./providerPolicy.server.ts";
+import {
+  consumeProviderRequest,
+  readConnectionBody,
+  recordProviderAudit,
+} from "./providerOperations.server.ts";
 type RuntimeBindings = Record<string, unknown>;
 
 export interface XweatherUserCredentials {
@@ -24,11 +30,6 @@ interface RuntimeConfig {
   encryptionSecret: string;
 }
 
-interface CredentialCacheEntry {
-  credentials: XweatherUserCredentials;
-  expiresAt: number;
-}
-
 const processEnv = (
   globalThis as typeof globalThis & {
     process?: { env?: Record<string, string | undefined> };
@@ -36,9 +37,6 @@ const processEnv = (
 ).process?.env;
 
 const buildEnv = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env;
-const credentialCache = new Map<string, CredentialCacheEntry>();
-const CACHE_TTL_MS = 30_000;
-const MAX_CACHED_USERS = 100;
 
 function value(bindings: unknown, names: string[]) {
   for (const name of names) {
@@ -196,30 +194,13 @@ export async function decryptXweatherCredentials(
   return { clientId: parsed.clientId, clientSecret: parsed.clientSecret };
 }
 
-async function tokenCacheKey(token: string) {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
-  return bytesToBase64Url(new Uint8Array(digest));
-}
-
-function putCachedCredentials(key: string, credentials: XweatherUserCredentials) {
-  if (credentialCache.size >= MAX_CACHED_USERS) {
-    const oldest = credentialCache.keys().next().value as string | undefined;
-    if (oldest) credentialCache.delete(oldest);
-  }
-  credentialCache.set(key, { credentials, expiresAt: Date.now() + CACHE_TTL_MS });
-}
-
 export async function resolveUserXweatherCredentials(
   request: Request,
   bindings?: unknown,
-): Promise<XweatherUserCredentials | null> {
+): Promise<(XweatherUserCredentials & { userId: string }) | null> {
   const config = runtimeConfig(bindings);
   const token = authorizationToken(request);
   if (!config || !token) return null;
-  const cacheKey = await tokenCacheKey(token);
-  const cached = credentialCache.get(cacheKey);
-  if (cached && cached.expiresAt > Date.now()) return cached.credentials;
-  credentialCache.delete(cacheKey);
   const authenticated = await authenticate(request, config);
   if (!authenticated) return null;
   const row = await readConnection(config, authenticated.token, authenticated.user.id);
@@ -230,8 +211,7 @@ export async function resolveUserXweatherCredentials(
       authenticated.user.id,
       config.encryptionSecret,
     );
-    putCachedCredentials(cacheKey, credentials);
-    return credentials;
+    return { ...credentials, userId: authenticated.user.id };
   } catch {
     return null;
   }
@@ -267,9 +247,11 @@ function clientIdHint(clientId: string) {
 async function testXweatherCredentials(
   credentials: XweatherUserCredentials,
   origin: string,
+  product = "radar-global",
 ): Promise<{ valid: boolean; error?: string | undefined }> {
   const credentialPath = encodeURIComponent(`${credentials.clientId}_${credentials.clientSecret}`);
-  const url = `https://maps.api.xweather.com/${credentialPath}/radar-global/0/0/0/current.png`;
+  if (!/^[a-z0-9-]+$/.test(product)) throw new Error("Unsupported product");
+  const url = `https://maps.api.xweather.com/${credentialPath}/${product}/0/0/0/current.png`;
   const response = await fetch(url, {
     signal: AbortSignal.timeout(12_000),
     headers: {
@@ -277,11 +259,16 @@ async function testXweatherCredentials(
       Referer: `${origin}/`,
       "User-Agent": "LandDraftWeather/0.2 (https://landdraft.net)",
     },
+  }).catch(() => {
+    throw new Error("Xweather is temporarily unavailable; no credentials were saved");
   });
   if (response.ok && (response.headers.get("content-type") ?? "").startsWith("image/"))
     return { valid: true };
   if (response.status === 429)
-    return { valid: true, error: "Connected, but this Xweather account has reached a usage limit" };
+    return {
+      valid: false,
+      error: "Xweather usage limit reached; product access could not be verified",
+    };
   if (response.status === 401) return { valid: false, error: "Xweather rejected this API key" };
   if (response.status === 403)
     return {
@@ -351,6 +338,29 @@ export async function handleXweatherConnection(request: Request, bindings?: unkn
   const config = runtimeConfig(bindings)!;
   const authenticated = await authenticate(request, config);
   if (!authenticated) return jsonResponse({ error: "Sign in to connect Xweather" }, 401);
+  const correlationId = crypto.randomUUID();
+  const audit = (
+    action: "connect" | "disconnect" | "test",
+    outcome: "success" | "denied" | "failed",
+  ) =>
+    recordProviderAudit({
+      correlationId,
+      providerId: "xweather",
+      subjectId: authenticated.user.id,
+      action,
+      outcome,
+    });
+  if (request.method !== "GET" && !consumeProviderRequest(authenticated.user.id, "connection"))
+    return jsonResponse(
+      { error: "Too many connection requests. Try again in one minute.", correlationId },
+      429,
+    );
+  if (
+    request.method !== "GET" &&
+    request.headers.get("origin") &&
+    request.headers.get("origin") !== url.origin
+  )
+    return jsonResponse({ error: "Forbidden", correlationId }, 403);
 
   try {
     if (request.method === "GET") {
@@ -377,6 +387,7 @@ export async function handleXweatherConnection(request: Request, bindings?: unkn
       return jsonResponse({
         state: row.status === "connected" ? "connected" : "invalid",
         connected: row.status === "connected",
+        approvedProducts: approvedXweatherProducts(bindings, authenticated.user.id),
         clientIdHint: row.client_id_hint,
         lastTestedAt: row.last_tested_at ?? undefined,
         updatedAt: row.updated_at ?? undefined,
@@ -384,11 +395,43 @@ export async function handleXweatherConnection(request: Request, bindings?: unkn
       });
     }
 
-    if (request.method === "POST") {
+    if (request.method === "POST" || request.method === "PATCH") {
+      const approvedProducts = approvedXweatherProducts(bindings, authenticated.user.id);
+      if (!approvedProducts.length)
+        return jsonResponse(
+          {
+            error:
+              "LICENSE REVIEW REQUIRED: LandDraft must approve Xweather proxy/BYOK use before testing credentials",
+          },
+          403,
+        );
       const contentLength = Number(request.headers.get("content-length") ?? 0);
       if (contentLength > 2_048)
         return jsonResponse({ error: "Connection request is too large" }, 413);
-      const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
+      const body = await readConnectionBody(request);
+      const product =
+        typeof body?.["product"] === "string" ? body["product"] : approvedProducts[0]!;
+      if (!approvedProducts.includes(product))
+        return jsonResponse(
+          { error: "This product has no active license grant for your account" },
+          403,
+        );
+      if (request.method === "PATCH") {
+        const saved = await resolveUserXweatherCredentials(request, bindings);
+        if (!saved) return jsonResponse({ error: "Reconnect Xweather before testing" }, 401);
+        const result = await testXweatherCredentials(saved, url.origin, product);
+        audit("test", result.valid ? "success" : "denied");
+        return jsonResponse({
+          state: "connected",
+          connected: true,
+          approvedProducts,
+          verifiedProducts: result.valid ? [product] : [],
+          lastTestedAt: new Date().toISOString(),
+          ...(result.valid
+            ? { lastSuccessfulRequest: new Date().toISOString() }
+            : { error: result.error }),
+        });
+      }
       const clientId = body?.["clientId"];
       const clientSecret = body?.["clientSecret"];
       const credentials =
@@ -398,7 +441,7 @@ export async function handleXweatherConnection(request: Request, bindings?: unkn
           : null);
       if (!credentials)
         return jsonResponse({ error: "Paste a valid complete Xweather API key" }, 400);
-      const test = await testXweatherCredentials(credentials, url.origin);
+      const test = await testXweatherCredentials(credentials, url.origin, product);
       if (!test.valid) return jsonResponse({ error: test.error }, 400);
       const encrypted = await encryptXweatherCredentials(
         credentials,
@@ -413,12 +456,13 @@ export async function handleXweatherConnection(request: Request, bindings?: unkn
         clientIdHint(credentials.clientId),
         test.error,
       );
-      credentialCache.clear();
-      const cacheKey = await tokenCacheKey(authenticated.token);
-      putCachedCredentials(cacheKey, credentials);
+      audit("connect", "success");
       return jsonResponse({
         state: "connected",
         connected: true,
+        approvedProducts: approvedXweatherProducts(bindings, authenticated.user.id),
+        verifiedProducts: [product],
+        lastSuccessfulRequest: new Date().toISOString(),
         clientIdHint: clientIdHint(credentials.clientId),
         lastTestedAt: new Date().toISOString(),
         error: test.error,
@@ -427,7 +471,7 @@ export async function handleXweatherConnection(request: Request, bindings?: unkn
 
     if (request.method === "DELETE") {
       await deleteConnection(config, authenticated.token, authenticated.user.id);
-      credentialCache.clear();
+      audit("disconnect", "success");
       return jsonResponse({ state: "not-connected", connected: false });
     }
 

@@ -167,7 +167,7 @@ export function buildStormObjectsFromAlerts(
 const qualityByLead = (leadMinutes: number): WeatherQuality =>
   leadMinutes <= 15 ? "moderate" : leadMinutes <= 60 ? "low" : "estimated";
 
-export const MAX_ROLLING_STORM_FORECAST_AGE_MINUTES = 30;
+export const MAX_ROLLING_STORM_FORECAST_AGE_MINUTES = 6;
 
 export interface TimeAdjustedStormForecast {
   positions: StormForecastPosition[];

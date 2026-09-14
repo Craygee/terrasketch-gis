@@ -1,4 +1,5 @@
 import { weatherLayerRegistry } from "./registry.ts";
+import { STORM_STYLE_MODES } from "./stormPresentation.ts";
 import type {
   WeatherLayerSetting,
   WeatherPreset,
@@ -44,6 +45,9 @@ export function defaultWeatherTimeline(): WeatherTimelineState {
 export function defaultWeatherWorkspace(): WeatherWorkspaceState {
   return {
     version: 1,
+    nativeLayerCatalogVersion: 1,
+    radarSiteMode: "automatic",
+    radarSiteIds: [],
     enabled: true,
     introductoryChooserSeen: false,
     unitSystem: "us",
@@ -58,6 +62,7 @@ export function defaultWeatherWorkspace(): WeatherWorkspaceState {
 
 export function normalizeWeatherWorkspace(
   stored: WeatherWorkspaceState | undefined,
+  resetPlayback = true,
 ): WeatherWorkspaceState {
   const defaults = defaultWeatherWorkspace();
   if (!stored) return defaults;
@@ -70,6 +75,9 @@ export function normalizeWeatherWorkspace(
       favorite: Boolean(saved.favorite),
       opacity: Math.max(0, Math.min(1, Number(saved.opacity) || 0)),
       menuVisible: saved.menuVisible !== false,
+      ...(typeof saved.lastUsedAt === "string" && Number.isFinite(Date.parse(saved.lastUsedAt))
+        ? { lastUsedAt: saved.lastUsedAt }
+        : {}),
     };
   }
   const savedOrder = Array.from(new Set(Array.isArray(stored.layerOrder) ? stored.layerOrder : []));
@@ -77,13 +85,51 @@ export function normalizeWeatherWorkspace(
     ...savedOrder.filter((id) => typeof id === "string" && id in layerSettings),
     ...weatherLayerRegistry.map((layer) => layer.id).filter((id) => !savedOrder.includes(id)),
   ];
+  const legacyRadarSite =
+    typeof stored.radarSiteId === "string" && /^[A-Z0-9]{4}$/.test(stored.radarSiteId)
+      ? stored.radarSiteId
+      : undefined;
+  const radarSiteIds = Array.from(
+    new Set(
+      (Array.isArray(stored.radarSiteIds)
+        ? stored.radarSiteIds
+        : legacyRadarSite
+          ? [legacyRadarSite]
+          : []
+      )
+        .filter((id): id is string => typeof id === "string" && /^[A-Z0-9]{4}$/.test(id))
+        .slice(0, 6),
+    ),
+  );
+  const radarSiteMode: NonNullable<WeatherWorkspaceState["radarSiteMode"]> = [
+    "automatic",
+    "covering",
+    "manual",
+  ].includes(stored.radarSiteMode ?? "")
+    ? stored.radarSiteMode!
+    : legacyRadarSite
+      ? "manual"
+      : "automatic";
   return {
     ...defaults,
     ...stored,
+    stormStyle: STORM_STYLE_MODES.includes(stored.stormStyle!) ? stored.stormStyle! : "Intensity",
     version: 1,
+    nativeLayerCatalogVersion: 1,
     layerSettings,
     layerOrder,
-    timeline: { ...defaults.timeline, ...stored.timeline, playing: false },
+    radarSiteMode,
+    radarSiteIds,
+    radarSiteId: radarSiteMode === "manual" ? radarSiteIds[0] : undefined,
+    radarTilt:
+      Number.isInteger(stored.radarTilt) && stored.radarTilt! >= 0 && stored.radarTilt! <= 3
+        ? stored.radarTilt
+        : 0,
+    timeline: {
+      ...defaults.timeline,
+      ...stored.timeline,
+      playing: resetPlayback ? false : Boolean(stored.timeline?.playing),
+    },
     presets: Array.isArray(stored.presets) ? stored.presets.slice(0, 25) : [],
   };
 }

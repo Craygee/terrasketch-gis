@@ -1,13 +1,18 @@
 import type { WeatherLayerDefinition } from "./types";
-import { XWEATHER_ADDITIONAL_LAYERS } from "./xweatherCatalog.ts";
+import { NATIVE_RADAR_PRODUCTS, RADAR_SCALES, type NativeRadarLayer } from "./nativeRadar.ts";
+import { rainfallLayers } from "./publicRainfall.ts";
+import { SPC_PRODUCTS } from "./spcCatalog.ts";
 
 export const WEATHER_LAYER_GROUPS = [
+  "LandDraft tools",
+  "Source data",
   "Current",
   "Radar",
   "Satellite & clouds",
   "Wind",
   "Lightning",
   "Severe weather",
+  "SPC",
   "Forecast",
   "Meteorology",
   "Aviation",
@@ -23,7 +28,7 @@ export const WEATHER_LAYER_GROUPS = [
 export const STORM_CHASER_RECOMMENDED_LAYERS = [
   {
     id: "weather.severe.intelligence",
-    label: "NOAA ProbSevere",
+    label: "LandDraft Predictive Model",
     reason: "Core tracked-storm analysis, hazard guidance, trends, and projected motion.",
     core: true,
   },
@@ -80,28 +85,34 @@ export const STORM_CHASER_PRO_RADAR_LAYERS = [
   "weather.radar.pro.hydrometeor",
 ] as const;
 
-export const STORM_CHASER_RADAR_COMPANIONS = [
-  {
-    id: "radarscope",
-    name: "RadarScope",
-    href: "https://www.radarscope.app/",
-    description: "Open the official professional radar app and product information.",
-  },
-  {
-    id: "radaromega",
-    name: "RadarOmega",
-    href: "https://www.radaromega.com/",
-    description: "Open the official multi-platform radar app and product information.",
-  },
-] as const;
-
 export const weatherLayerRegistry: WeatherLayerDefinition[] = [
+  ...SPC_PRODUCTS.map((product): WeatherLayerDefinition => ({
+    id: product.layerId,
+    name: product.name,
+    group: "SPC",
+    description:
+      "Official convective forecast. Probabilities describe the stated hazard within 25 miles of a point during the valid period, not a guarantee at a location. Latest issuance only; source colors and below-threshold statements are retained. Not a warning.",
+    capability: "weather.severe",
+    dataType: "geojson",
+    providerProducts: [product.productId],
+    defaultOpacity: 0.3,
+    minZoom: 0,
+    maxZoom: 24,
+    animationSupport: false,
+    timeSupport: true,
+    inspectSupport: false,
+    mobileVisibility: "primary",
+    audience: "basic",
+    attribution: "NOAA / NWS Storm Prediction Center",
+    providerName: "NOAA Storm Prediction Center",
+    coverage: "Contiguous United States",
+  })),
   {
     id: "weather.current",
     name: "Current conditions",
     group: "Current",
     description:
-      "Latest supported observation at the inspected map location, shown as a temperature marker with a concise conditions label.",
+      "Latest supported conditions at the inspected map location. Model or estimated fallback values are explicitly labeled and are not observations.",
     capability: "weather.basic",
     dataType: "point",
     providerProducts: ["observation", "point-forecast"],
@@ -114,34 +125,13 @@ export const weatherLayerRegistry: WeatherLayerDefinition[] = [
     mobileVisibility: "primary",
     audience: "basic",
   },
-  ...XWEATHER_ADDITIONAL_LAYERS.map((item): WeatherLayerDefinition => ({
-    id: item.id,
-    name: item.name,
-    group: item.group,
-    description: item.description,
-    capability: item.capability,
-    dataType: "raster",
-    providerProducts: [`xweather:${item.providerLayer}`],
-    ...(item.units ? { units: item.units } : {}),
-    defaultOpacity: 0.68,
-    minZoom: item.minZoom ?? 0,
-    maxZoom: item.maxZoom ?? 18,
-    animationSupport: item.animationSupport ?? true,
-    timeSupport: true,
-    inspectSupport: item.inspectSupport ?? false,
-    mobileVisibility: "professional",
-    audience: "professional",
-    attribution: "Weather data and imagery © Vaisala Xweather",
-    providerName: "Vaisala Xweather Raster Maps",
-    providerCostMultiplier: item.costMultiplier,
-    coverage: item.coverage,
-  })),
+  ...rainfallLayers,
   {
     id: "weather.radar.simple",
     name: "Radar",
     group: "Radar",
     description:
-      "Official U.S. composite reflectivity with configured global Xweather fallback outside coverage or during an outage.",
+      "Public NOAA U.S. composite reflectivity. Source time and coverage are retained; outages are reported.",
     capability: "weather.radar",
     dataType: "raster",
     providerProducts: ["radar-reflectivity"],
@@ -165,23 +155,27 @@ export const weatherLayerRegistry: WeatherLayerDefinition[] = [
   },
   ...[
     ["reflectivity", "Base reflectivity", "dBZ"],
-    ["velocity", "Base velocity", "kt"],
+    ["velocity", "Radial velocity", "m/s"],
     ["storm-velocity", "Storm-relative velocity", "kt"],
-    ["correlation", "Correlation coefficient", "%"],
+    ["correlation", "Correlation coefficient", "ratio"],
     ["differential-reflectivity", "Differential reflectivity", "dB"],
+    ["specific-phase", "Specific differential phase", "°/km"],
     ["hydrometeor", "Hydrometeor classification", "class"],
   ].map(([id, name, units]): WeatherLayerDefinition => ({
     id: `weather.radar.pro.${id}`,
     name: name!,
     group: "Radar",
     description:
-      id === "reflectivity"
-        ? "Official NOAA single-site super-resolution base reflectivity from the nearest available NEXRAD site."
-        : id === "velocity"
-          ? "Official NOAA single-site base radial velocity from the nearest available NEXRAD site."
-          : id === "hydrometeor"
-            ? "Official NOAA single-site digital hydrometeor classification from the nearest available NEXRAD site."
-            : "Professional radar product; availability depends on a reviewed radar-site provider.",
+      id === "storm-velocity"
+        ? "Storm-relative velocity requires verified storm-motion input; not enabled."
+        : "LandDraft native rendering and gate inspection from public NOAA Level III scans. Select a site and elevation product; data gaps and range folding remain explicit.",
+    ...(NATIVE_RADAR_PRODUCTS[`weather.radar.pro.${id}` as NativeRadarLayer]
+      ? {
+          legend: RADAR_SCALES[`weather.radar.pro.${id}` as NativeRadarLayer].map(
+            ([value, color]) => ({ color, label: `${value} ${units}` }),
+          ),
+        }
+      : {}),
     capability: "weather.meteorology",
     dataType: "raster",
     providerProducts: [`radar-${id}`],
@@ -199,8 +193,7 @@ export const weatherLayerRegistry: WeatherLayerDefinition[] = [
     id: "weather.satellite.clouds",
     name: "Clouds",
     group: "Satellite & clouds",
-    description:
-      "Configured global Xweather color-infrared cloud imagery with NOAA satellite fallback when commercial access is unavailable.",
+    description: "Public NOAA GOES infrared cloud imagery with source time and coverage retained.",
     capability: "weather.satellite",
     dataType: "raster",
     providerProducts: ["satellite-clouds"],
@@ -265,7 +258,7 @@ export const weatherLayerRegistry: WeatherLayerDefinition[] = [
     name: "Lightning activity",
     group: "Lightning",
     description:
-      "Configured Xweather global flash imagery with NOAA 15-minute regional strike-density fallback.",
+      "Lightning layer awaiting a commercially reusable GOES GLM adapter. Third-party strike feeds are not included.",
     capability: "weather.lightning",
     dataType: "raster",
     providerProducts: ["lightning-density"],
@@ -303,11 +296,31 @@ export const weatherLayerRegistry: WeatherLayerDefinition[] = [
     ],
   },
   {
-    id: "weather.severe.intelligence",
-    name: "NOAA ProbSevere storm objects",
+    id: "weather.severe.probsevere",
+    name: "NOAA ProbSevere · source polygons",
     group: "Severe weather",
     description:
-      "NOAA/CIMSS tracked-storm next-hour hail, wind, and tornado probabilistic guidance. Not an official warning.",
+      "Original NOAA/CIMSS ProbSevere polygons and published attributes. NOAA next-hour probability guidance; no LandDraft motion paths, corridors, or analysis. Not official warnings.",
+    capability: "weather.severe",
+    dataType: "geojson",
+    providerProducts: ["probsevere-v3-source"],
+    defaultOpacity: 0.25,
+    minZoom: 0,
+    maxZoom: 24,
+    animationSupport: false,
+    timeSupport: false,
+    inspectSupport: true,
+    mobileVisibility: "primary",
+    audience: "basic",
+    attribution: "NOAA / CIMSS ProbSevere v3 via NCEP MRMS",
+    legend: [{ color: "#7c3aed", label: "NOAA source storm polygon" }],
+  },
+  {
+    id: "weather.severe.intelligence",
+    name: "LandDraft Predictive Model",
+    group: "Severe weather",
+    description:
+      "LandDraft storm tracking, experimental physical intensity, trends, confidence and projected motion. NOAA/CIMSS ProbSevere probabilities remain separate. Projections and the unvalidated intensity index are LandDraft analysis, not official warnings.",
     capability: "weather.severe_intelligence",
     dataType: "geojson",
     providerProducts: ["probsevere-v3"],
@@ -321,7 +334,7 @@ export const weatherLayerRegistry: WeatherLayerDefinition[] = [
     audience: "basic",
     attribution: "NOAA / CIMSS ProbSevere v3",
     legend: [
-      { color: "#7f1d1d", label: "Tracked storm object" },
+      { color: "#6b7280", label: "Storm objects use selected coloring metric" },
       { color: "#f97316", label: "Likely motion corridor" },
       { color: "#fdba74", label: "Possible motion corridor" },
     ],
@@ -422,7 +435,7 @@ export const weatherLayerRegistry: WeatherLayerDefinition[] = [
                 : id === "air-quality"
                   ? "Official NOAA near-surface smoke guidance; broader AQI feeds remain a future integration."
                   : id === "photo"
-                    ? "Conservative lower-exposure candidate zones derived from official alert polygons and model conditions."
+                    ? "LandDraft candidate viewing areas around the selected NOAA-tracked storm or an official alert polygon, with model weather checks. Not validated safe locations."
                     : "Registered for a later validated provider or analysis increment.",
     capability: capability as WeatherLayerDefinition["capability"],
     dataType:
@@ -447,6 +460,23 @@ export function weatherLayer(id: string) {
   return weatherLayerRegistry.find((layer) => layer.id === id);
 }
 
+/** Additional navigation membership; tools retain their original category and state. */
+export function isLandDraftTool(id: string) {
+  return (
+    Object.hasOwn(NATIVE_RADAR_PRODUCTS, id) ||
+    rainfallLayers.some((layer) => layer.id === id) ||
+    ["weather.severe.intelligence", "weather.photo", "weather.storm_chaser.spotters"].includes(id)
+  );
+}
+export function weatherLayerInGroup(layer: WeatherLayerDefinition, group: string) {
+  if (group === "Source data")
+    return ![
+      "weather.severe.intelligence",
+      "weather.photo",
+      "weather.storm_chaser.spotters",
+    ].includes(layer.id);
+  return group === "LandDraft tools" ? isLandDraftTool(layer.id) : layer.group === group;
+}
 export function weatherLayersInGroup(group: string) {
-  return weatherLayerRegistry.filter((layer) => layer.group === group);
+  return weatherLayerRegistry.filter((layer) => weatherLayerInGroup(layer, group));
 }

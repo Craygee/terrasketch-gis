@@ -111,15 +111,15 @@ test("delayed storm motion keeps displayed lead times relative to the current cl
     forecastPositions: forecastFromValidatedMotion(origin, motion, [5, 30, 60]),
   } satisfies StormObject;
 
-  const adjusted = timeAdjustedStormForecast(storm, "2026-09-11T20:10:00Z");
+  const adjusted = timeAdjustedStormForecast(storm, "2026-09-11T20:04:00Z");
   assert.equal(adjusted.ageAdjusted, true);
   assert.equal(adjusted.expired, false);
-  assert.equal(Math.round(adjusted.sourceAgeMinutes), 10);
+  assert.equal(Math.round(adjusted.sourceAgeMinutes), 4);
   assert.deepEqual(
     adjusted.positions.map((position) => position.leadMinutes),
     [5, 30, 60],
   );
-  assert.equal(adjusted.positions.at(-1)?.validTime, "2026-09-11T21:10:00.000Z");
+  assert.equal(adjusted.positions.at(-1)?.validTime, "2026-09-11T21:04:00.000Z");
   assert.ok(
     adjusted.positions.at(-1)!.location.geometry.coordinates[0]! >
       storm.forecastPositions.at(-1)!.location.geometry.coordinates[0]!,

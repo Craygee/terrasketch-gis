@@ -1,3 +1,16 @@
+import { NativeRadarControls } from "./NativeRadarControls";
+import { StormAnalysisCard } from "./StormAnalysisCard";
+import {
+  STORM_STYLE_MODES,
+  stormStyleLegend,
+  stormStyleLegendEntries,
+} from "@/lib/weather/stormPresentation";
+import { nativeProduct } from "@/lib/weather/nativeRadar";
+import { hasWeatherCapability } from "@/lib/weather/entitlements";
+import { weatherProviderRegistry } from "@/lib/weather/providerRegistry";
+import { weatherProduct } from "@/lib/weather/productRegistry";
+import { followsLatestScan, timelineForLayerActivation } from "@/lib/weather/landdraftLayers";
+import type { NativeRadarReading } from "@/lib/weather/nativeRadar";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MapMouseEvent, MapMovementEvent } from "maplibre-gl";
 import { bbox } from "@turf/turf";
@@ -19,7 +32,6 @@ import {
   GripVertical,
   Heart,
   Layers3,
-  KeyRound,
   LoaderCircle,
   LocateFixed,
   Navigation,
@@ -40,6 +52,7 @@ import {
 import { toast } from "sonner";
 import { LandDraftMark } from "@/components/brand/LandDraftMark";
 import { useAuth } from "@/lib/auth";
+
 import { BasemapControl } from "@/components/gis/BasemapControl";
 import { MapCanvas } from "@/components/gis/MapCanvas";
 import { SearchBox } from "@/components/gis/SearchBox";
@@ -53,7 +66,7 @@ import {
   publishChaserPresence,
   stopChaserPresence,
 } from "@/lib/weather/chaserPresence";
-import { hasWeatherCapability } from "@/lib/weather/entitlements";
+
 import {
   formatPressure,
   formatTemperature,
@@ -64,9 +77,9 @@ import {
 import { createWeatherPreset, normalizeWeatherWorkspace } from "@/lib/weather/model";
 import {
   STORM_CHASER_PRO_RADAR_LAYERS,
-  STORM_CHASER_RADAR_COMPANIONS,
   STORM_CHASER_RECOMMENDED_LAYERS,
   WEATHER_LAYER_GROUPS,
+  weatherLayerInGroup,
   weatherLayerRegistry,
 } from "@/lib/weather/registry";
 import {
@@ -89,17 +102,13 @@ import type {
 } from "@/lib/weather/types";
 import { WeatherMapOverlay } from "./WeatherMapOverlay";
 import { WeatherTimeline } from "./WeatherTimeline";
-import { XweatherConnectionDialog } from "./XweatherConnectionDialog";
-import {
-  getXweatherConnection,
-  loadingXweatherConnection,
-  type XweatherConnectionStatus,
-} from "@/lib/weather/xweatherConnection";
-import {
-  XWEATHER_TILE_ERROR_EVENT,
-  XWEATHER_TILE_SUCCESS_EVENT,
-  type XweatherTileErrorDetail,
-} from "@/lib/weather/xweatherProtocol";
+
+import { WeatherDataSources } from "./WeatherDataSources";
+
+import { layerAvailability } from "@/lib/weather/layerAvailability";
+import { spcVisible } from "@/lib/weather/spc";
+
+const publicConnection = { connected: false };
 
 type MobileSheet = "layers" | "weather" | "sources" | null;
 type WorkspaceView = "weather" | "meteorology" | "storm-chaser" | "photography";
@@ -112,49 +121,12 @@ function initialWorkspaceView(): WorkspaceView {
     : "weather";
 }
 
-const starterChoices = [
-  { name: "Current Weather", category: "Current", layer: "weather.current", icon: CloudSun },
-  { name: "Radar", category: "Radar", layer: "weather.radar.simple", icon: CloudRainWind },
-  { name: "Storms", category: "Severe weather", layer: "weather.severe.alerts", icon: ShieldAlert },
-  { name: "Wind", category: "Wind", layer: "weather.wind.surface", icon: Wind },
-  { name: "Lightning", category: "Lightning", layer: "weather.lightning.recent", icon: Zap },
-  { name: "Forecast", category: "Forecast", layer: "weather.current", icon: Cloud },
-] as const;
-
 const workspaceChoices: Array<{ id: WorkspaceView; name: string; help: string }> = [
   { id: "weather", name: "Weather", help: "Simple weather layers and inspection" },
   { id: "meteorology", name: "Meteorology", help: "Professional products and analysis" },
   { id: "storm-chaser", name: "Storm Chaser", help: "Warnings, storm context, and field safety" },
   { id: "photography", name: "Photography", help: "Viewing and light-planning foundation" },
 ];
-
-const CONNECTED_LAYERS = new Set([
-  "weather.current",
-  "weather.radar.simple",
-  "weather.radar.pro.reflectivity",
-  "weather.radar.pro.velocity",
-  "weather.radar.pro.hydrometeor",
-  "weather.satellite.clouds",
-  "weather.satellite.true-color",
-  "weather.satellite.infrared",
-  "weather.satellite.water-vapor",
-  "weather.satellite.cloud-top",
-  "weather.satellite.smoke",
-  "weather.wind.surface",
-  "weather.lightning.recent",
-  "weather.severe.alerts",
-  "weather.severe.intelligence",
-  "weather.severe.reports",
-  "weather.storm_chaser.spotters",
-  "weather.forecast.precipitation",
-  "weather.surface",
-  "weather.metar",
-  "weather.tropical",
-  "weather.winter",
-  "weather.fire",
-  "weather.air-quality",
-  "weather.photo",
-]);
 
 function closestFrameIndex(frames: Array<{ timestamp: string }>, selectedTime: string) {
   const target = new Date(selectedTime).getTime();
@@ -212,7 +184,7 @@ export function WeatherWorkspace() {
   const wb = useWorkbench();
   const { map } = useMapRef();
   const workspace = useMemo(
-    () => normalizeWeatherWorkspace(wb.weatherWorkspace),
+    () => normalizeWeatherWorkspace(wb.weatherWorkspace, false),
     [wb.weatherWorkspace],
   );
   const requestedLayerIds = useMemo(
@@ -229,14 +201,29 @@ export function WeatherWorkspace() {
     [workspace.layerSettings],
   );
   const [bundle, setBundle] = useState<WeatherBundle | null>(null);
+  const latestBundle = useRef(bundle);
+  latestBundle.current = bundle;
+  const writeWorkspace = useRef(wb.setWeatherWorkspace);
+  writeWorkspace.current = wb.setWeatherWorkspace;
+  const [nativeReadings, setNativeReadings] = useState<Record<string, NativeRadarReading>>({});
+  const onNativeReading = useCallback(
+    (reading: NativeRadarReading) =>
+      setNativeReadings((current) => ({
+        ...current,
+        [`${reading.layerId}|${reading.site ?? "pending"}`]: reading,
+      })),
+    [],
+  );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
   const [mobileSheet, setMobileSheet] = useState<MobileSheet>(null);
-  const [advancedLayers, setAdvancedLayers] = useState(false);
   const [selectedAlert, setSelectedAlert] = useState<WeatherAlert | null>(null);
   const [selectedStormId, setSelectedStormId] = useState<string | null>(null);
+  const layerSidebar = useRef<HTMLElement | null>(null);
+  const photographyStormId = useRef<string | null>(null);
+  photographyStormId.current = selectedStormId;
   const [selectedCommunityChaser, setSelectedCommunityChaser] =
     useState<WeatherChaserPosition | null>(null);
   const [selectedStormReport, setSelectedStormReport] = useState<WeatherStormReport | null>(null);
@@ -244,6 +231,7 @@ export function WeatherWorkspace() {
   const [presenceSharing, setPresenceSharing] = useState(false);
   const [presenceBusy, setPresenceBusy] = useState(false);
   const [presenceError, setPresenceError] = useState<string | null>(null);
+  const [presenceLastSuccess, setPresenceLastSuccess] = useState<string | null>(null);
   const [workspaceView, setWorkspaceView] = useState<WorkspaceView>(initialWorkspaceView);
   const [chaseActive, setChaseActive] = useState(false);
   const [chaseFollow, setChaseFollow] = useState(true);
@@ -252,35 +240,22 @@ export function WeatherWorkspace() {
   const [chaseError, setChaseError] = useState<string | null>(null);
   const [navigationTargetMode, setNavigationTargetMode] = useState(false);
   const [navigationTarget, setNavigationTarget] = useState<[number, number] | undefined>();
+  const navigationTargetRef = useRef(navigationTarget);
+  navigationTargetRef.current = navigationTarget;
+  const chaserLocationRef = useRef(chaserLocation);
+  chaserLocationRef.current = chaserLocation;
   const [forecastReferenceTime, setForecastReferenceTime] = useState(() =>
     new Date().toISOString(),
   );
+  const publicAccess = publicConnection;
+  const [advancedLayers, setAdvancedLayers] = useState(false);
   const [presetName, setPresetName] = useState("");
-  const [xweatherConnection, setXweatherConnection] =
-    useState<XweatherConnectionStatus>(loadingXweatherConnection);
-  const [xweatherConnectionOpen, setXweatherConnectionOpen] = useState(false);
   const loadedProject = useRef<string | null>(null);
   const latestWeatherRequest = useRef(0);
-  const xweatherReloaded = useRef("");
-
-  useEffect(() => {
-    const onTileError = (event: Event) => {
-      const detail = (event as CustomEvent<XweatherTileErrorDetail>).detail;
-      if (!detail?.message) return;
-      setXweatherConnection((current) => ({ ...current, error: detail.message }));
-    };
-    const onTileSuccess = () => {
-      setXweatherConnection((current) =>
-        current.error ? { ...current, error: undefined } : current,
-      );
-    };
-    window.addEventListener(XWEATHER_TILE_ERROR_EVENT, onTileError);
-    window.addEventListener(XWEATHER_TILE_SUCCESS_EVENT, onTileSuccess);
-    return () => {
-      window.removeEventListener(XWEATHER_TILE_ERROR_EVENT, onTileError);
-      window.removeEventListener(XWEATHER_TILE_SUCCESS_EVENT, onTileSuccess);
-    };
-  }, []);
+  const activePointRequest = useRef<AbortController | null>(null);
+  const latestWorkspace = useRef(workspace);
+  latestWorkspace.current = workspace;
+  const layerActivationRevision = useRef(0);
   const synchronizedLayerRequest = useRef("");
   const geolocationWatch = useRef<number | null>(null);
   const latestChaserPosition = useRef<{
@@ -292,6 +267,13 @@ export function WeatherWorkspace() {
   const chaseFollowRef = useRef(true);
   const stormAutoCenterPending = useRef(false);
   const initialWorkspaceApplied = useRef(false);
+  const replaceWorkspace = useCallback(
+    (next: WeatherWorkspaceState) => {
+      latestWorkspace.current = next;
+      wb.setWeatherWorkspace(next);
+    },
+    [wb],
+  );
 
   useEffect(
     () => () => {
@@ -313,31 +295,13 @@ export function WeatherWorkspace() {
     if (wb.projectReady && !wb.weatherWorkspace) wb.setWeatherWorkspace(workspace);
   }, [wb, workspace]);
 
-  useEffect(() => {
-    let active = true;
-    void getXweatherConnection()
-      .then((status) => {
-        if (active) setXweatherConnection(status);
-      })
-      .catch((nextError) => {
-        if (!active) return;
-        setXweatherConnection({
-          state: "server-not-configured",
-          connected: false,
-          error:
-            nextError instanceof Error
-              ? nextError.message
-              : "Xweather connection status is unavailable",
-        });
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
-
   const updateWorkspace = useCallback(
-    (change: Partial<WeatherWorkspaceState>) => wb.setWeatherWorkspace({ ...workspace, ...change }),
-    [wb, workspace],
+    (change: Partial<WeatherWorkspaceState>) => {
+      const next = { ...latestWorkspace.current, ...change };
+      latestWorkspace.current = next;
+      replaceWorkspace(next);
+    },
+    [replaceWorkspace],
   );
 
   const updateTimeline = useCallback(
@@ -348,19 +312,78 @@ export function WeatherWorkspace() {
 
   const loadPoint = useCallback(
     async (point: [number, number], quietly = false, layers: string[] = requestedLayerIds) => {
+      const mapCenter = map?.getCenter();
+      const requestWorkspace = latestWorkspace.current;
+      const selectedStorm = latestBundle.current?.stormObjects.find(
+        (storm) => storm.id === photographyStormId.current,
+      );
+      const stormFocus = selectedStorm?.centroid.geometry.coordinates as
+        [number, number] | undefined;
+      const radarFocus =
+        stormFocus ??
+        navigationTargetRef.current ??
+        chaserLocationRef.current ??
+        requestWorkspace.lastInspectionPoint ??
+        (mapCenter ? [mapCenter.wrap().lng, mapCenter.lat] : point);
+      const radarFocusSource = stormFocus
+        ? "storm"
+        : navigationTargetRef.current
+          ? "target"
+          : chaserLocationRef.current
+            ? "gps"
+            : requestWorkspace.lastInspectionPoint
+              ? "inspection"
+              : "map";
       const requestId = ++latestWeatherRequest.current;
+      activePointRequest.current?.abort();
+      const controller = new AbortController();
+      activePointRequest.current = controller;
+      const requestTimeout = window.setTimeout(
+        () =>
+          controller.abort(
+            new Error("Weather request timed out. Use Refresh weather to try again."),
+          ),
+        45000,
+      );
       if (!quietly) setLoading(true);
       setError(null);
       try {
         const next = await getWeatherAtPoint({
+          signal: controller.signal,
           data: {
             longitude: point[0],
             latitude: point[1],
             requestedLayerIds: layers,
-            xweatherConnected: xweatherConnection.connected,
+            photographyStormId: photographyStormId.current ?? undefined,
+            mapCenter: mapCenter ? [mapCenter.wrap().lng, mapCenter.lat] : point,
+            radarFocus,
+            radarFocusSource,
+            ...(requestWorkspace.radarSiteMode
+              ? { radarSiteMode: requestWorkspace.radarSiteMode }
+              : {}),
+            ...(requestWorkspace.radarSiteIds?.length
+              ? { radarSiteIds: requestWorkspace.radarSiteIds }
+              : {}),
+            ...(requestWorkspace.radarSiteId ? { radarSiteId: requestWorkspace.radarSiteId } : {}),
+            ...(requestWorkspace.radarTilt === undefined
+              ? {}
+              : { radarTilt: requestWorkspace.radarTilt }),
           },
         });
-        if (requestId === latestWeatherRequest.current) setBundle(next);
+        if (requestId !== latestWeatherRequest.current) return null;
+        const currentWorkspace = latestWorkspace.current;
+        if (followsLatestScan(currentWorkspace, latestBundle.current)) {
+          const liveWorkspace = {
+            ...currentWorkspace,
+            timeline: { ...currentWorkspace.timeline, selectedTime: new Date().toISOString() },
+          };
+          // Layer activation resumes before React commits; share the new time synchronously.
+          latestWorkspace.current = liveWorkspace;
+          writeWorkspace.current(liveWorkspace);
+        }
+        latestBundle.current = next;
+        setNativeReadings({});
+        setBundle(next);
         return next;
       } catch (nextError) {
         const message =
@@ -371,11 +394,58 @@ export function WeatherWorkspace() {
         }
         return null;
       } finally {
+        window.clearTimeout(requestTimeout);
         if (requestId === latestWeatherRequest.current) setLoading(false);
       }
     },
-    [requestedLayerIds, xweatherConnection.connected],
+    [requestedLayerIds, map],
   );
+
+  useEffect(() => {
+    if (
+      !bundle ||
+      ((bundle.request.radarSiteMode ?? "automatic") === (workspace.radarSiteMode ?? "automatic") &&
+        JSON.stringify(bundle.request.radarSiteIds ?? []) ===
+          JSON.stringify(workspace.radarSiteIds ?? []) &&
+        (bundle.request.radarSiteId || "") === (workspace.radarSiteId || "") &&
+        (bundle.request.radarTilt ?? 0) === (workspace.radarTilt ?? 0))
+    )
+      return;
+    void loadPoint(workspace.lastInspectionPoint ?? wb.mapView.center, true);
+  }, [
+    workspace.radarSiteId,
+    workspace.radarSiteIds,
+    workspace.radarSiteMode,
+    workspace.radarTilt,
+    workspace.lastInspectionPoint,
+    wb.mapView.center,
+    bundle,
+    loadPoint,
+  ]);
+
+  useEffect(() => {
+    if (!map) return;
+    const followRadar = () => {
+      const current = latestWorkspace.current;
+      if (
+        (current.radarSiteMode ?? "automatic") === "manual" ||
+        photographyStormId.current ||
+        navigationTargetRef.current ||
+        chaserLocationRef.current ||
+        current.lastInspectionPoint ||
+        !Object.entries(current.layerSettings).some(
+          ([id, setting]) => nativeProduct(id) && setting.visible,
+        )
+      )
+        return;
+      const center = map.getCenter().wrap();
+      void loadPoint(current.lastInspectionPoint ?? [center.lng, center.lat], true);
+    };
+    map.on("moveend", followRadar);
+    return () => {
+      map.off("moveend", followRadar);
+    };
+  }, [map, loadPoint]);
 
   const loadCommunityChasers = useCallback(async () => {
     const point = chaserLocation ?? workspace.lastInspectionPoint ?? wb.mapView.center;
@@ -385,13 +455,16 @@ export function WeatherWorkspace() {
         latitude: point[1],
       });
       setCommunityChasers(positions);
+      setPresenceLastSuccess(new Date().toISOString());
       setPresenceError(null);
+      return true;
     } catch (nextError) {
       setPresenceError(
         nextError instanceof Error
           ? nextError.message
           : "Live LandDraft chaser locations are temporarily unavailable",
       );
+      return false;
     }
   }, [chaserLocation, wb.mapView.center, workspace.lastInspectionPoint]);
 
@@ -409,29 +482,13 @@ export function WeatherWorkspace() {
   }, [auth.user?.name]);
 
   useEffect(() => {
-    if (!wb.projectReady || loadedProject.current === wb.projectId) return;
+    if (!map || loadedProject.current === wb.projectId) return;
     loadedProject.current = wb.projectId;
     const point = workspace.lastInspectionPoint ?? wb.mapView.center;
     if (!workspace.lastInspectionPoint)
-      wb.setWeatherWorkspace({ ...workspace, lastInspectionPoint: point });
+      replaceWorkspace({ ...workspace, lastInspectionPoint: point });
     void loadPoint(point);
-  }, [loadPoint, wb, workspace]);
-
-  useEffect(() => {
-    if (!wb.projectReady || xweatherConnection.state === "loading") return;
-    const connectionRevision = `${xweatherConnection.state}:${xweatherConnection.connected}:${xweatherConnection.lastTestedAt ?? ""}`;
-    if (xweatherReloaded.current === connectionRevision) return;
-    xweatherReloaded.current = connectionRevision;
-    void loadPoint(workspace.lastInspectionPoint ?? wb.mapView.center, true);
-  }, [
-    loadPoint,
-    wb.mapView.center,
-    wb.projectReady,
-    workspace.lastInspectionPoint,
-    xweatherConnection.connected,
-    xweatherConnection.lastTestedAt,
-    xweatherConnection.state,
-  ]);
+  }, [loadPoint, map, replaceWorkspace, wb.mapView.center, wb.projectId, workspace]);
 
   useEffect(() => {
     if (!wb.projectReady || !bundle) return;
@@ -453,13 +510,14 @@ export function WeatherWorkspace() {
     workspace.lastInspectionPoint,
   ]);
 
+  const hasBundle = !!bundle;
   useEffect(() => {
-    if (!wb.projectReady || workspaceView !== "storm-chaser") return;
+    if (!map || !hasBundle) return;
     const timer = window.setInterval(() => {
       void loadPoint(workspace.lastInspectionPoint ?? wb.mapView.center, true);
     }, 60_000);
     return () => window.clearInterval(timer);
-  }, [loadPoint, wb.mapView.center, wb.projectReady, workspace.lastInspectionPoint, workspaceView]);
+  }, [loadPoint, wb.mapView.center, map, hasBundle, workspace.lastInspectionPoint]);
 
   useEffect(() => {
     if (
@@ -511,11 +569,18 @@ export function WeatherWorkspace() {
     const inspect = (event: MapMouseEvent) => {
       if (navigationTargetMode) {
         const point: [number, number] = [event.lngLat.lng, event.lngLat.lat];
+        navigationTargetRef.current = point;
         setNavigationTarget(point);
         setNavigationTargetMode(false);
         toast.success("Navigation point selected", {
           description: "Review current hazards and road conditions before opening directions.",
         });
+        if (
+          Object.entries(latestWorkspace.current.layerSettings).some(
+            ([id, setting]) => nativeProduct(id) && setting.visible,
+          )
+        )
+          void loadPoint(latestWorkspace.current.lastInspectionPoint ?? point, true);
         return;
       }
       const selectedWeatherObject = map
@@ -530,6 +595,7 @@ export function WeatherWorkspace() {
       updateWorkspace({ lastInspectionPoint: point });
       setSelectedAlert(null);
       setSelectedStormId(null);
+      photographyStormId.current = null;
       void loadPoint(point);
     };
     map.on("click", inspect);
@@ -557,6 +623,9 @@ export function WeatherWorkspace() {
 
   const timelineFrames = useMemo(() => {
     const candidates = [
+      ...(bundle?.nativeRadarFrames ?? []).filter(
+        (frame) => workspace.layerSettings[frame.layerId]?.visible,
+      ),
       ...(workspace.layerSettings["weather.radar.simple"]?.visible
         ? (bundle?.radarFrames ?? [])
         : []),
@@ -567,7 +636,12 @@ export function WeatherWorkspace() {
     return [...new Map(candidates.map((frame) => [frame.timestamp, frame])).values()].sort(
       (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
     );
-  }, [bundle?.radarFrames, bundle?.rasterFrames, workspace.layerSettings]);
+  }, [
+    bundle?.radarFrames,
+    bundle?.rasterFrames,
+    bundle?.nativeRadarFrames,
+    workspace.layerSettings,
+  ]);
 
   useEffect(() => {
     if (!workspace.timeline.playing || timelineFrames.length < 2) return;
@@ -588,29 +662,81 @@ export function WeatherWorkspace() {
   }, [timelineFrames, updateTimeline, workspace.timeline]);
 
   const setLayer = useCallback(
-    (id: string, change: Partial<WeatherLayerSetting>) => {
-      const current = workspace.layerSettings[id];
-      if (!current) return;
-      updateWorkspace({
-        layerSettings: {
-          ...workspace.layerSettings,
-          [id]: { ...current, ...change },
-        },
-      });
-      if (change.visible && !current.visible) {
-        const point = workspace.lastInspectionPoint ?? wb.mapView.center;
-        void loadPoint(point, true, Array.from(new Set([...requestedLayerIds, id])));
+    async (id: string, change: Partial<WeatherLayerSetting>) => {
+      const revision = ++layerActivationRevision.current;
+      const initial = latestWorkspace.current.layerSettings[id];
+      if (!initial) return;
+      if (change.visible && !initial.visible && id === "weather.storm_chaser.spotters") {
+        if (!(await loadCommunityChasers()) || revision !== layerActivationRevision.current) return;
       }
+      if (change.visible && !initial.visible && id !== "weather.storm_chaser.spotters") {
+        let availability = layerAvailability(id, bundle, publicAccess);
+        if (!availability.ready || nativeProduct(id)) {
+          if (!availability.ready && !availability.canCheck) {
+            toast.info(availability.label, { description: "See Data Sources for requirements." });
+            return;
+          }
+          toast.info("Checking layer availability…");
+          const next = await loadPoint(
+            latestWorkspace.current.lastInspectionPoint ?? wb.mapView.center,
+            true,
+            Array.from(new Set([...requestedLayerIds, id])),
+          );
+          if (revision !== layerActivationRevision.current || !next) return;
+          availability = layerAvailability(id, next, publicAccess);
+          if (!availability.ready) {
+            toast.info(availability.label);
+            return;
+          }
+        }
+      }
+      const latest = latestWorkspace.current;
+      const setting = latest.layerSettings[id];
+      if (!setting) return;
+      const nextWorkspace: WeatherWorkspaceState = {
+        ...latest,
+        timeline:
+          change.visible && !initial.visible
+            ? timelineForLayerActivation(id, latest.timeline)
+            : latest.timeline,
+        layerSettings: {
+          ...latest.layerSettings,
+          [id]: {
+            ...setting,
+            ...change,
+            ...(change.visible ? { lastUsedAt: new Date().toISOString() } : {}),
+          },
+        },
+      };
+      replaceWorkspace(nextWorkspace);
     },
     [
+      bundle,
       loadPoint,
       requestedLayerIds,
-      updateWorkspace,
       wb.mapView.center,
-      workspace.lastInspectionPoint,
-      workspace.layerSettings,
+      publicAccess,
+      loadCommunityChasers,
+      replaceWorkspace,
     ],
   );
+  const selectLayerCategory = (selectedCategory: string) => {
+    updateWorkspace({ selectedCategory });
+    const candidates = weatherLayerRegistry
+      .filter(
+        (layer) =>
+          weatherLayerInGroup(layer, selectedCategory) &&
+          weatherProduct(layer.id)?.adapterStatus === "implemented" &&
+          weatherProduct(layer.id)?.connectionType === "INCLUDED_PUBLIC",
+      )
+      .map((layer) => layer.id);
+    if (candidates.length)
+      void loadPoint(
+        workspace.lastInspectionPoint ?? wb.mapView.center,
+        true,
+        Array.from(new Set([...requestedLayerIds, ...candidates])).slice(0, 100),
+      );
+  };
 
   const reorderWeatherLayer = useCallback(
     (sourceId: string, targetId: string, edge: "before" | "after") => {
@@ -624,29 +750,11 @@ export function WeatherWorkspace() {
     [updateWorkspace, workspace.layerOrder],
   );
 
-  const chooseStarter = (choice: (typeof starterChoices)[number]) => {
-    const currentSetting = workspace.layerSettings[choice.layer];
-    updateWorkspace({
-      introductoryChooserSeen: true,
-      selectedCategory: choice.category,
-      layerSettings: currentSetting
-        ? {
-            ...workspace.layerSettings,
-            [choice.layer]: { ...currentSetting, visible: true },
-          }
-        : workspace.layerSettings,
-    });
-    void loadPoint(
-      workspace.lastInspectionPoint ?? wb.mapView.center,
-      true,
-      Array.from(new Set([...requestedLayerIds, choice.layer])),
-    );
-  };
-
   const openWorkspace = useCallback(
     (view: WorkspaceView) => {
       if (view === "storm-chaser") stormAutoCenterPending.current = true;
       setWorkspaceView(view);
+      layerSidebar.current?.scrollTo({ top: 0 });
       if (view === "weather") return;
       setAdvancedLayers(true);
       const workspaceLayerIds =
@@ -690,9 +798,6 @@ export function WeatherWorkspace() {
     if (workspaceView !== "weather") openWorkspace(workspaceView);
   }, [openWorkspace, wb.projectReady, workspaceView]);
 
-  const activeLayerCount = Object.values(workspace.layerSettings).filter(
-    (setting) => setting.visible,
-  ).length;
   const displayBundle = useMemo(
     () =>
       bundle
@@ -706,10 +811,14 @@ export function WeatherWorkspace() {
               {
                 providerId: "landdraft-chaser-presence",
                 providerName: "LandDraft opt-in chaser presence",
-                status: presenceError ? ("down" as const) : ("up" as const),
+                status: presenceError
+                  ? ("down" as const)
+                  : presenceLastSuccess
+                    ? ("up" as const)
+                    : ("not-configured" as const),
                 products: ["ephemeral opt-in chaser locations"],
                 coverage: "Signed-in LandDraft users within 800 km of the inspected point",
-                lastSuccessfulRequest: presenceError ? undefined : new Date().toISOString(),
+                lastSuccessfulRequest: presenceLastSuccess ?? undefined,
                 lastUpdate: communityChasers[0]?.observedAt,
                 error: presenceError ?? undefined,
                 costClass: "self-hosted" as const,
@@ -717,7 +826,7 @@ export function WeatherWorkspace() {
             ],
           }
         : null,
-    [bundle, communityChasers, presenceError],
+    [bundle, communityChasers, presenceError, presenceLastSuccess],
   );
   const current = bundle?.current;
   const activeStorm = useMemo(
@@ -754,6 +863,7 @@ export function WeatherWorkspace() {
       setPresenceSharing(false);
       setChaseActive(false);
       setChaserLocation(undefined);
+      chaserLocationRef.current = undefined;
       setChaserAccuracy(undefined);
       return;
     }
@@ -777,8 +887,19 @@ export function WeatherWorkspace() {
           ...(position.coords.speed === null ? {} : { speedMS: position.coords.speed }),
         };
         setChaserLocation(nextLocation);
+        chaserLocationRef.current = nextLocation;
         setChaserAccuracy(position.coords.accuracy);
         setChaseActive(true);
+        const priorFocus = latestBundle.current?.request.radarFocus;
+        if (
+          Object.entries(latestWorkspace.current.layerSettings).some(
+            ([id, setting]) => nativeProduct(id) && setting.visible,
+          ) &&
+          (latestBundle.current?.request.radarFocusSource !== "gps" ||
+            !priorFocus ||
+            Math.hypot(priorFocus[0] - nextLocation[0], priorFocus[1] - nextLocation[1]) > 0.2)
+        )
+          void loadPoint(latestWorkspace.current.lastInspectionPoint ?? nextLocation, true);
         if (chaseFollowRef.current && map) {
           map.easeTo({
             center: nextLocation,
@@ -864,6 +985,15 @@ export function WeatherWorkspace() {
   const selectStorm = useCallback(
     (storm: StormObject) => {
       setSelectedStormId(storm.id);
+      photographyStormId.current = storm.id;
+      if (
+        latestWorkspace.current.layerSettings["weather.photo"]?.visible ||
+        Object.entries(latestWorkspace.current.layerSettings).some(
+          ([id, setting]) => nativeProduct(id) && setting.visible,
+        )
+      ) {
+        void loadPoint(latestWorkspace.current.lastInspectionPoint ?? wb.mapView.center, true);
+      }
       const alert = bundle?.alerts.find((item) => storm.officialAlertIds.includes(item.id));
       setSelectedAlert(alert ?? null);
       if (window.innerWidth < 768) setMobileSheet(null);
@@ -876,7 +1006,7 @@ export function WeatherWorkspace() {
         essential: true,
       });
     },
-    [bundle?.alerts, forecastReferenceTime, map],
+    [bundle?.alerts, forecastReferenceTime, map, loadPoint, wb.mapView.center],
   );
 
   useEffect(() => {
@@ -889,10 +1019,34 @@ export function WeatherWorkspace() {
   const visibleGroups = useMemo(
     () =>
       WEATHER_LAYER_GROUPS.filter((group) => {
-        const layers = weatherLayerRegistry.filter((layer) => layer.group === group);
+        const layers = weatherLayerRegistry.filter((layer) => weatherLayerInGroup(layer, group));
         return layers.some((layer) => advancedLayers || layer.audience === "basic");
       }),
     [advancedLayers],
+  );
+
+  const renderedWorkspace = useMemo(
+    () => ({
+      ...workspace,
+      layerSettings: Object.fromEntries(
+        Object.entries(workspace.layerSettings).map(([id, setting]) => [
+          id,
+          {
+            ...setting,
+            visible: setting.visible && layerAvailability(id, displayBundle, publicAccess).ready,
+          },
+        ]),
+      ),
+    }),
+    [workspace, displayBundle, publicAccess],
+  );
+  const activeLayerCount = Object.values(renderedWorkspace.layerSettings).filter(
+    (setting) => setting.visible,
+  ).length;
+  const displayedSpc = (bundle?.spcOutlooks ?? []).filter(
+    (outlook) =>
+      renderedWorkspace.layerSettings[outlook.layerId]?.visible &&
+      spcVisible(outlook, workspace.timeline),
   );
 
   if (!workspace.enabled)
@@ -949,7 +1103,7 @@ export function WeatherWorkspace() {
         <select
           value={workspaceView}
           onChange={(event) => openWorkspace(event.target.value as WorkspaceView)}
-          className="ml-auto max-w-28 rounded-xl border border-border bg-secondary px-2 py-2 text-[10px] font-semibold md:hidden"
+          className="ml-auto min-h-11 max-w-28 shrink-0 rounded-xl border border-border bg-secondary px-2 py-2 text-[10px] font-semibold lg:hidden"
           aria-label="Weather workspace"
         >
           {workspaceChoices.map((choice) => (
@@ -959,7 +1113,7 @@ export function WeatherWorkspace() {
           ))}
         </select>
 
-        <div className="ml-auto hidden items-center gap-1 overflow-x-auto md:flex">
+        <div className="ml-auto hidden items-center gap-1 overflow-x-auto lg:flex">
           {workspaceChoices.map((choice) => (
             <button
               key={choice.id}
@@ -996,8 +1150,12 @@ export function WeatherWorkspace() {
 
       <div className="relative flex min-h-0 flex-1">
         {leftOpen && (
-          <aside className="hidden w-72 shrink-0 overflow-y-auto border-r border-border bg-card lg:block">
+          <aside
+            ref={layerSidebar}
+            className="hidden w-72 shrink-0 overflow-y-auto border-r border-border bg-card lg:block"
+          >
             <WeatherLayerPanel
+              nativeReadings={nativeReadings}
               workspace={workspace}
               bundle={displayBundle}
               groups={visibleGroups}
@@ -1006,12 +1164,12 @@ export function WeatherWorkspace() {
               presetName={presetName}
               onPresetName={setPresetName}
               onAdvanced={setAdvancedLayers}
-              onCategory={(selectedCategory) => updateWorkspace({ selectedCategory })}
+              onCategory={selectLayerCategory}
               onLayer={setLayer}
               onLayerOrder={reorderWeatherLayer}
-              onWorkspace={(next) => wb.setWeatherWorkspace(next)}
-              xweatherConnection={xweatherConnection}
-              onManageXweather={() => setXweatherConnectionOpen(true)}
+              onWorkspace={replaceWorkspace}
+              publicAccess={publicAccess}
+              onOpenSources={() => setMobileSheet("sources")}
             />
           </aside>
         )}
@@ -1020,8 +1178,9 @@ export function WeatherWorkspace() {
           <div className="relative min-h-0 flex-1">
             <MapCanvas />
             <WeatherMapOverlay
+              onNativeReading={onNativeReading}
               bundle={displayBundle}
-              workspace={workspace}
+              workspace={renderedWorkspace}
               onSelectAlert={(alert) => {
                 setSelectedAlert(alert);
                 const storm = bundle?.stormObjects.find((item) =>
@@ -1053,10 +1212,9 @@ export function WeatherWorkspace() {
                 });
                 if (window.innerWidth < 1024) setMobileSheet("weather");
               }}
-              stormObjectsVisible={
-                workspaceView === "storm-chaser" &&
-                Boolean(workspace.layerSettings["weather.severe.intelligence"]?.visible)
-              }
+              stormObjectsVisible={Boolean(
+                renderedWorkspace.layerSettings["weather.severe.intelligence"]?.visible,
+              )}
               selectedStormId={activeStorm?.id ?? null}
               forecastReferenceTime={forecastReferenceTime}
               chaserLocation={chaserLocation}
@@ -1089,7 +1247,22 @@ export function WeatherWorkspace() {
             </div>
 
             <div className="pointer-events-none absolute left-2 top-2 z-30 max-w-[calc(100%-6rem)] sm:left-3 sm:top-16">
-              <WeatherStatusPill bundle={bundle} loading={loading} error={error} />
+              <WeatherStatusPill
+                bundle={bundle}
+                workspace={workspace}
+                loading={loading}
+                error={error}
+              />
+              {displayedSpc.slice(0, 1).map((outlook) => (
+                <div
+                  key={outlook.layerId}
+                  className="mt-1 w-fit rounded-xl border border-border bg-card/95 px-2 py-1 text-[10px] shadow-float"
+                >
+                  {displayedSpc.length > 1
+                    ? `OFFICIAL SPC · ${displayedSpc.length} FORECASTS · Details in Weather inspector`
+                    : `${outlook.source.product} · FORECAST${outlook.statement ? ` · ${outlook.statement}` : ""}`}
+                </div>
+              ))}
             </div>
 
             <div className="pointer-events-none absolute left-2 top-14 z-30 flex max-w-[calc(100%-6rem)] flex-col gap-2 sm:left-3 sm:top-28">
@@ -1115,7 +1288,11 @@ export function WeatherWorkspace() {
               )}
             </div>
 
-            <WeatherLegends workspace={workspace} workspaceView={workspaceView} />
+            <WeatherLegends
+              workspace={renderedWorkspace}
+              workspaceView={workspaceView}
+              bundle={displayBundle}
+            />
 
             <div className="absolute inset-x-2 bottom-[calc(.5rem+env(safe-area-inset-bottom))] z-40 grid grid-cols-4 gap-1 rounded-3xl border border-border bg-card/95 p-1 shadow-float backdrop-blur lg:hidden">
               <MobileButton
@@ -1153,7 +1330,14 @@ export function WeatherWorkspace() {
             </div>
 
             {mobileSheet && (
-              <section className="weather-mobile-sheet absolute inset-x-2 bottom-[calc(4.6rem+env(safe-area-inset-bottom))] z-40 max-h-[54dvh] overflow-hidden rounded-3xl border border-border bg-card shadow-float lg:hidden">
+              <section
+                className={cn(
+                  "weather-mobile-sheet absolute inset-x-2 bottom-[calc(4.6rem+env(safe-area-inset-bottom))] z-40 max-h-[54dvh] overflow-hidden rounded-3xl border border-border bg-card shadow-float [@media(max-height:500px)]:left-auto [@media(max-height:500px)]:w-[min(24rem,48vw)]",
+                  mobileSheet === "sources"
+                    ? "lg:inset-x-auto lg:right-4 lg:bottom-4 lg:w-96"
+                    : "lg:hidden",
+                )}
+              >
                 <div className="flex items-center border-b border-border px-4 py-2">
                   <strong className="text-sm">
                     {mobileSheet === "layers"
@@ -1166,7 +1350,7 @@ export function WeatherWorkspace() {
                   </strong>
                   <button
                     onClick={() => setMobileSheet(null)}
-                    className="ml-auto flex size-8 items-center justify-center rounded-xl hover:bg-accent"
+                    className="ml-auto flex size-11 items-center justify-center rounded-xl hover:bg-accent"
                     aria-label="Close weather panel"
                   >
                     <X className="size-4" />
@@ -1175,6 +1359,8 @@ export function WeatherWorkspace() {
                 <div className="max-h-[calc(54dvh-3rem)] overflow-y-auto">
                   {mobileSheet === "layers" ? (
                     <WeatherLayerPanel
+                      compact
+                      nativeReadings={nativeReadings}
                       workspace={workspace}
                       bundle={displayBundle}
                       groups={visibleGroups}
@@ -1183,22 +1369,18 @@ export function WeatherWorkspace() {
                       presetName={presetName}
                       onPresetName={setPresetName}
                       onAdvanced={setAdvancedLayers}
-                      onCategory={(selectedCategory) => updateWorkspace({ selectedCategory })}
+                      onCategory={selectLayerCategory}
                       onLayer={setLayer}
                       onLayerOrder={reorderWeatherLayer}
-                      onWorkspace={(next) => wb.setWeatherWorkspace(next)}
-                      xweatherConnection={xweatherConnection}
-                      onManageXweather={() => setXweatherConnectionOpen(true)}
-                      compact
+                      onWorkspace={replaceWorkspace}
+                      publicAccess={publicAccess}
+                      onOpenSources={() => setMobileSheet("sources")}
                     />
                   ) : mobileSheet === "sources" ? (
-                    <SourcePanel
-                      bundle={bundle}
-                      xweatherConnection={xweatherConnection}
-                      onManageXweather={() => setXweatherConnectionOpen(true)}
-                    />
+                    <SourcePanel bundle={bundle} />
                   ) : workspaceView === "storm-chaser" ? (
                     <StormChaserPanel
+                      alerts={bundle?.alerts ?? []}
                       storms={bundle?.stormObjects ?? []}
                       stormReports={bundle?.stormReports ?? []}
                       selectedStormReport={selectedStormReport}
@@ -1227,7 +1409,10 @@ export function WeatherWorkspace() {
                         setMobileSheet(null);
                       }}
                       onNavigate={openNavigationTarget}
-                      onClearNavigationTarget={() => setNavigationTarget(undefined)}
+                      onClearNavigationTarget={() => {
+                        navigationTargetRef.current = undefined;
+                        setNavigationTarget(undefined);
+                      }}
                     />
                   ) : (
                     <InspectorPanel
@@ -1249,14 +1434,6 @@ export function WeatherWorkspace() {
                 )}
               </section>
             )}
-
-            {!workspace.introductoryChooserSeen && (
-              <FirstRunPanel
-                choices={starterChoices}
-                onChoose={chooseStarter}
-                onSkip={() => updateWorkspace({ introductoryChooserSeen: true })}
-              />
-            )}
           </div>
 
           <div className="hidden shrink-0 border-t border-border bg-card px-2 py-1.5 lg:block">
@@ -1272,6 +1449,7 @@ export function WeatherWorkspace() {
           <aside className="hidden w-80 shrink-0 overflow-y-auto border-l border-border bg-card xl:block">
             {workspaceView === "storm-chaser" ? (
               <StormChaserPanel
+                alerts={bundle?.alerts ?? []}
                 storms={bundle?.stormObjects ?? []}
                 stormReports={bundle?.stormReports ?? []}
                 selectedStormReport={selectedStormReport}
@@ -1297,82 +1475,24 @@ export function WeatherWorkspace() {
                 onToggleFollow={toggleChaseFollow}
                 onChooseNavigationTarget={() => setNavigationTargetMode((active) => !active)}
                 onNavigate={openNavigationTarget}
-                onClearNavigationTarget={() => setNavigationTarget(undefined)}
+                onClearNavigationTarget={() => {
+                  navigationTargetRef.current = undefined;
+                  setNavigationTarget(undefined);
+                }}
               />
             ) : (
               <InspectorPanel bundle={bundle} activeAlert={activeAlert} workspace={workspace} />
             )}
-            <SourcePanel
-              bundle={bundle}
-              xweatherConnection={xweatherConnection}
-              onManageXweather={() => setXweatherConnectionOpen(true)}
-            />
+            <SourcePanel bundle={bundle} />
           </aside>
         )}
-      </div>
-      <XweatherConnectionDialog
-        open={xweatherConnectionOpen}
-        status={xweatherConnection}
-        onOpenChange={setXweatherConnectionOpen}
-        onStatus={setXweatherConnection}
-      />
-    </div>
-  );
-}
-
-function FirstRunPanel({
-  choices,
-  onChoose,
-  onSkip,
-}: {
-  choices: typeof starterChoices;
-  onChoose: (choice: (typeof starterChoices)[number]) => void;
-  onSkip: () => void;
-}) {
-  return (
-    <div className="absolute inset-0 z-50 flex items-center justify-center bg-background/50 p-4 backdrop-blur-sm">
-      <div className="w-full max-w-xl rounded-3xl border border-border bg-card p-5 shadow-float">
-        <div className="flex items-start gap-3">
-          <span className="flex size-10 shrink-0 items-center justify-center rounded-2xl bg-primary text-primary-foreground">
-            <CloudSun className="size-5" />
-          </span>
-          <div>
-            <h2 className="text-lg font-bold">What do you want to see?</h2>
-            <p className="text-xs text-muted-foreground">
-              Start simply. Professional products stay one level deeper and every source keeps its
-              observation or forecast time.
-            </p>
-          </div>
-        </div>
-        <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
-          {choices.map((choice) => (
-            <button
-              key={choice.name}
-              onClick={() => onChoose(choice)}
-              className="rounded-2xl bg-secondary p-4 text-left transition-colors hover:bg-accent"
-            >
-              <choice.icon className="size-5 text-primary" />
-              <strong className="mt-2 block text-xs">{choice.name}</strong>
-            </button>
-          ))}
-        </div>
-        <div className="mt-4 flex items-center justify-between gap-2">
-          <p className="text-[9px] text-muted-foreground">
-            Official warnings supersede LandDraft analysis.
-          </p>
-          <button
-            onClick={onSkip}
-            className="rounded-xl px-3 py-2 text-xs font-semibold hover:bg-accent"
-          >
-            Skip
-          </button>
-        </div>
       </div>
     </div>
   );
 }
 
 function WeatherLayerPanel({
+  nativeReadings,
   workspace,
   bundle,
   groups,
@@ -1386,9 +1506,10 @@ function WeatherLayerPanel({
   onLayer,
   onLayerOrder,
   onWorkspace,
-  xweatherConnection,
-  onManageXweather,
+  publicAccess,
+  onOpenSources,
 }: {
+  nativeReadings: Record<string, NativeRadarReading>;
   workspace: WeatherWorkspaceState;
   bundle: WeatherBundle | null;
   groups: readonly string[];
@@ -1402,11 +1523,15 @@ function WeatherLayerPanel({
   onLayer: (id: string, change: Partial<WeatherLayerSetting>) => void;
   onLayerOrder: (sourceId: string, targetId: string, edge: "before" | "after") => void;
   onWorkspace: (workspace: WeatherWorkspaceState) => void;
-  xweatherConnection: XweatherConnectionStatus;
-  onManageXweather: () => void;
+  publicAccess: { connected: boolean };
+  onOpenSources: () => void;
 }) {
   const [draggedLayer, setDraggedLayer] = useState<string | null>(null);
   const [layerSearch, setLayerSearch] = useState("");
+  const [showUnavailable, setShowUnavailable] = useState(false);
+  const [favoritesOnly, setFavoritesOnly] = useState(false);
+  const [recentOnly, setRecentOnly] = useState(false);
+  const [requirementLayer, setRequirementLayer] = useState<string | null>(null);
   const [layerMenuSearch, setLayerMenuSearch] = useState("");
   const [dropTarget, setDropTarget] = useState<{
     id: string;
@@ -1414,20 +1539,38 @@ function WeatherLayerPanel({
   } | null>(null);
   const normalizedSearch = layerSearch.trim().toLowerCase();
   const normalizedMenuSearch = layerMenuSearch.trim().toLowerCase();
-  const selectedLayers = weatherLayerRegistry.filter((layer) => {
-    if (workspace.layerSettings[layer.id]?.menuVisible === false) return false;
-    if (!advanced && !normalizedSearch && layer.audience !== "basic") return false;
-    if (!normalizedSearch) return layer.group === workspace.selectedCategory;
-    return [
-      layer.name,
-      layer.description,
-      layer.group,
-      layer.providerName,
-      ...layer.providerProducts,
-    ]
-      .filter(Boolean)
-      .some((value) => value!.toLowerCase().includes(normalizedSearch));
-  });
+  const selectedLayers = weatherLayerRegistry
+    .filter((layer) => {
+      if (favoritesOnly && !workspace.layerSettings[layer.id]?.favorite) return false;
+      if (recentOnly && !workspace.layerSettings[layer.id]?.lastUsedAt) return false;
+      if (!showUnavailable && workspace.layerSettings[layer.id]?.menuVisible === false)
+        return false;
+      if (
+        !showUnavailable &&
+        !advanced &&
+        workspace.selectedCategory !== "LandDraft tools" &&
+        !normalizedSearch &&
+        layer.audience !== "basic" &&
+        !nativeProduct(layer.id)
+      )
+        return false;
+      if (!normalizedSearch) return weatherLayerInGroup(layer, workspace.selectedCategory);
+      return [
+        layer.name,
+        layer.description,
+        layer.group,
+        layer.providerName,
+        ...layer.providerProducts,
+      ]
+        .filter(Boolean)
+        .some((value) => value!.toLowerCase().includes(normalizedSearch));
+    })
+    .sort((a, b) =>
+      recentOnly
+        ? Date.parse(workspace.layerSettings[b.id]?.lastUsedAt ?? "1970-01-01") -
+          Date.parse(workspace.layerSettings[a.id]?.lastUsedAt ?? "1970-01-01")
+        : 0,
+    );
   const activeLayers = workspace.layerOrder.flatMap((id) => {
     const layer = weatherLayerRegistry.find((candidate) => candidate.id === id);
     return layer && workspace.layerSettings[id]?.visible ? [layer] : [];
@@ -1449,11 +1592,11 @@ function WeatherLayerPanel({
     const layer = weatherLayerRegistry.find((candidate) => candidate.id === id);
     return layer && hasWeatherCapability(layer.capability) ? [layer] : [];
   });
-  const menuGroups = groups.filter((group) =>
+  const menuGroups = (showUnavailable ? WEATHER_LAYER_GROUPS : groups).filter((group) =>
     weatherLayerRegistry.some(
       (layer) =>
-        layer.group === group &&
-        workspace.layerSettings[layer.id]?.menuVisible !== false &&
+        weatherLayerInGroup(layer, group) &&
+        (showUnavailable || workspace.layerSettings[layer.id]?.menuVisible !== false) &&
         hasWeatherCapability(layer.capability),
     ),
   );
@@ -1468,69 +1611,16 @@ function WeatherLayerPanel({
   const hiddenMenuLayerCount = weatherLayerRegistry.filter(
     (layer) => workspace.layerSettings[layer.id]?.menuVisible === false,
   ).length;
-  const layerStatus = (id: string) => {
-    const requested = bundle?.request.requestedLayerIds?.includes(id) ?? false;
-    const hasRaster = bundle?.rasterFrames.some((frame) => frame.layerId === id) ?? false;
-    const available =
-      id === "weather.current"
-        ? Boolean(bundle?.current)
-        : id === "weather.radar.simple"
-          ? Boolean(bundle?.radarFrames.length)
-          : id === "weather.severe.alerts"
-            ? Boolean(bundle && requested)
-            : id === "weather.severe.intelligence"
-              ? Boolean(
-                  bundle?.providerHealth.some(
-                    (provider) =>
-                      provider.providerId === "noaa-probsevere-v3" &&
-                      (provider.status === "up" || provider.status === "degraded"),
-                  ),
-                )
-              : id === "weather.wind.surface"
-                ? hasRaster || bundle?.current?.windSpeedMS !== undefined
-                : id === "weather.metar"
-                  ? Boolean(bundle?.stationObservations.length)
-                  : id === "weather.storm_chaser.spotters"
-                    ? Boolean(
-                        bundle?.providerHealth.some(
-                          (provider) =>
-                            provider.providerId === "landdraft-chaser-presence" &&
-                            provider.status === "up",
-                        ),
-                      )
-                    : id === "weather.severe.reports"
-                      ? Boolean(
-                          bundle?.providerHealth.some(
-                            (provider) =>
-                              provider.providerId === "iem-nws-lsr" &&
-                              (provider.status === "up" || provider.status === "degraded"),
-                          ),
-                        )
-                      : id === "weather.photo"
-                        ? Boolean(bundle?.photography)
-                        : hasRaster;
-    if (available) return { ready: true, label: "AVAILABLE" };
-    if (id === "weather.storm_chaser.spotters") {
-      const provider = bundle?.providerHealth.find(
-        (item) => item.providerId === "landdraft-chaser-presence",
-      );
-      if (provider?.status === "down") return { ready: false, label: "CONNECTION ERROR" };
-    }
-    if (id === "weather.severe.reports") {
-      const provider = bundle?.providerHealth.find((item) => item.providerId === "iem-nws-lsr");
-      if (provider?.status === "down") return { ready: false, label: "CONNECTION ERROR" };
-    }
-    const registered = weatherLayerRegistry.find((layer) => layer.id === id);
-    const hasConnectedProvider = registered?.providerProducts.some((product) =>
-      product.startsWith("xweather:"),
-    );
-    if (hasConnectedProvider && !xweatherConnection.connected)
-      return { ready: false, label: "CONNECT XWEATHER" };
-    if (hasConnectedProvider && xweatherConnection.error)
-      return { ready: false, label: "PROVIDER ERROR" };
-    if (!CONNECTED_LAYERS.has(id) && !hasConnectedProvider)
-      return { ready: false, label: "SETUP REQUIRED" };
-    return { ready: false, label: requested ? "NO DATA HERE" : "TURN ON TO LOAD" };
+  const layerStatus = (id: string) => layerAvailability(id, bundle, publicAccess);
+  const availableActiveLayers = activeLayers.filter((layer) => layerStatus(layer.id).ready);
+  const legendWorkspace = {
+    ...workspace,
+    layerSettings: Object.fromEntries(
+      Object.entries(workspace.layerSettings).map(([id, setting]) => [
+        id,
+        { ...setting, visible: setting.visible && layerStatus(id).ready },
+      ]),
+    ),
   };
   const savePreset = () => {
     const preset = createWeatherPreset(presetName, workspace);
@@ -1538,7 +1628,154 @@ function WeatherLayerPanel({
     onPresetName("");
     toast.success("Weather preset saved");
   };
+  const radarReadingForLayer = (id: string) => {
+    const readings = Object.values(nativeReadings).filter((reading) => reading.layerId === id);
+    return (
+      readings.find((reading) => reading.state === "ready") ??
+      readings.find((reading) => reading.state === "error") ??
+      readings[0]
+    );
+  };
 
+  const renderLayer = (layer: (typeof weatherLayerRegistry)[number]) => {
+    const setting = workspace.layerSettings[layer.id];
+    if (!setting || !hasWeatherCapability(layer.capability)) return null;
+    const status = layerStatus(layer.id);
+    const radarReading =
+      setting.visible && nativeProduct(layer.id) ? radarReadingForLayer(layer.id) : undefined;
+    const displayStatus =
+      setting.visible && status.ready && nativeProduct(layer.id)
+        ? radarReading?.state === "error"
+          ? (radarReading.message ?? "Radar rendering failed")
+          : radarReading?.state === "ready"
+            ? `Radar tiles loaded · ${radarReading.site ?? "NOAA"}`
+            : radarReading?.state === "rendering"
+              ? "Drawing radar tiles…"
+              : "Loading radar scan…"
+        : status.label;
+    return (
+      <div
+        key={layer.id}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          onLayer(layer.id, { favorite: !setting.favorite });
+        }}
+        className={cn(
+          "rounded-2xl border border-border bg-background p-3",
+          !status.ready && "border-dashed bg-secondary/40",
+        )}
+      >
+        <div className="flex items-start gap-2">
+          <button
+            onClick={() =>
+              setting.visible || status.ready || status.canCheck
+                ? onLayer(layer.id, { visible: !setting.visible })
+                : setRequirementLayer(requirementLayer === layer.id ? null : layer.id)
+            }
+            className={cn(
+              "mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-xl",
+              setting.visible ? "bg-primary text-primary-foreground" : "bg-secondary",
+            )}
+            aria-label={`${setting.visible ? "Hide" : "Show"} ${layer.name}`}
+          >
+            <Eye className="size-4" />
+          </button>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1">
+              <strong className="truncate text-xs">{layer.name}</strong>
+              <button
+                onClick={() => onLayer(layer.id, { favorite: !setting.favorite })}
+                className={cn(
+                  "ml-auto rounded-lg p-1",
+                  setting.favorite ? "text-primary" : "text-muted-foreground",
+                )}
+                aria-label={`${setting.favorite ? "Remove" : "Add"} favorite`}
+              >
+                <Heart className={cn("size-3.5", setting.favorite && "fill-current")} />
+              </button>
+            </div>
+            <p className="mt-0.5 text-[9px] leading-relaxed text-muted-foreground">
+              {layer.description}
+            </p>
+            <span
+              className={cn(
+                "mt-1 inline-flex rounded-full px-1.5 py-0.5 text-[8px] font-semibold",
+                status.ready && radarReading?.state !== "error"
+                  ? "bg-emerald-100 text-emerald-800"
+                  : "bg-amber-100 text-amber-800",
+              )}
+            >
+              {displayStatus}
+            </span>
+            {requirementLayer === layer.id && !status.ready && (
+              <div className="mt-2 rounded-xl border border-border p-2 text-[10px]">
+                <p>
+                  Provider:{" "}
+                  {weatherProviderRegistry.find(
+                    (provider) => provider.provider_id === weatherProduct(layer.id)?.providerId,
+                  )?.provider_name ?? "Not selected"}
+                </p>
+                <p>Product: {weatherProduct(layer.id)?.providerProduct}</p>
+                <p>
+                  Update interval:{" "}
+                  {weatherProduct(layer.id)?.updateIntervalSeconds ??
+                    "Product-dependent; not verified"}
+                </p>
+                <p>
+                  {layer.coverage ?? "Coverage and upstream product availability must be verified."}
+                </p>
+                <p className="mt-1">
+                  {status.label}. Review the provider and connection requirements in Data Sources.
+                </p>
+                {status.canCheck && (
+                  <button
+                    className="mt-2 font-semibold text-primary"
+                    onClick={() => onLayer(layer.id, { visible: true })}
+                  >
+                    Check availability
+                  </button>
+                )}
+              </div>
+            )}
+            {layer.providerName && (
+              <div className="mt-1 flex flex-wrap gap-1 text-[8px] text-muted-foreground">
+                <span className="rounded-full bg-secondary px-1.5 py-0.5">
+                  {layer.providerName}
+                </span>
+                {layer.providerCostMultiplier && (
+                  <span className="rounded-full bg-secondary px-1.5 py-0.5">
+                    {layer.providerCostMultiplier}× provider access
+                  </span>
+                )}
+                {layer.coverage && (
+                  <span className="rounded-full bg-secondary px-1.5 py-0.5">{layer.coverage}</span>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+        {setting.visible && layer.dataType !== "point" && (
+          <label className="mt-2 flex items-center gap-2 text-[9px] text-muted-foreground">
+            Opacity
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.05}
+              value={setting.opacity}
+              onChange={(event) => onLayer(layer.id, { opacity: Number(event.target.value) })}
+              className="min-w-0 flex-1 accent-primary"
+            />
+            {Math.round(setting.opacity * 100)}%
+          </label>
+        )}
+      </div>
+    );
+  };
+  const listedLayers = selectedLayers.filter(
+    (layer) => showUnavailable || layerStatus(layer.id).ready || layerStatus(layer.id).canCheck,
+  );
+  const rainfallOptions = listedLayers.filter((layer) => layer.id.startsWith("weather.rainfall."));
   return (
     <div className={cn("space-y-4", compact ? "p-3" : "p-4")}>
       <div>
@@ -1546,7 +1783,8 @@ function WeatherLayerPanel({
           <CloudSun className="size-4 text-primary" />
           <strong className="text-xs">Weather layers</strong>
           <span className="ml-auto rounded-full bg-secondary px-2 py-0.5 text-[9px]">
-            {Object.values(workspace.layerSettings).filter((item) => item.visible).length} on
+            {availableActiveLayers.length} on · {activeLayers.length - availableActiveLayers.length}{" "}
+            paused
           </span>
         </div>
         <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
@@ -1555,7 +1793,66 @@ function WeatherLayerPanel({
         </p>
       </div>
 
-      {!compact && <WeatherLegends workspace={workspace} workspaceView={workspaceView} embedded />}
+      {workspaceView === "storm-chaser" && (
+        <section
+          aria-label="LandDraft Predictive Model"
+          className="rounded-2xl border-2 border-primary/30 p-2"
+        >
+          <p className="px-2 py-1 text-[10px] font-semibold text-primary">
+            LANDDRAFT PREDICTIVE FEATURE
+          </p>
+          {renderLayer(
+            weatherLayerRegistry.find((layer) => layer.id === "weather.severe.intelligence")!,
+          )}
+          <p className="px-2 pt-2 text-[10px] text-muted-foreground">
+            Select a storm on the map to inspect its recent track and LandDraft’s projected path.
+            Powered by NOAA/CIMSS ProbSevere. Dashed paths and shaded areas are predictions.
+          </p>
+        </section>
+      )}
+      <label className="block rounded-xl border p-3 text-xs">
+        Storm object coloring
+        <select
+          className="mt-2 w-full rounded border p-2"
+          value={workspace.stormStyle ?? "Intensity"}
+          onChange={(event) =>
+            onWorkspace({
+              ...workspace,
+              stormStyle: event.target.value as (typeof STORM_STYLE_MODES)[number],
+            })
+          }
+        >
+          {STORM_STYLE_MODES.map((mode) => (
+            <option key={mode}>{mode}</option>
+          ))}
+        </select>
+        <span
+          className="mt-2 flex flex-wrap gap-x-3 gap-y-1"
+          aria-label={`${workspace.stormStyle ?? "Intensity"} map color scale`}
+        >
+          {stormStyleLegendEntries(workspace.stormStyle).map((entry) => (
+            <span key={entry.label} className="inline-flex items-center gap-1">
+              <span
+                className="size-2.5 shrink-0 rounded-full border border-black/10"
+                style={{ backgroundColor: entry.color }}
+              />
+              {entry.label}
+            </span>
+          ))}
+        </span>
+        <span className="mt-2 block text-muted-foreground">
+          Colors match storm objects on the map. NOAA probabilities are separate; official warnings
+          retain priority.
+        </span>
+      </label>
+      {!compact && (
+        <WeatherLegends
+          workspace={legendWorkspace}
+          workspaceView={workspaceView}
+          bundle={bundle}
+          embedded
+        />
+      )}
 
       {workspaceView === "storm-chaser" && (
         <details className="group rounded-2xl border border-primary/30 bg-primary/5">
@@ -1577,55 +1874,60 @@ function WeatherLayerPanel({
               other layers remain available in their normal categories unless hidden in Layer menu
               settings.
             </p>
-            {recommendedChaserLayers.map(({ recommendation, layer }) => {
-              const setting = workspace.layerSettings[layer.id];
-              if (!setting) return null;
-              const status = layerStatus(layer.id);
-              return (
-                <div
-                  key={layer.id}
-                  className={cn(
-                    "flex items-start gap-2 rounded-xl border bg-background p-2",
-                    recommendation.core ? "border-primary/40" : "border-border",
-                  )}
-                >
-                  <button
-                    type="button"
-                    onClick={() => onLayer(layer.id, { visible: !setting.visible })}
+            {recommendedChaserLayers
+              .filter(
+                ({ layer }) =>
+                  showUnavailable || layerStatus(layer.id).ready || layerStatus(layer.id).canCheck,
+              )
+              .map(({ recommendation, layer }) => {
+                const setting = workspace.layerSettings[layer.id];
+                if (!setting) return null;
+                const status = layerStatus(layer.id);
+                return (
+                  <div
+                    key={layer.id}
                     className={cn(
-                      "flex size-8 shrink-0 items-center justify-center rounded-xl",
-                      setting.visible ? "bg-primary text-primary-foreground" : "bg-secondary",
+                      "flex items-start gap-2 rounded-xl border bg-background p-2",
+                      recommendation.core ? "border-primary/40" : "border-border",
                     )}
-                    aria-label={`${setting.visible ? "Hide" : "Show"} ${recommendation.label}`}
                   >
-                    <Eye className="size-4" />
-                  </button>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-1">
-                      <strong className="text-[10px]">{recommendation.label}</strong>
-                      {recommendation.core && (
-                        <span className="rounded-full bg-primary px-1.5 py-0.5 text-[7px] font-bold text-primary-foreground">
-                          CORE ANALYSIS
-                        </span>
+                    <button
+                      type="button"
+                      onClick={() => onLayer(layer.id, { visible: !setting.visible })}
+                      className={cn(
+                        "flex size-8 shrink-0 items-center justify-center rounded-xl",
+                        setting.visible ? "bg-primary text-primary-foreground" : "bg-secondary",
                       )}
-                      <span
-                        className={cn(
-                          "ml-auto rounded-full px-1.5 py-0.5 text-[7px] font-semibold",
-                          status.ready
-                            ? "bg-emerald-100 text-emerald-800"
-                            : "bg-amber-100 text-amber-800",
+                      aria-label={`${setting.visible ? "Hide" : "Show"} ${recommendation.label}`}
+                    >
+                      <Eye className="size-4" />
+                    </button>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-1">
+                        <strong className="text-[10px]">{recommendation.label}</strong>
+                        {recommendation.core && (
+                          <span className="rounded-full bg-primary px-1.5 py-0.5 text-[7px] font-bold text-primary-foreground">
+                            CORE ANALYSIS
+                          </span>
                         )}
-                      >
-                        {status.label}
-                      </span>
+                        <span
+                          className={cn(
+                            "ml-auto rounded-full px-1.5 py-0.5 text-[7px] font-semibold",
+                            status.ready
+                              ? "bg-emerald-100 text-emerald-800"
+                              : "bg-amber-100 text-amber-800",
+                          )}
+                        >
+                          {status.label}
+                        </span>
+                      </div>
+                      <p className="mt-0.5 text-[8px] leading-relaxed text-muted-foreground">
+                        {recommendation.reason}
+                      </p>
                     </div>
-                    <p className="mt-0.5 text-[8px] leading-relaxed text-muted-foreground">
-                      {recommendation.reason}
-                    </p>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })}
           </div>
         </details>
       )}
@@ -1731,105 +2033,53 @@ function WeatherLayerPanel({
           </summary>
           <div className="space-y-2 border-t border-border p-2.5">
             <p className="text-[9px] leading-relaxed text-muted-foreground">
-              LandDraft uses its own reviewed NOAA/provider connections. RadarScope and RadarOmega
-              subscriptions are companion apps and do not grant LandDraft access to their private
-              feeds.
+              LandDraft radar layers use public NOAA data. No external weather subscription is
+              required. Source timestamps and coverage accompany each layer.
             </p>
             <div className="space-y-1">
-              {proRadarLayers.map((layer) => {
-                const setting = workspace.layerSettings[layer.id];
-                if (!setting) return null;
-                const status = layerStatus(layer.id);
-                return (
-                  <button
-                    key={layer.id}
-                    type="button"
-                    onClick={() => onLayer(layer.id, { visible: !setting.visible })}
-                    className={cn(
-                      "flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left text-[9px] font-semibold",
-                      setting.visible ? "bg-primary text-primary-foreground" : "bg-secondary",
-                    )}
-                  >
-                    <Eye className="size-3.5 shrink-0" />
-                    <span className="min-w-0 flex-1 truncate">{layer.name}</span>
-                    <span className="shrink-0 text-[7px] opacity-80">{status.label}</span>
-                  </button>
-                );
-              })}
-            </div>
-            <div className="grid grid-cols-2 gap-1">
-              {STORM_CHASER_RADAR_COMPANIONS.map((app) => (
-                <a
-                  key={app.id}
-                  href={app.href}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="rounded-xl border border-border p-2 text-[9px] font-semibold hover:bg-accent"
-                  title={app.description}
-                >
-                  <span className="flex items-center gap-1">
-                    {app.name}
-                    <ExternalLink className="ml-auto size-3" />
-                  </span>
-                  <span className="mt-1 block text-[7px] font-normal text-muted-foreground">
-                    Official app/site
-                  </span>
-                </a>
-              ))}
+              {proRadarLayers
+                .filter(
+                  (layer) =>
+                    showUnavailable ||
+                    layerStatus(layer.id).ready ||
+                    layerStatus(layer.id).canCheck,
+                )
+                .map((layer) => {
+                  const setting = workspace.layerSettings[layer.id];
+                  if (!setting) return null;
+                  const status = layerStatus(layer.id);
+                  return (
+                    <button
+                      key={layer.id}
+                      type="button"
+                      onClick={() => onLayer(layer.id, { visible: !setting.visible })}
+                      className={cn(
+                        "flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left text-[9px] font-semibold",
+                        setting.visible ? "bg-primary text-primary-foreground" : "bg-secondary",
+                      )}
+                    >
+                      <Eye className="size-3.5 shrink-0" />
+                      <span className="min-w-0 flex-1 truncate">{layer.name}</span>
+                      <span className="shrink-0 text-[7px] opacity-80">{status.label}</span>
+                    </button>
+                  );
+                })}
             </div>
           </div>
         </details>
       )}
 
-      <div
-        className={cn(
-          "flex items-center gap-2 border border-border bg-background",
-          xweatherConnection.connected ? "rounded-xl px-2 py-1.5" : "rounded-2xl p-3",
-        )}
+      <button
+        type="button"
+        onClick={onOpenSources}
+        className="min-h-11 rounded-xl border border-border px-3 py-2 text-xs font-semibold"
       >
-        <span
-          className={cn(
-            "flex shrink-0 items-center justify-center rounded-xl",
-            xweatherConnection.connected ? "size-6" : "size-8",
-            xweatherConnection.connected
-              ? "bg-emerald-100 text-emerald-800"
-              : "bg-secondary text-muted-foreground",
-          )}
-        >
-          <KeyRound className={xweatherConnection.connected ? "size-3.5" : "size-4"} />
-        </span>
-        <div className="min-w-0 flex-1">
-          <strong className="block truncate text-[10px]">
-            {xweatherConnection.connected ? "Xweather connected" : "Xweather premium products"}
-          </strong>
-          {!xweatherConnection.connected && (
-            <p className="truncate text-[9px] text-muted-foreground">
-              {xweatherConnection.state === "loading"
-                ? "Checking connection…"
-                : "Use your own Xweather account and allowance"}
-            </p>
-          )}
-          {xweatherConnection.connected && xweatherConnection.error && (
-            <p className="truncate text-[8px] text-destructive" title={xweatherConnection.error}>
-              {xweatherConnection.error}
-            </p>
-          )}
-        </div>
-        <button
-          type="button"
-          onClick={onManageXweather}
-          className={cn(
-            "shrink-0 rounded-xl bg-primary font-semibold text-primary-foreground",
-            xweatherConnection.connected ? "px-2 py-1 text-[8px]" : "px-2.5 py-2 text-[9px]",
-          )}
-        >
-          {xweatherConnection.connected ? "Manage" : "Connect"}
-        </button>
-      </div>
-
+        Manage Data Sources
+      </button>
       <details className="rounded-2xl border border-border bg-background" open>
         <summary className="cursor-pointer px-3 py-2 text-xs font-semibold">
-          Active layer stack · {activeLayers.length}
+          Layer stack · {availableActiveLayers.length} on ·{" "}
+          {activeLayers.length - availableActiveLayers.length} paused
         </summary>
         <div className="border-t border-border p-2">
           <p className="mb-2 text-[9px] leading-relaxed text-muted-foreground">
@@ -1878,11 +2128,26 @@ function WeatherLayerPanel({
                   />
                 )}
                 <GripVertical className="size-3.5 shrink-0 cursor-grab text-muted-foreground" />
-                <span
-                  className="min-w-0 flex-1 truncate text-[10px] font-semibold"
-                  title={layer.name}
-                >
+                <span className="min-w-0 flex-1 text-[10px] font-semibold" title={layer.name}>
                   {layer.name}
+                  {nativeProduct(layer.id) && layerStatus(layer.id).ready && (
+                    <span className="block whitespace-normal text-[10px] font-normal text-muted-foreground">
+                      {workspace.timeline.mode === "forecast"
+                        ? "Hidden in forecast mode"
+                        : radarReadingForLayer(layer.id)?.state === "error"
+                          ? (radarReadingForLayer(layer.id)?.message ?? "Radar rendering failed")
+                          : radarReadingForLayer(layer.id)?.state === "ready"
+                            ? `Tiles loaded · ${radarReadingForLayer(layer.id)?.site ?? "NOAA"}`
+                            : radarReadingForLayer(layer.id)?.state === "rendering"
+                              ? "Drawing radar tiles…"
+                              : "Loading radar…"}
+                    </span>
+                  )}
+                  {!layerStatus(layer.id).ready && (
+                    <span className="block whitespace-normal text-[10px] font-normal text-muted-foreground">
+                      Paused · {layerStatus(layer.id).label}
+                    </span>
+                  )}
                 </span>
                 <button
                   onClick={() => {
@@ -1890,7 +2155,7 @@ function WeatherLayerPanel({
                     if (target) onLayerOrder(layer.id, target.id, "before");
                   }}
                   disabled={index === 0}
-                  className="flex size-7 items-center justify-center rounded-lg hover:bg-accent disabled:opacity-25"
+                  className="flex size-11 items-center justify-center rounded-lg hover:bg-accent disabled:opacity-25"
                   title="Move toward front"
                   aria-label={`Move ${layer.name} toward front`}
                 >
@@ -1902,7 +2167,7 @@ function WeatherLayerPanel({
                     if (target) onLayerOrder(layer.id, target.id, "after");
                   }}
                   disabled={index === activeLayers.length - 1}
-                  className="flex size-7 items-center justify-center rounded-lg hover:bg-accent disabled:opacity-25"
+                  className="flex size-11 items-center justify-center rounded-lg hover:bg-accent disabled:opacity-25"
                   title="Move toward back"
                   aria-label={`Move ${layer.name} toward back`}
                 >
@@ -1910,7 +2175,7 @@ function WeatherLayerPanel({
                 </button>
                 <button
                   onClick={() => onLayer(layer.id, { visible: false })}
-                  className="flex size-7 items-center justify-center rounded-lg text-primary hover:bg-accent"
+                  className="flex size-11 items-center justify-center rounded-lg text-primary hover:bg-accent"
                   title="Hide layer"
                   aria-label={`Hide ${layer.name}`}
                 >
@@ -1927,12 +2192,39 @@ function WeatherLayerPanel({
         </div>
       </details>
 
+      <div className="flex flex-wrap gap-3 text-xs">
+        <label className="flex min-h-11 items-center gap-2">
+          <input
+            type="checkbox"
+            checked={recentOnly}
+            onChange={(event) => setRecentOnly(event.target.checked)}
+          />
+          Recently used
+        </label>
+        <label className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={showUnavailable}
+            onChange={(event) => setShowUnavailable(event.target.checked)}
+          />
+          Show unavailable &amp; optional layers
+        </label>
+        <label className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={favoritesOnly}
+            onChange={(event) => setFavoritesOnly(event.target.checked)}
+          />
+          Favorites
+        </label>
+      </div>
       <label className="flex items-center gap-2 rounded-xl border border-border bg-background px-3 py-2">
         <Search className="size-3.5 shrink-0 text-muted-foreground" />
         <input
           value={layerSearch}
           onChange={(event) => setLayerSearch(event.target.value)}
           placeholder="Search weather layers"
+          aria-label="Search weather layers"
           className="min-w-0 flex-1 bg-transparent text-[10px] outline-none placeholder:text-muted-foreground"
         />
         {layerSearch && (
@@ -1965,95 +2257,50 @@ function WeatherLayerPanel({
         ))}
       </div>
 
+      {["Radar", "LandDraft tools"].includes(workspace.selectedCategory) && (
+        <NativeRadarControls
+          workspace={workspace}
+          bundle={bundle}
+          readings={nativeReadings}
+          onWorkspace={onWorkspace}
+          onLayer={onLayer}
+          showProducts={false}
+        />
+      )}
       <div className="space-y-2">
-        {!selectedLayers.length && (
+        {!selectedLayers.some(
+          (layer) =>
+            showUnavailable || layerStatus(layer.id).ready || layerStatus(layer.id).canCheck,
+        ) && (
           <div className="rounded-2xl bg-secondary p-3 text-[10px] text-muted-foreground">
             {normalizedSearch
               ? "No weather layers match this search."
-              : "No visible menu layers remain in this category. Restore them in Layer menu settings or turn on professional layers."}
+              : "No verified products in this category. Show unavailable & optional layers to inspect requirements."}
           </div>
         )}
-        {selectedLayers.map((layer) => {
-          const setting = workspace.layerSettings[layer.id];
-          if (!setting || !hasWeatherCapability(layer.capability)) return null;
-          const status = layerStatus(layer.id);
-          return (
-            <div key={layer.id} className="rounded-2xl border border-border bg-background p-3">
-              <div className="flex items-start gap-2">
-                <button
-                  onClick={() => onLayer(layer.id, { visible: !setting.visible })}
-                  className={cn(
-                    "mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-xl",
-                    setting.visible ? "bg-primary text-primary-foreground" : "bg-secondary",
-                  )}
-                  aria-label={`${setting.visible ? "Hide" : "Show"} ${layer.name}`}
-                >
-                  <Eye className="size-4" />
-                </button>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-1">
-                    <strong className="truncate text-xs">{layer.name}</strong>
-                    <button
-                      onClick={() => onLayer(layer.id, { favorite: !setting.favorite })}
-                      className={cn(
-                        "ml-auto rounded-lg p-1",
-                        setting.favorite ? "text-primary" : "text-muted-foreground",
-                      )}
-                      aria-label={`${setting.favorite ? "Remove" : "Add"} favorite`}
-                    >
-                      <Heart className={cn("size-3.5", setting.favorite && "fill-current")} />
-                    </button>
-                  </div>
-                  <p className="mt-0.5 text-[9px] leading-relaxed text-muted-foreground">
-                    {layer.description}
-                  </p>
-                  <span
-                    className={cn(
-                      "mt-1 inline-flex rounded-full px-1.5 py-0.5 text-[8px] font-semibold",
-                      status.ready
-                        ? "bg-emerald-100 text-emerald-800"
-                        : "bg-amber-100 text-amber-800",
-                    )}
-                  >
-                    {status.label}
-                  </span>
-                  {layer.providerName && (
-                    <div className="mt-1 flex flex-wrap gap-1 text-[8px] text-muted-foreground">
-                      <span className="rounded-full bg-secondary px-1.5 py-0.5">
-                        {layer.providerName}
-                      </span>
-                      {layer.providerCostMultiplier && (
-                        <span className="rounded-full bg-secondary px-1.5 py-0.5">
-                          {layer.providerCostMultiplier}× provider access
-                        </span>
-                      )}
-                      {layer.coverage && (
-                        <span className="rounded-full bg-secondary px-1.5 py-0.5">
-                          {layer.coverage}
-                        </span>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-              {setting.visible && layer.dataType !== "point" && (
-                <label className="mt-2 flex items-center gap-2 text-[9px] text-muted-foreground">
-                  Opacity
-                  <input
-                    type="range"
-                    min={0}
-                    max={1}
-                    step={0.05}
-                    value={setting.opacity}
-                    onChange={(event) => onLayer(layer.id, { opacity: Number(event.target.value) })}
-                    className="min-w-0 flex-1 accent-primary"
-                  />
-                  {Math.round(setting.opacity * 100)}%
-                </label>
-              )}
+        {rainfallOptions.length > 0 && (
+          <details className="rounded-2xl border border-border bg-background">
+            <summary className="cursor-pointer p-3 text-xs font-semibold">
+              LandDraft rainfall{" "}
+              <span className="text-muted-foreground">
+                ·{" "}
+                {rainfallOptions
+                  .filter((layer) => workspace.layerSettings[layer.id]?.visible)
+                  .map((layer) => layer.id.split(".").at(-1))
+                  .join(", ") || "Choose hours"}
+              </span>
+            </summary>
+            <div className="space-y-2 border-t border-border p-2">
+              <p className="px-1 text-[10px] text-muted-foreground">
+                Choose rainfall accumulation: 1, 3, 6, 12, 24, 48 or 72 hours.
+              </p>
+              {rainfallOptions.map(renderLayer)}
             </div>
-          );
-        })}
+          </details>
+        )}
+        {listedLayers
+          .filter((layer) => !layer.id.startsWith("weather.rainfall."))
+          .map(renderLayer)}{" "}
       </div>
 
       <button
@@ -2229,6 +2476,7 @@ function StormHistorySignal({
 }
 
 function StormChaserPanel({
+  alerts,
   storms,
   stormReports,
   selectedStormReport,
@@ -2256,6 +2504,7 @@ function StormChaserPanel({
   onNavigate,
   onClearNavigationTarget,
 }: {
+  alerts: WeatherAlert[];
   storms: StormObject[];
   stormReports: WeatherStormReport[];
   selectedStormReport: WeatherStormReport | null;
@@ -2325,7 +2574,7 @@ function StormChaserPanel({
       <div>
         <div className="flex items-center gap-2">
           <ShieldAlert className="size-4 text-primary" />
-          <strong className="text-xs">Storm Chaser / Severe Intelligence</strong>
+          <strong className="text-xs">LandDraft Predictive Model</strong>
         </div>
         <p className="mt-1 text-[9px] leading-relaxed text-muted-foreground">
           LandDraft combines NOAA tracked-storm guidance, official alerts, recent NWS storm reports,
@@ -2673,6 +2922,13 @@ function StormChaserPanel({
                 : "border-rose-200 bg-rose-50 text-rose-950",
             )}
           >
+            <StormAnalysisCard
+              storm={activeStorm}
+              officialWarning={alerts.some(
+                (alert) =>
+                  activeStorm.officialAlertIds.includes(alert.id) && /warning/i.test(alert.event),
+              )}
+            />
             <span className="inline-flex rounded-full bg-white/80 px-2 py-1 text-[8px] font-bold">
               {activeStorm.statusLabel}
             </span>
@@ -3092,6 +3348,9 @@ function InspectorPanel({
   workspace: WeatherWorkspaceState;
 }) {
   const current = bundle?.current;
+  const alertsAvailable = layerAvailability("weather.severe.alerts", bundle, {
+    connected: false,
+  }).ready;
   return (
     <div className="space-y-4 p-4">
       <div>
@@ -3103,6 +3362,105 @@ function InspectorPanel({
           Tap the map to load consolidated weather for that exact point.
         </p>
       </div>
+
+      {(bundle?.rasterFrames ?? [])
+        .filter((frame) => frame.pointSample && workspace.layerSettings[frame.layerId]?.visible)
+        .map((frame) => (
+          <section
+            key={frame.id}
+            className="space-y-2 rounded-2xl border border-border bg-secondary p-3 text-xs"
+          >
+            <strong>
+              {weatherLayerRegistry.find((layer) => layer.id === frame.layerId)?.name}
+            </strong>
+            <p className="text-lg font-semibold">
+              {frame.pointSample!.value === null
+                ? "Sample unavailable"
+                : workspace.unitSystem === "us"
+                  ? frame.pointSample!.value.toFixed(2) + " in"
+                  : (frame.pointSample!.value * 25.4).toFixed(1) + " mm"}
+            </p>
+            <p>Radar estimate · approximately 1 km grid</p>
+            <p>Accumulation ending {new Date(frame.timestamp).toLocaleString()}</p>
+            <p>{layerAvailability(frame.layerId, bundle, publicConnection).label}</p>
+            <p className="text-muted-foreground">
+              NOAA/NWS MRMS · LandDraft colors. Rainfall amount is not flood depth. Below 0.01 in is
+              transparent on the map; missing samples are not zero.
+            </p>
+          </section>
+        ))}
+
+      {(bundle?.spcOutlooks ?? [])
+        .filter((outlook) => workspace.layerSettings[outlook.layerId]?.visible)
+        .map((outlook) => (
+          <section
+            key={outlook.layerId}
+            className="space-y-2 rounded-2xl border border-border bg-secondary p-3 text-xs"
+            aria-label={outlook.source.product}
+          >
+            <strong>{outlook.source.product}</strong>
+            {outlook.statement && (
+              <p className="font-medium">
+                Official statement: {outlook.statement}. No shaded contour in this issuance; this is
+                not an all-clear.
+              </p>
+            )}
+            <p>
+              FORECAST ·{" "}
+              {spcVisible(outlook, workspace.timeline)
+                ? "Displayed"
+                : "Hidden at this time or stale"}
+            </p>
+            <p className="text-muted-foreground">
+              Latest issuance only. Historical versions are not connected. This outlook is not a
+              warning.
+            </p>
+            <p>
+              Issued: {outlook.source.sourceTimestamp}
+              <br />
+              Valid: {outlook.source.validTime}
+              <br />
+              Until: {outlook.source.expirationTime}
+            </p>
+            <p>
+              Retrieved: {outlook.source.receivedTimestamp}
+              <br />
+              Issuance age:{" "}
+              {Math.max(
+                0,
+                Math.floor(
+                  (Date.now() - Date.parse(outlook.source.sourceTimestamp ?? "")) / 60_000,
+                ),
+              )}{" "}
+              min · Input quality: {outlook.source.quality}
+            </p>
+            <ul className="space-y-1" aria-label="SPC risk categories">
+              {[
+                ...new Map(
+                  outlook.areas.map((area) => [area.properties.label, area.properties]),
+                ).values(),
+              ].map((area) => (
+                <li key={area.label} className="flex items-center gap-2">
+                  <span
+                    aria-hidden="true"
+                    className="inline-block size-3 shrink-0 border"
+                    style={{ backgroundColor: area.fill, borderColor: area.stroke }}
+                  />
+                  {area.label}
+                </li>
+              ))}
+            </ul>
+            <a
+              className="underline"
+              href={outlook.source.rawSourceReference}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Official SPC source
+            </a>
+            <p className="text-muted-foreground">{outlook.source.attribution}</p>
+          </section>
+        ))}
 
       {current ? (
         <div className="rounded-2xl bg-secondary p-3">
@@ -3148,7 +3506,7 @@ function InspectorPanel({
         <div className="flex items-center gap-2 text-xs font-semibold">
           <ShieldAlert className="size-4 text-primary" /> Official alerts
           <span className="ml-auto rounded-full bg-secondary px-2 py-0.5 text-[9px]">
-            {bundle?.alerts.length ?? 0}
+            {alertsAvailable ? bundle?.alerts.length : "Unavailable"}
           </span>
         </div>
         {activeAlert ? (
@@ -3177,8 +3535,9 @@ function InspectorPanel({
           </div>
         ) : (
           <p className="mt-2 rounded-2xl bg-secondary p-3 text-[10px] text-muted-foreground">
-            No active alert was returned for the inspected point. This is not an all-clear; follow
-            official local guidance.
+            {alertsAvailable
+              ? "No active alert was returned for the inspected point. This is not an all-clear; follow official local guidance."
+              : "The official alert feed is unavailable or stale. Warning status is unknown; consult official local guidance."}
           </p>
         )}
       </div>
@@ -3224,8 +3583,8 @@ function PhotographyPanel({
       </p>
       {assessment.status === "no-severe-target" ? (
         <p className="mt-2 rounded-2xl bg-secondary p-3 text-[10px] text-muted-foreground">
-          No candidate zones were generated. LandDraft requires an official warning/watch polygon
-          before it treats a storm as an analysis target.
+          Select a tracked storm on the map, then open Photography, or inspect an official warning
+          polygon. Candidate viewing locations need a current storm target.
         </p>
       ) : (
         <div className="mt-2 space-y-2">
@@ -3248,8 +3607,8 @@ function PhotographyPanel({
               </div>
               <p className="mt-1 text-[10px] font-semibold">
                 {zone.score === null
-                  ? "Photography score suppressed"
-                  : `Photography ${zone.score}/100`}
+                  ? "Viewing conditions unavailable — observations missing or official hazard present"
+                  : `Viewing conditions ${zone.score}/100 · not a safety score`}
               </p>
               <p className="mt-1 text-[9px] text-muted-foreground">
                 {zone.distanceFromTargetMiles.toFixed(1)} mi from alert center · target bearing{" "}
@@ -3260,6 +3619,20 @@ function PhotographyPanel({
                   <li key={reason}>• {reason}</li>
                 ))}
               </ul>
+              <p className="mt-2 text-[9px]">LANDDRAFT ANALYSIS · Confidence: {zone.confidence}</p>
+              <p className="text-[9px] text-muted-foreground">
+                Source: {zone.source.providerName} · {zone.source.product}
+              </p>
+              <p className="text-[9px] text-muted-foreground">
+                Valid: {zone.source.validTime ?? "Unknown"} · Retrieved:{" "}
+                {zone.source.receivedTimestamp} · {weatherAgeLabel(zone.source)}
+              </p>
+              <details className="mt-1 text-[9px]">
+                <summary>Missing data and cautions</summary>
+                {zone.cautions.map((caution) => (
+                  <p key={caution}>{caution}</p>
+                ))}
+              </details>
             </div>
           ))}
         </div>
@@ -3281,103 +3654,16 @@ function PhotographyPanel({
   );
 }
 
-function SourcePanel({
-  bundle,
-  xweatherConnection,
-  onManageXweather,
-}: {
-  bundle: WeatherBundle | null;
-  xweatherConnection: XweatherConnectionStatus;
-  onManageXweather: () => void;
-}) {
-  return (
-    <div className="border-t border-border p-4">
-      <div className="flex items-center gap-2">
-        <Database className="size-4 text-primary" />
-        <strong className="text-xs">Data sources</strong>
-      </div>
-      <p className="mt-1 text-[9px] text-muted-foreground">
-        Provider identity and health are never hidden during fallback.
-      </p>
-      <button
-        type="button"
-        onClick={onManageXweather}
-        className="mt-3 flex w-full items-center gap-2 rounded-xl border border-border bg-background p-3 text-left hover:bg-accent"
-      >
-        <span
-          className={cn(
-            "size-2 shrink-0 rounded-full",
-            xweatherConnection.connected
-              ? "bg-emerald-600"
-              : xweatherConnection.state === "loading"
-                ? "bg-amber-500"
-                : "bg-slate-400",
-          )}
-        />
-        <span className="min-w-0 flex-1">
-          <strong className="block truncate text-[10px]">Your Xweather account</strong>
-          <span className="block truncate text-[8px] text-muted-foreground">
-            {xweatherConnection.connected
-              ? `${xweatherConnection.clientIdHint ?? "Connected"} · your usage allowance`
-              : "Not connected · public sources remain available"}
-          </span>
-        </span>
-        <span className="text-[8px] font-semibold text-primary">
-          {xweatherConnection.connected ? "MANAGE" : "CONNECT"}
-        </span>
-      </button>
-      <div className="mt-3 space-y-2">
-        {(bundle?.providerHealth ?? []).map((provider) => (
-          <div key={provider.providerId} className="rounded-xl bg-secondary p-3">
-            <div className="flex items-center gap-2">
-              <span
-                className={cn(
-                  "size-2 shrink-0 rounded-full",
-                  provider.status === "up"
-                    ? "bg-emerald-600"
-                    : provider.status === "degraded"
-                      ? "bg-amber-500"
-                      : provider.status === "not-configured"
-                        ? "bg-slate-400"
-                        : "bg-rose-600",
-                )}
-              />
-              <strong className="truncate text-[10px]">{provider.providerName}</strong>
-              <span className="ml-auto text-[8px] font-semibold uppercase text-muted-foreground">
-                {provider.status}
-              </span>
-            </div>
-            <p className="mt-1 text-[8px] text-muted-foreground">{provider.coverage}</p>
-            {provider.lastUpdate && (
-              <p className="mt-1 text-[8px]">
-                Updated {new Date(provider.lastUpdate).toLocaleString()}
-              </p>
-            )}
-            {provider.error && <p className="mt-1 text-[8px] text-amber-800">{provider.error}</p>}
-          </div>
-        ))}
-        {!bundle && (
-          <p className="text-[10px] text-muted-foreground">
-            Inspect a map point to check providers.
-          </p>
-        )}
-      </div>
-      <p className="mt-3 rounded-xl bg-secondary p-3 text-[9px] leading-relaxed text-muted-foreground">
-        NOAA/NWS satellite, regional lightning-density, radar, forecast layers and METAR stations
-        are connected. Individual global lightning strikes, global radar and advanced model grids
-        still require reviewed licensed sources. Community spotter positions are test-only until
-        provider permission is confirmed. LandDraft never substitutes invented values.
-      </p>
-    </div>
-  );
-}
+const SourcePanel = WeatherDataSources;
 
 function WeatherStatusPill({
   bundle,
+  workspace,
   loading,
   error,
 }: {
   bundle: WeatherBundle | null;
+  workspace: WeatherWorkspaceState;
   loading: boolean;
   error: string | null;
 }) {
@@ -3390,15 +3676,32 @@ function WeatherStatusPill({
   if (error)
     return (
       <div className="pointer-events-auto flex w-fit items-center gap-2 rounded-full bg-rose-50 px-3 py-2 text-[10px] font-semibold text-rose-900 shadow-float">
-        <AlertTriangle className="size-3.5" /> Weather connection unavailable
+        <AlertTriangle className="size-3.5 shrink-0" />
+        <span>Weather connection unavailable · {error}</span>
       </div>
     );
   if (!bundle) return null;
+  const radarTime = Math.max(
+    ...(bundle.nativeRadarFrames ?? [])
+      .filter((frame) => workspace.layerSettings[frame.layerId]?.visible)
+      .map((frame) => Date.parse(frame.timestamp)),
+  );
+  const alertsAvailable = layerAvailability("weather.severe.alerts", bundle, {
+    connected: false,
+  }).ready;
   return (
     <div className="pointer-events-auto flex w-fit items-center gap-2 rounded-full border border-border bg-card/95 px-3 py-2 text-[10px] font-semibold shadow-float">
-      <span className="size-2 rounded-full bg-emerald-600" />
-      {bundle.current ? weatherAgeLabel(bundle.current.source) : "FORECAST / ALERTS"}
-      <span className="text-muted-foreground">· {bundle.alerts.length} alerts</span>
+      <span
+        className={cn("size-2 rounded-full", alertsAvailable ? "bg-emerald-600" : "bg-amber-600")}
+      />
+      {Number.isFinite(radarTime)
+        ? `RADAR · ${Math.max(0, Math.floor((Date.now() - radarTime) / 60000))} MIN AGO`
+        : bundle.current
+          ? `CONDITIONS · ${weatherAgeLabel(bundle.current.source)}`
+          : "PUBLIC WEATHER"}
+      <span className="text-muted-foreground">
+        · {alertsAvailable ? `${bundle.alerts.length} alerts` : "Alerts unavailable"}
+      </span>
     </div>
   );
 }
@@ -3406,16 +3709,47 @@ function WeatherStatusPill({
 function WeatherLegends({
   workspace,
   workspaceView,
+  bundle,
   embedded = false,
 }: {
   workspace: WeatherWorkspaceState;
   workspaceView: WorkspaceView;
+  bundle: WeatherBundle | null;
   embedded?: boolean;
 }) {
   const activeLayers = weatherLayerRegistry.filter(
     (layer) => workspace.layerSettings[layer.id]?.visible,
   );
-  const layersWithLegends = activeLayers.filter((layer) => layer.legend?.length);
+  const legendFor = (layer: (typeof weatherLayerRegistry)[number]) => {
+    if (layer.id === "weather.severe.intelligence")
+      return stormStyleLegendEntries(workspace.stormStyle);
+    const spcEntries = (bundle?.spcOutlooks ?? [])
+      .filter((outlook) => outlook.layerId === layer.id)
+      .flatMap((outlook) =>
+        outlook.areas.map((area) => ({
+          color: area.properties.fill,
+          label: area.properties.label,
+        })),
+      );
+    if (spcEntries.length)
+      return Array.from(
+        new Map(spcEntries.map((entry) => [`${entry.color}|${entry.label}`, entry])).values(),
+      );
+    if (layer.id === "weather.severe.alerts")
+      return [
+        { color: "#7f1d1d", label: "Extreme" },
+        { color: "#dc2626", label: "Severe" },
+        { color: "#ca8a04", label: "Moderate" },
+      ];
+    if (layer.id === "weather.photo" && bundle?.photography?.zones.length)
+      return [
+        { color: "#059669", label: "Lower exposure" },
+        { color: "#d97706", label: "Elevated / unknown" },
+        { color: "#e11d48", label: "High exposure" },
+      ];
+    return layer.legend ?? [];
+  };
+  const layersWithLegends = activeLayers.filter((layer) => legendFor(layer).length);
   if (!activeLayers.length && workspaceView !== "storm-chaser") return null;
 
   return (
@@ -3457,37 +3791,44 @@ function WeatherLegends({
               <span className="min-w-0">
                 <strong className="block text-[8px]">ProbSevere tracked storm</strong>
                 <span className="block text-[7px] leading-tight text-muted-foreground">
-                  Center symbol shows the leading hazard; circle color shows analyzed severity.
+                  Symbol identifies the event type; colors show{" "}
+                  {workspace.stormStyle ?? "Intensity"}. Probability is not storm intensity.
                 </span>
               </span>
             </div>
             <div className="mt-2 grid grid-cols-2 gap-1.5">
-              <WeatherEventLegendItem type="tornado" label="Tornado / rotation" />
-              <WeatherEventLegendItem type="hail" label="Hail-dominant storm" />
+              <WeatherEventLegendItem type="tornado" label="Tornado warning / observed" />
+              <WeatherEventLegendItem type="hail" label="Hail event" />
               <WeatherEventLegendItem type="hurricane" label="Hurricane" />
               <WeatherEventLegendItem type="dust" label="Dust / haboob" />
               <WeatherEventLegendItem type="lightning" label="Lightning" />
-              <WeatherEventLegendItem type="storm" label="Major storm" />
+              <WeatherEventLegendItem type="storm" label="Tracked thunderstorm" />
             </div>
-            <div className="mt-1 flex items-center gap-1" aria-label="Severity color scale">
-              {[
-                ["#15803d", "Lower"],
-                ["#ca8a04", "Elevated"],
-                ["#ea580c", "Significant"],
-                ["#dc2626", "Severe"],
-                ["#7f1d1d", "Extreme"],
-              ].map(([color, label]) => (
-                <span key={label} className="flex min-w-0 flex-1 flex-col items-center gap-0.5">
-                  <span
-                    className="size-3 rounded-full border border-white shadow-sm"
-                    style={{ backgroundColor: color }}
-                  />
-                  <span className="max-w-full truncate text-[6px] text-muted-foreground">
-                    {label}
+            <p className="mt-2">{stormStyleLegend(workspace.stormStyle)}</p>
+            {(workspace.stormStyle ?? "Intensity") === "Intensity" && (
+              <div
+                className="mt-1 flex items-center gap-1"
+                aria-label="Experimental intensity color scale"
+              >
+                {[
+                  ["#15803d", "Weak"],
+                  ["#ca8a04", "Moderate"],
+                  ["#ea580c", "Strong"],
+                  ["#dc2626", "Severe"],
+                  ["#7f1d1d", "Extreme"],
+                ].map(([color, label]) => (
+                  <span key={label} className="flex min-w-0 flex-1 flex-col items-center gap-0.5">
+                    <span
+                      className="size-3 rounded-full border border-white shadow-sm"
+                      style={{ backgroundColor: color }}
+                    />
+                    <span className="max-w-full truncate text-[6px] text-muted-foreground">
+                      {label}
+                    </span>
                   </span>
-                </span>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
             <p className="mt-1 text-[7px] text-muted-foreground">
               Future symbols use the same event icon with +minute labels and projected-state
               styling.
@@ -3503,8 +3844,8 @@ function WeatherLegends({
                   <span
                     className="size-2.5 shrink-0 rounded-sm border border-black/10 bg-primary/70"
                     style={
-                      layer.legend?.[0]?.color
-                        ? { backgroundColor: layer.legend[0].color }
+                      legendFor(layer)[0]?.color
+                        ? { backgroundColor: legendFor(layer)[0]!.color }
                         : undefined
                     }
                   />
@@ -3520,7 +3861,7 @@ function WeatherLegends({
           <div key={layer.id}>
             <strong className="block text-[9px]">{layer.name}</strong>
             <div className="mt-1 flex flex-wrap gap-x-2 gap-y-1">
-              {layer.legend?.map((entry) => (
+              {legendFor(layer).map((entry) => (
                 <span key={entry.label} className="flex items-center gap-1 text-muted-foreground">
                   <span
                     className="size-2.5 rounded-sm border border-black/10"

@@ -1,3 +1,4 @@
+import type { WaterWorkspaceState } from "@/lib/water/types";
 import {
   createContext,
   useCallback,
@@ -61,6 +62,7 @@ interface WorkbenchState {
   projectId: string;
   projectReady: boolean;
   projectError: string | null;
+  projectRecoveryNotice: string | null;
   projectName: string;
   projects: ProjectSummary[];
   saveHistory: ProjectVersion[];
@@ -93,6 +95,7 @@ interface WorkbenchState {
   records: ProjectRecords;
   pipelineEngineering: PipelineEngineeringState | undefined;
   weatherWorkspace: WeatherWorkspaceState | undefined;
+  waterWorkspace: WaterWorkspaceState | undefined;
 }
 
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -101,6 +104,7 @@ const initialState = (): WorkbenchState => ({
   projectId: "",
   projectReady: false,
   projectError: null,
+  projectRecoveryNotice: null,
   projectName: "Untitled project",
   projects: [],
   saveHistory: [],
@@ -138,6 +142,7 @@ const initialState = (): WorkbenchState => ({
   records: emptyProjectRecords(),
   pipelineEngineering: undefined,
   weatherWorkspace: undefined,
+  waterWorkspace: undefined,
 });
 
 const blankProjectState = (name: string): ProjectState => ({
@@ -224,6 +229,7 @@ const normalizedProject = (
     projectReady: true,
     projectError: null,
     projectName: stored.name,
+    projectRecoveryNotice: project.recoveryNotice ?? null,
     projects,
     saveHistory: project.versions ?? [],
     autosave: project.autosave,
@@ -302,6 +308,7 @@ const normalizedProject = (
       events: stored.records?.events ?? [],
     },
     pipelineEngineering: stored.pipelineEngineering,
+    waterWorkspace: stored.waterWorkspace,
     weatherWorkspace: stored.weatherWorkspace
       ? normalizeWeatherWorkspace(stored.weatherWorkspace)
       : undefined,
@@ -327,6 +334,7 @@ const stateToProject = (state: WorkbenchState): ProjectState => ({
   connectionHints: state.connectionHints,
   records: state.records,
   ...(state.pipelineEngineering ? { pipelineEngineering: state.pipelineEngineering } : {}),
+  ...(state.waterWorkspace ? { waterWorkspace: state.waterWorkspace } : {}),
   ...(state.weatherWorkspace ? { weatherWorkspace: state.weatherWorkspace } : {}),
   ...(state.shareSource ? { shareSource: state.shareSource } : {}),
 });
@@ -393,6 +401,7 @@ export interface WorkbenchApi extends WorkbenchState {
   setConnectionHint: (id: string, hint: ConnectionRecoveryHint) => void;
   setProjectRecords: (records: ProjectRecords) => void;
   setPipelineEngineering: (state: PipelineEngineeringState | undefined) => void;
+  setWaterWorkspace: (state: WaterWorkspaceState | undefined) => void;
   setWeatherWorkspace: (state: WeatherWorkspaceState | undefined) => void;
   addProjectEvent: (input: {
     type: ProjectEventType;
@@ -1251,6 +1260,10 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
     (pipelineEngineering) => patch({ pipelineEngineering }),
     [patch],
   );
+  const setWaterWorkspace = useCallback<WorkbenchApi["setWaterWorkspace"]>(
+    (waterWorkspace) => patch({ waterWorkspace }),
+    [patch],
+  );
   const setWeatherWorkspace = useCallback<WorkbenchApi["setWeatherWorkspace"]>(
     (weatherWorkspace) => patch({ weatherWorkspace }),
     [patch],
@@ -1308,6 +1321,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
         ...value,
         projects,
         saveHistory: project.versions,
+        projectRecoveryNotice: null,
         lastSavedAt: project.updatedAt,
       }));
       return project.versions[0];
@@ -1722,6 +1736,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       try {
         await workspaceProjectStore.migrateLocalAccount(userId, auth.user?.email ?? "");
         const projects = await workspaceProjectStore.list(userId);
+        setState((current) => ({ ...current, projects }));
         const requestedShareId = new URL(window.location.href).searchParams.get("share");
         if (requestedShareId) {
           await loadShareIntoState(userId, auth.user?.email ?? "", requestedShareId, projects);
@@ -1808,6 +1823,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
     state.records,
     state.pipelineEngineering,
     state.weatherWorkspace,
+    state.waterWorkspace,
     state.units,
     state.accessRole,
   ]);
@@ -1903,6 +1919,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       setProjectRecords,
       setPipelineEngineering,
       setWeatherWorkspace,
+      setWaterWorkspace,
       addProjectEvent,
       saveProject,
       createProject,
@@ -1964,6 +1981,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       setProjectRecords,
       setPipelineEngineering,
       setWeatherWorkspace,
+      setWaterWorkspace,
       addProjectEvent,
       saveProject,
       createProject,

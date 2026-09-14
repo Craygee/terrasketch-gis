@@ -1,3 +1,5 @@
+import { wmsTimes, selectWmsTimes, wmsTimeParameter } from "./wms.ts";
+import { linkStormWarnings } from "./stormWarnings.ts";
 import type { Feature, MultiPolygon, Point, Polygon } from "geojson";
 import {
   cardinalDirectionDegrees,
@@ -24,16 +26,24 @@ import type {
 } from "./types";
 import { recordWeatherUsage } from "./telemetry.server";
 import { loadMetNorwayPoint } from "./metNorway.server";
-import { buildPhotographyAssessment } from "./photography.server";
+import { buildPhotographyAssessment, selectPhotographyStorm } from "./photography.server";
+import {
+  weatherProviderEnabled,
+  weatherFeatureAvailable,
+  weatherPolicyConfiguration,
+} from "./providerPolicy.server.ts";
+import { weatherProduct } from "./productRegistry.ts";
+import { publicProviderPermitted } from "./providerRegistry.ts";
+import { parseSpcOutlook, spcUrl } from "./spc.ts";
+import { SPC_PRODUCTS } from "./spcCatalog.ts";
+import { measurementValue, nwsWindMetersPerSecond } from "./nwsMeasurement.ts";
 import { nearestWeatherRadarSite, type WeatherRadarSite } from "./radar";
 import { buildStormObjectsFromAlerts } from "./stormIntelligence";
-import { loadProbSevereStormObjects } from "./probSevere.server";
+import { loadProbSevereStormObjects, loadProbSevereSource } from "./probSevere.server";
 import { loadIemStormReports } from "./iemStormReports.server";
-import {
-  xweatherProviderHealth,
-  xweatherRadarFrames,
-  xweatherRasterFramesFor,
-} from "./xweather.server";
+import { discoverNativeRadar, nativeRadarSites } from "./nativeRadar.server.ts";
+import { nativeProduct } from "./nativeRadar.ts";
+import { loadPublicRainfall } from "./publicRainfall.server.ts";
 
 type CacheEntry<T> = { value: T; expiresAt: number };
 const cache = new Map<string, CacheEntry<unknown>>();
@@ -82,6 +92,10 @@ async function withCache<T>(
   try {
     const value = await loading;
     cache.set(key, { value, expiresAt: Date.now() + ttlMs });
+    if (cache.size > 512) {
+      const oldest = cache.keys().next().value;
+      if (oldest) cache.delete(oldest);
+    }
     recordWeatherUsage({ ...metric, success: true, cacheHit: false });
     return value;
   } catch (error) {
@@ -112,6 +126,7 @@ type WmsRasterSpec = {
   capabilitiesUrl: string;
   layerNames: string[];
   styles?: string | undefined;
+  daily?: boolean;
   coverage: string;
   resolution?: string | undefined;
   temporalKind: "observed" | "forecast" | "model";
@@ -136,6 +151,7 @@ const WMS_LAYER_SPECS: Record<string, WmsRasterSpec> = {
     providerId: "nasa-gibs-modis",
     providerName: "NASA Earthdata GIBS",
     product: "MODIS daily cloud-top temperature",
+    daily: true,
     capabilitiesUrl:
       "https://gibs.earthdata.nasa.gov/wms/epsg3857/best/wms.cgi?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetCapabilities",
     layerNames: [
@@ -259,31 +275,6 @@ function escapeRegex(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function wmsTimes(xml: string, layerName: string) {
-  const nameMatch = new RegExp(`<Name>\\s*${escapeRegex(layerName)}\\s*</Name>`, "i").exec(xml);
-  const scoped = nameMatch
-    ? xml.slice(nameMatch.index, xml.indexOf("</Layer>", nameMatch.index))
-    : xml;
-  const dimension = /<Dimension[^>]*name=["']time["'][^>]*>([\s\S]*?)<\/Dimension>/i.exec(scoped);
-  if (!dimension) return [];
-  const raw = dimension[1]?.trim() ?? "";
-  if (raw.includes("/")) {
-    // Some NASA layers advertise multiple disjoint availability intervals.
-    // Selecting the end of the first interval can make current imagery appear
-    // decades stale, so retain the newest valid interval end instead.
-    const ends = raw
-      .split(",")
-      .map((interval) => validIso(interval.trim().split("/")[1]))
-      .filter((value): value is string => Boolean(value))
-      .sort((left, right) => new Date(left).getTime() - new Date(right).getTime());
-    return ends.slice(-1);
-  }
-  return raw
-    .split(",")
-    .map((value) => validIso(value.trim()))
-    .filter((value): value is string => Boolean(value));
-}
-
 async function loadWmsRasterFrames(spec: WmsRasterSpec, signal: AbortSignal) {
   return withCache(
     `wms:${spec.layerId}:${spec.layerNames.join(",")}`,
@@ -313,10 +304,8 @@ async function loadWmsRasterFrames(spec: WmsRasterSpec, signal: AbortSignal) {
         : spec.layerNames;
       if (!advertised.length) throw new Error("Expected WMS layer is no longer advertised");
       const firstLayer = advertised[0]!;
-      const times = capabilities ? wmsTimes(capabilities, firstLayer) : [];
-      const frameTimes = (times.length ? times : [new Date().toISOString()]).slice(
-        -(spec.maxFrames ?? 1),
-      );
+      const times = capabilities ? wmsTimes(capabilities, firstLayer, spec.daily) : [];
+      const frameTimes = selectWmsTimes(times, spec.temporalKind, spec.maxFrames ?? 1);
       const endpoint = spec.capabilitiesUrl.split("?")[0]!;
       const base =
         `${endpoint}?SERVICE=WMS&REQUEST=GetMap&VERSION=1.1.1` +
@@ -327,7 +316,9 @@ async function loadWmsRasterFrames(spec: WmsRasterSpec, signal: AbortSignal) {
         id: `${spec.providerId}-${spec.layerId}-${timestamp}`,
         layerId: spec.layerId,
         timestamp,
-        tileUrlTemplate: times.length ? `${base}&TIME=${encodeURIComponent(timestamp)}` : base,
+        tileUrlTemplate: times.length
+          ? `${base}&TIME=${encodeURIComponent(wmsTimeParameter(timestamp, spec.daily))}`
+          : base,
         coverage: spec.coverage,
         legendUrl: `${endpoint}?service=WMS&version=1.3.0&request=GetLegendGraphic&format=image/png&layer=${encodeURIComponent(firstLayer)}`,
         source: sourceMetadata({
@@ -350,12 +341,6 @@ async function loadWmsRasterFrames(spec: WmsRasterSpec, signal: AbortSignal) {
       }));
     },
   );
-}
-
-function measurementValue(input: unknown): number | undefined {
-  if (!input || typeof input !== "object") return undefined;
-  const value = Number((input as Record<string, unknown>)["value"]);
-  return Number.isFinite(value) ? value : undefined;
 }
 
 function boundedText(input: unknown, length = 4_000) {
@@ -443,8 +428,8 @@ function normalizeNwsObservation(
         ? celsiusToKelvin(measurementValue(properties["dewpoint"])!)
         : undefined,
     relativeHumidityPct: measurementValue(properties["relativeHumidity"]),
-    windSpeedMS: measurementValue(properties["windSpeed"]),
-    windGustMS: measurementValue(properties["windGust"]),
+    windSpeedMS: nwsWindMetersPerSecond(properties["windSpeed"]),
+    windGustMS: nwsWindMetersPerSecond(properties["windGust"]),
     windDirectionDeg: measurementValue(properties["windDirection"]),
     pressurePa:
       measurementValue(properties["barometricPressure"]) ??
@@ -759,7 +744,8 @@ function satelliteSpec(
 function rasterSpecsFor(request: WeatherPointRequest) {
   const requested = new Set(request.requestedLayerIds ?? []);
   const specs: WmsRasterSpec[] = [];
-  const useXweather = request.xweatherConnected === true;
+  // Public imagery remains independent of commercial credentials and outages.
+  const useXweather = false;
   for (const layerId of requested) {
     const registered = WMS_LAYER_SPECS[layerId];
     if (registered && (registered.coverageKind === "global" || withinConus(request)))
@@ -814,7 +800,11 @@ function rasterSpecsFor(request: WeatherPointRequest) {
       ...WMS_LAYER_SPECS["weather.air-quality"]!,
       layerId: "weather.satellite.smoke",
     });
-  if (requested.has("weather.lightning.recent") && !useXweather)
+  if (
+    requested.has("weather.lightning.recent") &&
+    !useXweather &&
+    publicProviderPermitted("nowcoast-lightning")
+  )
     specs.push({
       layerId: "weather.lightning.recent",
       providerId: "noaa-nowcoast-lightning",
@@ -895,13 +885,13 @@ const PRO_RADAR_PRODUCTS: Record<
 
 async function prepareRasterSpecs(request: WeatherPointRequest, signal: AbortSignal) {
   const specs = rasterSpecsFor(request);
-  const commercialFrames = xweatherRasterFramesFor(request);
+
   const warnings: string[] = [];
   const providerHealth: WeatherProviderHealth[] = [];
-  const requested = Object.keys(PRO_RADAR_PRODUCTS).filter((id) =>
-    request.requestedLayerIds?.includes(id),
+  const requested = Object.keys(PRO_RADAR_PRODUCTS).filter(
+    (id) => request.requestedLayerIds?.includes(id) && !nativeProduct(id),
   );
-  if (!requested.length) return { specs, commercialFrames, warnings, providerHealth };
+  if (!requested.length) return { specs, warnings, providerHealth };
   if (!withinConus(request)) {
     warnings.push("Professional single-site NOAA radar is not available at this map point.");
     providerHealth.push(
@@ -915,7 +905,7 @@ async function prepareRasterSpecs(request: WeatherPointRequest, signal: AbortSig
         costClass: "public",
       }),
     );
-    return { specs, commercialFrames, warnings, providerHealth };
+    return { specs, warnings, providerHealth };
   }
   try {
     const nearest = nearestWeatherRadarSite(await loadRadarSites(signal), request);
@@ -952,7 +942,7 @@ async function prepareRasterSpecs(request: WeatherPointRequest, signal: AbortSig
       }),
     );
   }
-  return { specs, commercialFrames, warnings, providerHealth };
+  return { specs, warnings, providerHealth };
 }
 
 type AwcMetarFeature = {
@@ -1147,6 +1137,23 @@ export async function loadWeatherBundle(request: WeatherPointRequest): Promise<W
       ? request.requestedLayerIds
       : ["weather.current", "weather.radar.simple", "weather.severe.alerts"],
   );
+  for (const id of requestedLayers) {
+    const product = weatherProduct(id);
+    if (
+      !product ||
+      !weatherProviderEnabled(product.providerId) ||
+      (product.connectionType === "INCLUDED_PUBLIC" &&
+        !publicProviderPermitted(product.providerId)) ||
+      (product.providerId === "mrms" &&
+        !weatherFeatureAvailable(
+          id === "weather.severe.intelligence" ? "storm_objects" : "mrms",
+        )) ||
+      (product.providerId === "goes" && !weatherFeatureAvailable("goes_satellite"))
+    ) {
+      requestedLayers.delete(id);
+      warnings.push(`${id}: provider disabled or license review required`);
+    }
+  }
   let current: WeatherObservation | null = null;
   let forecast: WeatherForecastPeriod[] = [];
   let alerts: WeatherAlert[] = [];
@@ -1156,49 +1163,104 @@ export async function loadWeatherBundle(request: WeatherPointRequest): Promise<W
   const chaserPositions: WeatherChaserPosition[] = [];
   let stormReports: WeatherStormReport[] = [];
   let probSevereObjects: StormObject[] = [];
+  let probSevereSource: WeatherBundle["probSevereSource"];
   let photography: WeatherBundle["photography"] = null;
   let nwsCovered = false;
+  // Separate bounded requests: SPC failure cannot interrupt official warnings.
+  const spcTask = Promise.allSettled(
+    SPC_PRODUCTS.filter(
+      (product) => requestedLayers.has(product.layerId) && withinConus(request),
+    ).map((product) =>
+      withCache(
+        `spc:${product.productId}`,
+        300_000,
+        { providerId: "spc", product: product.productId },
+        async () =>
+          parseSpcOutlook(
+            await fetchJson<unknown>(
+              spcUrl(product.day, product.kind),
+              AbortSignal.timeout(12_000),
+              nwsHeaders,
+            ),
+            product.day,
+            Date.now(),
+            product.kind,
+          ),
+      ),
+    ),
+  );
+  // Start warnings independently: point observations and forecast failures must
+  // never prevent this request. Catch immediately to avoid unhandled rejections.
+  const alertTask = (
+    weatherProviderEnabled("nws")
+      ? loadNwsAlerts(request, AbortSignal.timeout(12_000))
+      : Promise.reject(new Error("NWS provider disabled"))
+  )
+    .then((value) => ({ ok: true as const, alerts: value }))
+    .catch(() => ({ ok: false as const, alerts: [] as WeatherAlert[] }));
 
   // Start requested map imagery immediately. Previously these requests waited
   // behind current conditions, alerts and radar while sharing their timeout,
   // which could leave valid NOAA layers with no time to load in an edge worker.
+  const nativeRadarTask = (async () => {
+    if (!weatherProviderEnabled("nexrad")) return { frames: [], sites: [] };
+    const sites = nativeRadarSites(await loadRadarSites(rasterController.signal));
+    const frames = await discoverNativeRadar(
+      { ...request, requestedLayerIds: [...requestedLayers] },
+      sites,
+      rasterController.signal,
+    );
+    return { frames, sites };
+  })().catch(() => ({ frames: [], sites: [] }));
+
+  const rainfallTask = withCache(
+    `public-rainfall:${request.longitude}:${request.latitude}:${[...requestedLayers]
+      .filter((id) => id.startsWith("weather.rainfall."))
+      .sort()
+      .join(",")}`,
+    300_000,
+    { providerId: "mrms", product: "rainfall-grids" },
+    () =>
+      loadPublicRainfall(
+        { ...request, requestedLayerIds: [...requestedLayers] },
+        rasterController.signal,
+      ),
+  )
+    .then((frames) => ({ frames, error: "" }))
+    .catch(() => ({
+      frames: [] as WeatherRasterFrame[],
+      error: "Public rainfall grids are temporarily unavailable",
+    }));
+
   const rasterTask = prepareRasterSpecs(
     { ...request, requestedLayerIds: [...requestedLayers] },
     rasterController.signal,
-  ).then(async (prepared) => ({
-    prepared,
-    results: await Promise.allSettled(
-      prepared.specs.map(async (spec) => ({
-        spec,
-        frames: await loadWmsRasterFrames(spec, rasterController.signal),
-      })),
-    ),
-  }));
+  )
+    .then(async (prepared) => ({
+      prepared,
+      results: await Promise.allSettled(
+        prepared.specs.map(async (spec) => ({
+          spec,
+          frames: await loadWmsRasterFrames(spec, rasterController.signal),
+        })),
+      ),
+    }))
+    .catch(() => ({
+      prepared: {
+        specs: [] as WmsRasterSpec[],
+        warnings: ["Raster discovery failed; official alerts remain independent."],
+        providerHealth: [] as WeatherProviderHealth[],
+      },
+      results: [],
+    }));
 
   try {
     try {
+      if (!weatherProviderEnabled("nws")) throw new Error("NWS provider disabled");
       const nws = await loadNwsPoint(request, controller.signal);
       nwsCovered = nws.covered;
       current = nws.current;
       forecast = nws.forecast;
-      if (nws.covered) {
-        try {
-          alerts = await loadNwsAlerts(request, controller.signal);
-        } catch (error) {
-          warnings.push("Official alert service is temporarily unavailable for this point.");
-          providerHealth.push(
-            health({
-              providerId: "nws-alerts",
-              providerName: "National Weather Service alerts",
-              status: "down",
-              products: ["alerts"],
-              coverage: "United States and territories",
-              error: error instanceof Error ? error.message : "Alert request failed",
-              costClass: "public",
-            }),
-          );
-        }
-      }
       providerHealth.push(
         health({
           providerId: "nws",
@@ -1236,7 +1298,25 @@ export async function loadWeatherBundle(request: WeatherPointRequest): Promise<W
       );
     }
 
-    if (!current || !forecast.length) {
+    const alertResult = await alertTask;
+    alerts = alertResult.alerts;
+    providerHealth.push(
+      health({
+        providerId: "nws-alerts",
+        providerName: "National Weather Service alerts",
+        status: alertResult.ok ? "up" : "down",
+        products: ["alerts"],
+        coverage: "United States and territories",
+        costClass: "public",
+        ...(alertResult.ok
+          ? { lastSuccessfulRequest: new Date().toISOString() }
+          : { error: "Official alerts unavailable; absence of warnings is not an all-clear" }),
+      }),
+    );
+    if (!alertResult.ok)
+      warnings.push("Official alert service is unavailable; warning status is unknown.");
+
+    if ((!current || !forecast.length) && weatherProviderEnabled("met-norway")) {
       try {
         const global = await withCache(
           `met-norway:${roundCoordinate(request.latitude)},${roundCoordinate(request.longitude)}`,
@@ -1279,7 +1359,9 @@ export async function loadWeatherBundle(request: WeatherPointRequest): Promise<W
       }
     }
 
-    const openMeteoEnabled = env?.["WEATHER_ENABLE_OPEN_METEO_EVALUATION"] === "true";
+    const openMeteoEnabled =
+      env?.["NODE_ENV"] === "development" &&
+      env?.["WEATHER_ENABLE_OPEN_METEO_EVALUATION"] === "true";
     if (!current && openMeteoEnabled) {
       try {
         current = await loadOpenMeteoEvaluation(request, controller.signal);
@@ -1356,14 +1438,7 @@ export async function loadWeatherBundle(request: WeatherPointRequest): Promise<W
               }),
             );
           } catch (fallbackError) {
-            if (request.xweatherConnected) {
-              radarFrames = xweatherRadarFrames(new Date(), true);
-              warnings.push(
-                "Official U.S. radar services were unavailable; LandDraft switched to Xweather global radar.",
-              );
-            } else {
-              warnings.push("Both official radar services are temporarily unavailable.");
-            }
+            warnings.push("Both official radar services are temporarily unavailable.");
             providerHealth.push(
               health({
                 providerId: "noaa-nws-mrms",
@@ -1378,30 +1453,42 @@ export async function loadWeatherBundle(request: WeatherPointRequest): Promise<W
           }
         }
       } else {
-        if (request.xweatherConnected) {
-          radarFrames = xweatherRadarFrames(new Date(), true);
-        } else {
-          providerHealth.push(
-            health({
-              providerId: "noaa-nws-mrms",
-              providerName: "NOAA/NWS radar",
-              status: "degraded",
-              products: ["radar-reflectivity"],
-              coverage: "United States and territories",
-              error:
-                "Radar is unavailable at this map point; satellite/model data are not mislabeled as radar",
-              costClass: "public",
-            }),
-          );
-        }
+        providerHealth.push(
+          health({
+            providerId: "noaa-nws-mrms",
+            providerName: "NOAA/NWS radar",
+            status: "degraded",
+            products: ["radar-reflectivity"],
+            coverage: "United States and territories",
+            error:
+              "Radar is unavailable at this map point; satellite/model data are not mislabeled as radar",
+            costClass: "public",
+          }),
+        );
       }
     }
 
+    const rainfall = await rainfallTask;
+    rasterFrames.push(...rainfall.frames);
+    if (rainfall.error) warnings.push(rainfall.error);
+    if ([...requestedLayers].some((id) => id.startsWith("weather.rainfall."))) {
+      providerHealth.push(
+        health({
+          providerId: "mrms",
+          providerName: "NOAA MRMS · LandDraft rainfall",
+          status: rainfall.error ? "down" : rainfall.frames.length ? "up" : "degraded",
+          products: rainfall.frames.map((frame) => frame.source.product),
+          coverage: "CONUS, Alaska, Hawaii and Puerto Rico; latest accumulation only",
+          lastUpdate: rainfall.frames[0]?.timestamp,
+          ...(rainfall.error ? { error: rainfall.error } : { lastSuccessfulRequest: generatedAt }),
+          costClass: "public",
+        }),
+      );
+    }
     const { prepared: rasterPreparation, results: rasterResults } = await rasterTask;
     const rasterSpecs = rasterPreparation.specs;
     warnings.push(...rasterPreparation.warnings);
     providerHealth.push(...rasterPreparation.providerHealth);
-    rasterFrames.push(...rasterPreparation.commercialFrames);
     rasterResults.forEach((result, index) => {
       if (result.status === "fulfilled") {
         rasterFrames.push(...result.value.frames);
@@ -1444,16 +1531,10 @@ export async function loadWeatherBundle(request: WeatherPointRequest): Promise<W
         );
       }
     });
-    if (
-      rasterPreparation.commercialFrames.length ||
-      radarFrames.some((frame) => frame.source.providerId === "xweather-raster") ||
-      [...requestedLayers].some((id) => id.startsWith("weather.xweather."))
-    )
-      providerHealth.push(xweatherProviderHealth(request.xweatherConnected === true));
 
     if (requestedLayers.has("weather.metar")) {
       try {
-        stationObservations = await loadAviationStations(request, controller.signal);
+        stationObservations = await loadAviationStations(request, AbortSignal.timeout(12_000));
         providerHealth.push(
           health({
             providerId: "nws-awc",
@@ -1482,29 +1563,14 @@ export async function loadWeatherBundle(request: WeatherPointRequest): Promise<W
       }
     }
 
-    if (requestedLayers.has("weather.photo")) {
-      photography = await buildPhotographyAssessment(
-        request,
-        alerts,
-        controller.signal,
-        async (candidate, signal) => {
-          const [candidateAlerts, model] = await Promise.all([
-            loadNwsAlerts(candidate, signal).catch(() => []),
-            withCache(
-              `met-norway:${roundCoordinate(candidate.latitude)},${roundCoordinate(candidate.longitude)}`,
-              15 * 60_000,
-              { providerId: "met-norway", product: "photography candidate" },
-              () => loadMetNorwayPoint(candidate, signal),
-            ),
-          ]);
-          return { alerts: candidateAlerts, current: model.current };
-        },
-      );
-    }
-
-    if (requestedLayers.has("weather.severe.intelligence")) {
+    if (
+      (requestedLayers.has("weather.severe.intelligence") ||
+        requestedLayers.has("weather.photo")) &&
+      weatherProviderEnabled("mrms") &&
+      weatherFeatureAvailable("storm_objects")
+    ) {
       try {
-        probSevereObjects = await loadProbSevereStormObjects(request, controller.signal);
+        probSevereObjects = await loadProbSevereStormObjects(request, AbortSignal.timeout(12_000));
         const latest = probSevereObjects[0]?.source;
         providerHealth.push(
           health({
@@ -1538,13 +1604,47 @@ export async function loadWeatherBundle(request: WeatherPointRequest): Promise<W
       }
     }
 
+    if (requestedLayers.has("weather.severe.probsevere") && weatherProviderEnabled("mrms")) {
+      try {
+        probSevereSource = await loadProbSevereSource(AbortSignal.timeout(12_000));
+      } catch {
+        warnings.push("The NOAA ProbSevere source layer could not be refreshed.");
+      }
+    }
+
+    if (requestedLayers.has("weather.photo")) {
+      photography = await buildPhotographyAssessment(
+        request,
+        alerts,
+        AbortSignal.timeout(12_000),
+        async (candidate, signal) => {
+          const [alertsResult, modelResult] = await Promise.allSettled([
+            loadNwsAlerts(candidate, signal),
+            withCache(
+              `met-norway:${roundCoordinate(candidate.latitude)},${roundCoordinate(candidate.longitude)}`,
+              15 * 60_000,
+              { providerId: "met-norway", product: "photography candidate" },
+              () => loadMetNorwayPoint(candidate, signal),
+            ),
+          ]);
+          return {
+            alerts: alertsResult.status === "fulfilled" ? alertsResult.value : [],
+            current: modelResult.status === "fulfilled" ? modelResult.value.current : null,
+            alertsAvailable: alertsResult.status === "fulfilled",
+            conditionsAvailable: modelResult.status === "fulfilled",
+          };
+        },
+        selectPhotographyStorm(probSevereObjects, request),
+      );
+    }
+
     if (requestedLayers.has("weather.severe.reports")) {
       try {
         stormReports = await withCache(
           `iem-lsr:${roundCoordinate(request.latitude)},${roundCoordinate(request.longitude)}`,
           5 * 60_000,
           { providerId: "iem-nws-lsr", product: "NWS Local Storm Reports" },
-          () => loadIemStormReports(request, controller.signal),
+          () => loadIemStormReports(request, AbortSignal.timeout(12_000)),
         );
         providerHealth.push(
           health({
@@ -1588,14 +1688,47 @@ export async function loadWeatherBundle(request: WeatherPointRequest): Promise<W
     clearTimeout(rasterTimeout);
   }
 
+  const spcResults = await spcTask;
+  const spcOutlooks = spcResults.flatMap((result) =>
+    result.status === "fulfilled" ? [result.value] : [],
+  );
+  if (spcResults.length) {
+    const failures = spcResults.length - spcOutlooks.length;
+    providerHealth.push(
+      health({
+        providerId: "spc",
+        providerName: "NOAA Storm Prediction Center",
+        status: failures ? (spcOutlooks.length ? "degraded" : "down") : "up",
+        products: spcOutlooks.map((outlook) => outlook.source.product),
+        coverage: "Contiguous United States",
+        costClass: "public",
+        lastSuccessfulRequest: spcOutlooks[0]?.source.receivedTimestamp,
+        ...(failures ? { error: "One or more outlooks unavailable, expired, or invalid" } : {}),
+      }),
+    );
+    if (failures)
+      warnings.push(
+        "SPC outlook data unavailable for some requested days; this does not mean no severe-weather risk.",
+      );
+  }
+  const nativeRadar = await nativeRadarTask;
   return {
+    nativeRadarFrames: nativeRadar.frames,
+    radarSites: nativeRadar.sites,
     request,
+    spcOutlooks,
+    providerControls: {
+      disabledProviders: weatherPolicyConfiguration().policy.disabledProviders,
+      disabledFeatures: weatherPolicyConfiguration().policy.disabledFeatures,
+      configurationValid: weatherPolicyConfiguration().valid,
+    },
     generatedAt,
     current,
     forecast,
     alerts,
+    ...(probSevereSource ? { probSevereSource } : {}),
     stormObjects: [
-      ...probSevereObjects,
+      ...linkStormWarnings(probSevereObjects, alerts),
       ...buildStormObjectsFromAlerts(alerts, [request.longitude, request.latitude]),
     ],
     radarFrames,

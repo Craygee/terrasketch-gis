@@ -15,6 +15,7 @@ import { Route as MobileRouteImport } from './routes/mobile'
 import { Route as PipelineRouteImport } from './routes/pipeline'
 import { Route as PrivacyRouteImport } from './routes/privacy'
 import { Route as TermsRouteImport } from './routes/terms'
+import { Route as WaterRouteImport } from './routes/water'
 import { Route as WeatherRouteImport } from './routes/weather'
 
 const IndexRoute = IndexRouteImport.update({
@@ -47,6 +48,11 @@ const TermsRoute = TermsRouteImport.update({
   path: '/terms',
   getParentRoute: () => rootRouteImport,
 } as any)
+const WaterRoute = WaterRouteImport.update({
+  id: '/water',
+  path: '/water',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const WeatherRoute = WeatherRouteImport.update({
   id: '/weather',
   path: '/weather',
@@ -60,6 +66,7 @@ export interface FileRoutesByFullPath {
   '/pipeline': typeof PipelineRoute
   '/privacy': typeof PrivacyRoute
   '/terms': typeof TermsRoute
+  '/water': typeof WaterRoute
   '/weather': typeof WeatherRoute
 }
 export interface FileRoutesByTo {
@@ -69,6 +76,7 @@ export interface FileRoutesByTo {
   '/pipeline': typeof PipelineRoute
   '/privacy': typeof PrivacyRoute
   '/terms': typeof TermsRoute
+  '/water': typeof WaterRoute
   '/weather': typeof WeatherRoute
 }
 export interface FileRoutesById {
@@ -79,6 +87,7 @@ export interface FileRoutesById {
   '/pipeline': typeof PipelineRoute
   '/privacy': typeof PrivacyRoute
   '/terms': typeof TermsRoute
+  '/water': typeof WaterRoute
   '/weather': typeof WeatherRoute
 }
 export interface FileRouteTypes {
@@ -90,6 +99,7 @@ export interface FileRouteTypes {
     | '/pipeline'
     | '/privacy'
     | '/terms'
+    | '/water'
     | '/weather'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -99,6 +109,7 @@ export interface FileRouteTypes {
     | '/pipeline'
     | '/privacy'
     | '/terms'
+    | '/water'
     | '/weather'
   id:
     | '__root__'
@@ -108,6 +119,7 @@ export interface FileRouteTypes {
     | '/pipeline'
     | '/privacy'
     | '/terms'
+    | '/water'
     | '/weather'
   fileRoutesById: FileRoutesById
 }
@@ -118,6 +130,7 @@ export interface RootRouteChildren {
   PipelineRoute: typeof PipelineRoute
   PrivacyRoute: typeof PrivacyRoute
   TermsRoute: typeof TermsRoute
+  WaterRoute: typeof WaterRoute
   WeatherRoute: typeof WeatherRoute
 }
 
@@ -165,6 +178,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof TermsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/water': {
+      id: '/water'
+      path: '/water'
+      fullPath: '/water'
+      preLoaderRoute: typeof WaterRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/weather': {
       id: '/weather'
       path: '/weather'
@@ -182,6 +202,7 @@ const rootRouteChildren: RootRouteChildren = {
   PipelineRoute: PipelineRoute,
   PrivacyRoute: PrivacyRoute,
   TermsRoute: TermsRoute,
+  WaterRoute: WaterRoute,
   WeatherRoute: WeatherRoute,
 }
 export const routeTree = rootRouteImport

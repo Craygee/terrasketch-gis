@@ -1,4 +1,4 @@
-import type { Feature, MultiPolygon, Point, Polygon } from "geojson";
+import type { Feature, FeatureCollection, MultiPolygon, Point, Polygon } from "geojson";
 
 export const WEATHER_MODULE_ID = "weather" as const;
 export const WEATHER_LAYER_ID_PATTERN = /^weather\.[a-z0-9._-]+$/i;
@@ -176,6 +176,7 @@ export interface StormHistorySample {
  * official alert areas without claiming that a radar-observed storm was found.
  */
 export interface StormObject {
+  analysis?: import("./analysisTypes").StormAnalysis;
   id: string;
   title: string;
   classification: string;
@@ -217,6 +218,7 @@ export interface RadarFrame {
 }
 
 export interface WeatherRasterFrame {
+  pointSample?: { longitude: number; latitude: number; value: number | null; units: string };
   id: string;
   layerId: string;
   timestamp: string;
@@ -356,6 +358,7 @@ export interface WeatherLayerDefinition {
 }
 
 export interface WeatherLayerSetting {
+  lastUsedAt?: string;
   opacity: number;
   favorite: boolean;
   visible: boolean;
@@ -383,6 +386,12 @@ export interface WeatherPreset {
 }
 
 export interface WeatherWorkspaceState {
+  stormStyle?: import("./stormPresentation").StormStyleMode;
+  nativeLayerCatalogVersion?: 1;
+  radarSiteMode?: "automatic" | "covering" | "manual";
+  radarSiteIds?: string[] | undefined;
+  radarSiteId?: string | undefined;
+  radarTilt?: number | undefined;
   version: 1;
   enabled: boolean;
   introductoryChooserSeen: boolean;
@@ -398,6 +407,16 @@ export interface WeatherWorkspaceState {
 }
 
 export interface WeatherPointRequest {
+  /** Visible map center for automatic radar selection; separate from the inspection point. */
+  mapCenter?: [number, number];
+  /** Highest-priority point used to select native radar coverage. */
+  radarFocus?: [number, number];
+  radarFocusSource?: "storm" | "target" | "gps" | "inspection" | "map";
+  radarSiteMode?: "automatic" | "covering" | "manual";
+  radarSiteIds?: string[] | undefined;
+  photographyStormId?: string | undefined;
+  radarSiteId?: string | undefined;
+  radarTilt?: number | undefined;
   latitude: number;
   longitude: number;
   requestedLayerIds?: string[] | undefined;
@@ -410,12 +429,21 @@ export interface WeatherPointRequest {
 }
 
 export interface WeatherBundle {
+  nativeRadarFrames?: import("./nativeRadar.ts").NativeRadarFrame[];
+  radarSites?: import("./radar.ts").WeatherRadarSite[];
+  spcOutlooks?: SpcOutlook[];
   request: WeatherPointRequest;
+  providerControls?: {
+    disabledProviders: string[];
+    disabledFeatures: string[];
+    configurationValid: boolean;
+  };
   generatedAt: string;
   current: WeatherObservation | null;
   forecast: WeatherForecastPeriod[];
   alerts: WeatherAlert[];
   stormObjects: StormObject[];
+  probSevereSource?: { timestamp: string; data: FeatureCollection<Polygon | MultiPolygon> };
   radarFrames: RadarFrame[];
   rasterFrames: WeatherRasterFrame[];
   stationObservations: WeatherStationObservation[];
@@ -431,6 +459,14 @@ export interface WeatherBundle {
     satellite: boolean;
     lightningDensity: boolean;
   };
+}
+
+export interface SpcOutlook {
+  statement?: string;
+  layerId: string;
+  day: number;
+  areas: Feature<Polygon | MultiPolygon, { label: string; fill: string; stroke: string }>[];
+  source: WeatherSourceMetadata;
 }
 
 export interface WeatherProviderContext {

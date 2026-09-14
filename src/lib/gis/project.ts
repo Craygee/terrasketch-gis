@@ -1,4 +1,5 @@
 import type { MapViewState, ProjectState } from "./types";
+import { recoverSnapshot } from "./snapshotRecovery";
 import { LANDDRAFT_APP_VERSION, projectVersionLabel } from "@/lib/appVersion";
 import {
   cloudConfigured,
@@ -20,6 +21,7 @@ export interface ProjectVersion {
 }
 
 export interface StoredProject {
+  recoveryNotice?: string;
   id: string;
   userId: string;
   name: string;
@@ -175,14 +177,9 @@ const downloadProjectState = async (path: string): Promise<ProjectState> => {
   return JSON.parse(text) as ProjectState;
 };
 
-const cleanUnusedSnapshots = async (project: StoredProject) => {
-  const prefix = `${project.userId}/${project.id}/states`;
-  const keep = new Set([
-    ...project.versions.flatMap((version) => (version.storagePath ? [version.storagePath] : [])),
-  ]);
-  const files = await listPrivateProjectFiles(prefix);
-  await deletePrivateProjectFiles(files.filter((path) => !keep.has(path)));
-};
+// Never garbage-collect snapshots from a browser's version list. Another tab may
+// have uploaded a new object before committing its database reference. Retention
+// requires a server-side grace period and transactional reference checks.
 
 const cloudVersions = async (projectId: string): Promise<ProjectVersion[]> => {
   const rows = await cloudDataRequest<CloudVersionRow[]>(
@@ -196,17 +193,28 @@ const cloudVersions = async (projectId: string): Promise<ProjectVersion[]> => {
   }));
 };
 
-const storedFromCloud = async (row: CloudProjectRow): Promise<StoredProject> => {
-  const state = await downloadProjectState(row.state_path);
+const storedFromCloud = async (
+  row: CloudProjectRow,
+  allowRecovery = true,
+): Promise<StoredProject> => {
+  const versions = await cloudVersions(row.id);
+  const { state, recoveredAt } = allowRecovery
+    ? await recoverSnapshot(row.state_path, versions, downloadProjectState)
+    : { state: await downloadProjectState(row.state_path), recoveredAt: null };
   return {
     id: row.id,
     userId: row.owner_id,
     name: row.name,
     createdAt: new Date(row.created_at).getTime(),
     updatedAt: new Date(row.updated_at).getTime(),
-    autosave: row.autosave,
+    autosave: recoveredAt !== null ? false : row.autosave,
+    ...(recoveredAt !== null
+      ? {
+          recoveryNotice: `The latest saved file is missing. Opened an earlier version from ${new Date(recoveredAt).toLocaleString()}. Autosave is paused; review this version before saving. No cloud project reference has been changed.`,
+        }
+      : {}),
     state: { ...state, mapView: row.map_view ?? state.mapView },
-    versions: await cloudVersions(row.id),
+    versions,
     parentProjectId: row.parent_project_id,
     showInQuickSwitch: row.show_in_quick_switch ?? true,
     showInMobileBar: row.show_in_mobile_bar ?? true,
@@ -265,7 +273,7 @@ const createCloudProject = async (
   }
   row.show_in_quick_switch = showInQuickSwitch;
   row.show_in_mobile_bar = showInMobileBar;
-  return storedFromCloud(row);
+  return storedFromCloud(row, false);
 };
 
 export const workspaceProjectStore = {
@@ -408,10 +416,7 @@ export const workspaceProjectStore = {
       });
       const row = rows[0];
       if (!row) throw new Error("Project was not found or is no longer editable");
-      const project = await storedFromCloud(row);
-      void cleanUnusedSnapshots(project).catch((error) =>
-        console.warn("Unused cloud snapshots will be cleaned up later", error),
-      );
+      const project = await storedFromCloud(row, false);
       return project;
     }
     const projects = readProjects();

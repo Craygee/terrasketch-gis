@@ -1,3 +1,4 @@
+import { WorkspaceLoading, WorkspaceRecoveryNotice } from "./WorkspaceLoading";
 import { lazy, Suspense, useState } from "react";
 import {
   Database,
@@ -43,6 +44,7 @@ import { ConnectionManager } from "./ConnectionManager";
 import { FieldModule } from "./FieldModule";
 import { ProjectAreaControl } from "./ProjectAreaControl";
 import { ProjectSwitcher } from "./ProjectSwitcher";
+import { LandDraftTools } from "./LandDraftTools";
 
 const AiAssistant = lazy(() =>
   import("./AiAssistant").then((module) => ({ default: module.AiAssistant })),
@@ -104,25 +106,7 @@ function MobileShell() {
     setSheet(null);
   };
 
-  if (!wb.projectReady)
-    return (
-      <div className="app-viewport flex items-center justify-center bg-background px-4 text-center text-sm text-muted-foreground">
-        {wb.projectError ? (
-          <div>
-            <p className="font-semibold text-foreground">Cloud workspace could not open</p>
-            <p className="mt-1 text-xs">{wb.projectError}</p>
-            <button
-              onClick={() => window.location.reload()}
-              className="mt-4 rounded-xl bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground"
-            >
-              Try again
-            </button>
-          </div>
-        ) : (
-          "Opening your latest project…"
-        )}
-      </div>
-    );
+  if (!wb.projectReady) return <WorkspaceLoading />;
 
   return (
     <div
@@ -132,6 +116,9 @@ function MobileShell() {
         wb.selectedFeatures.length > 0 && "mobile-has-selection",
       )}
     >
+      <div className="absolute inset-x-2 top-24 z-40">
+        <WorkspaceRecoveryNotice />
+      </div>
       <MapCanvas />
       {!fieldMode && <SelectionToolbar mobile />}
 
@@ -266,6 +253,7 @@ function MobileShell() {
             </div>
           ) : sheet === "data" ? (
             <div className="grid gap-2 p-4">
+              <LandDraftTools />
               <button
                 onClick={() => {
                   setSheet(null);
@@ -290,6 +278,17 @@ function MobileShell() {
                   <strong className="block text-sm">Pipeline engineering</strong>
                   <span className="text-[10px] text-muted-foreground">
                     Optional route, hydraulic profile, quantities, and estimating workspace.
+                  </span>
+                </span>
+              </button>
+              <button
+                onClick={() => window.location.assign("/water")}
+                className="flex items-center gap-3 rounded-2xl bg-secondary p-4 text-left"
+              >
+                <span>
+                  <strong className="block text-sm">Water & Hydrogeology</strong>
+                  <span className="text-[10px] text-muted-foreground">
+                    Optional source-backed water research.
                   </span>
                 </span>
               </button>
@@ -493,8 +492,11 @@ function MobileTourMenu({ onDone }: { onDone: () => void }) {
       </div>
       <div className="mt-3 border-t border-border pt-3">
         <div className="mb-2 flex items-center gap-2 text-muted-foreground">
-          <UserRound className="size-4" />
-          <span className="min-w-0 flex-1 truncate">{auth.user?.email}</span>
+          <UserRound className="size-4 shrink-0" />
+          <div className="min-w-0 flex-1">
+            <div className="text-[10px]">Signed in as</div>
+            <div className="break-words font-semibold text-foreground">{auth.user?.email}</div>
+          </div>
         </div>
         <button
           onClick={() => {

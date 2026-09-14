@@ -1,3 +1,14 @@
+import { NativeRadarOverlay } from "./NativeRadarOverlay";
+import { ProbSevereSourceOverlay } from "./ProbSevereSourceOverlay";
+import { probSevereSourceLayerIds } from "@/lib/weather/probSevereSource";
+import {
+  nativeProduct,
+  nativeMapLayerId,
+  type NativeRadarReading,
+  type NativeRadarFrame,
+} from "@/lib/weather/nativeRadar";
+const EMPTY_NATIVE_FRAMES: NativeRadarFrame[] = [];
+import { rainfallVisible } from "@/lib/weather/publicRainfall";
 import { useEffect, useMemo } from "react";
 import { Popup } from "maplibre-gl";
 import type { GeoJSONSource, Map as MlMap, MapMouseEvent, RasterTileSource } from "maplibre-gl";
@@ -22,11 +33,15 @@ import { formatTemperature, formatWind } from "@/lib/weather/format";
 import {
   stormEventIcon,
   stormIconImageId,
-  stormSeverityColor,
+  intensityColor,
   stormSeverityScore,
+  stormMapStyle,
+  type StormStyleMode,
   type WeatherEventIcon,
 } from "@/lib/weather/stormPresentation";
 import { timeAdjustedStormForecast } from "@/lib/weather/stormIntelligence";
+import { spcVisible } from "@/lib/weather/spc";
+import { SPC_PRODUCTS } from "@/lib/weather/spcCatalog";
 
 const ALERT_SOURCE = "landdraft-weather-alerts";
 const ALERT_FILL = "landdraft-weather-alert-fill";
@@ -138,14 +153,21 @@ function drawWeatherEventIcon(context: CanvasRenderingContext2D, icon: WeatherEv
     context.lineTo(34, 27);
     context.closePath();
   } else {
-    context.arc(28, 29, 10, Math.PI, Math.PI * 2);
-    context.arc(39, 29, 8, Math.PI, Math.PI * 2);
-    context.moveTo(18, 30);
-    context.lineTo(48, 30);
-    context.moveTo(35, 34);
-    context.lineTo(29, 45);
-    context.lineTo(37, 45);
-    context.lineTo(33, 53);
+    context.moveTo(18, 34);
+    context.bezierCurveTo(7, 34, 8, 20, 20, 20);
+    context.bezierCurveTo(20, 6, 42, 6, 44, 22);
+    context.bezierCurveTo(57, 20, 59, 34, 47, 34);
+    context.lineTo(18, 34);
+    context.stroke();
+    context.beginPath();
+    context.moveTo(33, 36);
+    context.lineTo(24, 47);
+    context.lineTo(32, 47);
+    context.lineTo(29, 57);
+    context.lineTo(43, 41);
+    context.lineTo(35, 41);
+    context.closePath();
+    context.fill();
   }
   context.stroke();
   if (icon === "lightning") context.fill();
@@ -207,7 +229,13 @@ function currentConditionsCollection(
 ): FeatureCollection<Point> {
   if (!observation) return { type: "FeatureCollection", features: [] };
   const wind = formatWind(observation.windSpeedMS, unitSystem);
-  const details = [observation.summary, wind === "Unavailable" ? undefined : `Wind ${wind}`]
+  const details = [
+    observation.source.temporalKind !== "observed"
+      ? observation.source.temporalKind.toUpperCase()
+      : undefined,
+    observation.summary,
+    wind === "Unavailable" ? undefined : `Wind ${wind}`,
+  ]
     .filter(Boolean)
     .join(" · ");
   return {
@@ -297,6 +325,7 @@ function photographyCollection(zones: WeatherViewingZone[]): FeatureCollection<P
 function stormCollection(
   storms: StormObject[],
   selectedStormId: string | null,
+  mode: StormStyleMode = "Intensity",
 ): FeatureCollection<Point> {
   return {
     type: "FeatureCollection",
@@ -307,11 +336,11 @@ function stormCollection(
         properties: {
           id: storm.id,
           alertId: storm.officialAlertIds[0] ?? "",
-          title: storm.title,
+          title: `${storm.title} · ${stormMapStyle(storm, mode).label}`,
           basis: storm.basis,
           selected: storm.id === selectedStormId,
           severity,
-          severityColor: stormSeverityColor(severity),
+          severityColor: stormMapStyle(storm, mode).color,
           icon: stormIconImageId(stormEventIcon(storm)),
           temporalState: storm.basis === "provider-guidance" ? "ANALYZED" : "OFFICIAL",
         },
@@ -323,6 +352,7 @@ function stormCollection(
 function stormAreaCollection(
   storms: StormObject[],
   selectedStormId: string | null = null,
+  mode: StormStyleMode = "Intensity",
 ): FeatureCollection<Polygon | MultiPolygon> {
   return {
     type: "FeatureCollection",
@@ -335,6 +365,7 @@ function stormAreaCollection(
                 id: storm.id,
                 title: storm.title,
                 selected: storm.id === selectedStormId,
+                analysisColor: stormMapStyle(storm, mode).color,
                 maximumProbability: Math.max(
                   storm.hazards.tornado.probabilityPct ?? 0,
                   storm.hazards.hail.probabilityPct ?? 0,
@@ -405,7 +436,7 @@ function stormForecastCollection(
           leadMinutes: forecast.leadMinutes,
           label: `+${forecast.leadMinutes}m`,
           severity,
-          severityColor: stormSeverityColor(severity),
+          severityColor: intensityColor(severity),
           icon: eventIcon,
           temporalState: "PREDICTED",
         },
@@ -677,17 +708,7 @@ function ensureVectorLayers(map: MlMap) {
       type: "fill",
       source: STORM_AREA_SOURCE,
       paint: {
-        "fill-color": [
-          "step",
-          ["get", "maximumProbability"],
-          "#facc15",
-          30,
-          "#f97316",
-          60,
-          "#dc2626",
-          80,
-          "#7f1d1d",
-        ],
+        "fill-color": ["get", "analysisColor"],
         "fill-opacity": 0.16,
       },
     });
@@ -1087,6 +1108,10 @@ function ensureRasterProducts(
 }
 
 function renderedLayerIds(weatherLayerId: string) {
+  if (weatherLayerId === "weather.severe.probsevere") return probSevereSourceLayerIds;
+  if (nativeProduct(weatherLayerId)) return [nativeMapLayerId(weatherLayerId)];
+  const spc = SPC_PRODUCTS.find((product) => product.layerId === weatherLayerId);
+  if (spc) return [`landdraft-spc-${spc.productId}-fill`, `landdraft-spc-${spc.productId}-line`];
   if (weatherLayerId === "weather.current") return [CURRENT_CIRCLE, CURRENT_VALUE, CURRENT_LABEL];
   if (weatherLayerId === "weather.radar.simple") return [RADAR_LAYER];
   if (weatherLayerId === "weather.severe.alerts") return [ALERT_FILL, ALERT_LINE];
@@ -1130,6 +1155,7 @@ function renderedLayerIds(weatherLayerId: string) {
 }
 
 export function WeatherMapOverlay({
+  onNativeReading,
   bundle,
   workspace,
   onSelectAlert,
@@ -1142,6 +1168,7 @@ export function WeatherMapOverlay({
   chaserLocation,
   navigationTarget,
 }: {
+  onNativeReading: (reading: NativeRadarReading) => void;
   bundle: WeatherBundle | null;
   workspace: WeatherWorkspaceState;
   onSelectAlert: (alert: WeatherAlert) => void;
@@ -1179,17 +1206,74 @@ export function WeatherMapOverlay({
       const selected = setting?.visible
         ? nearestRasterFrame(frames, workspace.timeline.selectedTime)
         : undefined;
+      if (
+        selected?.layerId.startsWith("weather.rainfall.") &&
+        !rainfallVisible(selected, workspace.timeline)
+      )
+        return [];
       return selected ? [{ frame: selected, opacity: setting?.opacity ?? 0.7 }] : [];
     });
-  }, [bundle?.rasterFrames, workspace.layerSettings, workspace.timeline.selectedTime]);
+  }, [bundle?.rasterFrames, workspace.layerSettings, workspace.timeline]);
 
   useEffect(() => {
     if (!map) return;
     const update = () => {
-      if (!map.isStyleLoaded()) return;
+      // A stalled optional feed must not prevent other overlays from mounting.
+      if (!map.getStyle()) {
+        map.off("idle", update);
+        map.once("idle", update);
+        return;
+      }
       ensureRadar(map, frame);
       ensureRasterProducts(map, rasterProducts);
       ensureVectorLayers(map);
+      for (const product of SPC_PRODUCTS) {
+        const layerId = product.layerId;
+        const sourceId = `landdraft-spc-${product.productId}`;
+        const fillId = `${sourceId}-fill`;
+        const lineId = `${sourceId}-line`;
+        const outlook = bundle?.spcOutlooks?.find((item) => item.layerId === layerId);
+        const visible =
+          workspace.layerSettings[layerId]?.visible &&
+          outlook &&
+          spcVisible(outlook, workspace.timeline);
+        const data: FeatureCollection<Polygon | MultiPolygon> = {
+          type: "FeatureCollection",
+          features: visible ? outlook.areas : [],
+        };
+        if (!map.getSource(sourceId))
+          map.addSource(sourceId, {
+            type: "geojson",
+            data,
+            attribution: "NOAA / NWS Storm Prediction Center · FORECAST",
+          });
+        else (map.getSource(sourceId) as GeoJSONSource).setData(data);
+        if (!map.getLayer(fillId))
+          map.addLayer(
+            {
+              id: fillId,
+              source: sourceId,
+              type: "fill",
+              paint: { "fill-color": ["get", "fill"] },
+            },
+            ALERT_FILL,
+          );
+        if (!map.getLayer(lineId))
+          map.addLayer(
+            {
+              id: lineId,
+              source: sourceId,
+              type: "line",
+              paint: { "line-color": ["get", "stroke"], "line-width": 2 },
+            },
+            ALERT_FILL,
+          );
+        map.setPaintProperty(
+          fillId,
+          "fill-opacity",
+          workspace.layerSettings[layerId]?.opacity ?? 0.3,
+        );
+      }
       (map.getSource(ALERT_SOURCE) as GeoJSONSource | undefined)?.setData(
         alertsVisible ? alertCollection(bundle?.alerts ?? []) : alertCollection([]),
       );
@@ -1212,12 +1296,17 @@ export function WeatherMapOverlay({
         ),
       );
       (map.getSource(STORM_SOURCE) as GeoJSONSource | undefined)?.setData(
-        stormCollection(stormObjectsVisible ? (bundle?.stormObjects ?? []) : [], selectedStormId),
+        stormCollection(
+          stormObjectsVisible ? (bundle?.stormObjects ?? []) : [],
+          selectedStormId,
+          workspace.stormStyle,
+        ),
       );
       (map.getSource(STORM_AREA_SOURCE) as GeoJSONSource | undefined)?.setData(
         stormAreaCollection(
           stormObjectsVisible ? (bundle?.stormObjects ?? []) : [],
           selectedStormId,
+          workspace.stormStyle,
         ),
       );
       const selectedStorm =
@@ -1314,6 +1403,8 @@ export function WeatherMapOverlay({
         STORM_REPORT_POINT,
         STORM_REPORT_LABEL,
         CHASER_CIRCLE,
+        ALERT_FILL,
+        ALERT_LINE,
         NAVIGATION_TARGET_CIRCLE,
         NAVIGATION_TARGET_LABEL,
       ]);
@@ -1322,6 +1413,7 @@ export function WeatherMapOverlay({
     map.on("style.load", update);
     return () => {
       map.off("style.load", update);
+      map.off("idle", update);
     };
   }, [
     alertsVisible,
@@ -1343,6 +1435,8 @@ export function WeatherMapOverlay({
     workspace.layerOrder,
     workspace.layerSettings,
     workspace.unitSystem,
+    workspace.stormStyle,
+    workspace.timeline,
   ]);
 
   useEffect(() => {
@@ -1517,5 +1611,18 @@ export function WeatherMapOverlay({
     onSelectStormReport,
   ]);
 
-  return null;
+  return (
+    <>
+      <NativeRadarOverlay
+        frames={bundle?.nativeRadarFrames ?? EMPTY_NATIVE_FRAMES}
+        workspace={workspace}
+        onReading={onNativeReading}
+      />
+      <ProbSevereSourceOverlay
+        data={bundle?.probSevereSource}
+        visible={!!workspace.layerSettings["weather.severe.probsevere"]?.visible}
+        opacity={workspace.layerSettings["weather.severe.probsevere"]?.opacity ?? 0.25}
+      />
+    </>
+  );
 }

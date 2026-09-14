@@ -33,14 +33,16 @@ test("chooses recognizable event icons from official event names", () => {
   assert.equal(stormEventIcon(storm("Haboob / blowing dust")), "haboob");
 });
 
-test("chooses the dominant analyzed hazard when the title is generic", () => {
-  assert.equal(stormEventIcon(storm("Tracked Storm", { hail: 82, tornado: 24 })), "hail");
+test("generic tracked storms are not labeled as detected hazards from probabilities", () => {
+  assert.equal(
+    stormEventIcon(storm("Tracked Storm", { hail: 82, tornado: 24 })),
+    "major-thunderstorm",
+  );
 });
 
-test("uses a severe official-warning floor without inventing a probability", () => {
+test("official warning does not invent a physical intensity", () => {
   const score = stormSeverityScore(storm("Tornado Warning"));
-  assert.equal(score, 85);
-  assert.equal(stormSeverityBand(score), "extreme");
+  assert.equal(score, null);
 });
 
 test("severity bands progress from green-compatible lower risk to dark red extreme", () => {
@@ -51,4 +53,11 @@ test("severity bands progress from green-compatible lower risk to dark red extre
     "severe",
     "extreme",
   ]);
+});
+
+test("low tornado probability does not draw a tornado icon", () => {
+  assert.equal(
+    stormEventIcon(storm("ProbSevere storm 1", { tornado: 8, wind: 32 })),
+    "major-thunderstorm",
+  );
 });

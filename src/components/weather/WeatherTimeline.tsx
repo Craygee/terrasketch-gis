@@ -35,7 +35,7 @@ export function WeatherTimeline({
   const move = (direction: -1 | 1) => {
     if (!frames.length) return;
     const next = Math.max(0, Math.min(frames.length - 1, index + direction));
-    onChange({ selectedTime: frames[next]!.timestamp, playing: false });
+    onChange({ selectedTime: frames[next]!.timestamp, playing: false, mode: "historical" });
   };
 
   if (!frames.length) {
@@ -62,7 +62,7 @@ export function WeatherTimeline({
       <div className="flex items-center gap-1.5">
         <button
           className="flex size-8 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground"
-          onClick={() => onChange({ playing: !timeline.playing })}
+          onClick={() => onChange({ playing: !timeline.playing, mode: "historical" })}
           aria-label={timeline.playing ? "Pause weather animation" : "Play weather animation"}
           title={timeline.playing ? "Pause" : "Play"}
           disabled={frames.length < 2}
@@ -81,7 +81,9 @@ export function WeatherTimeline({
         <div className="min-w-0 flex-1">
           <div className="mb-1 flex items-center text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
             <span>Past</span>
-            <span className="mx-auto text-primary">Weather time</span>
+            <span className="mx-auto text-primary">
+              {timeline.mode === "historical" ? "Historical" : "Weather time"}
+            </span>
             <span>Now</span>
           </div>
           <input
@@ -93,7 +95,8 @@ export function WeatherTimeline({
             disabled={!frames.length}
             onChange={(event) => {
               const next = frames[Number(event.target.value)];
-              if (next) onChange({ selectedTime: next.timestamp, playing: false });
+              if (next)
+                onChange({ selectedTime: next.timestamp, playing: false, mode: "historical" });
             }}
             className="h-2 w-full cursor-pointer accent-primary disabled:opacity-40"
             aria-label="Weather frame"
@@ -115,6 +118,7 @@ export function WeatherTimeline({
             onChange({
               selectedTime: latest?.timestamp ?? new Date().toISOString(),
               playing: false,
+              mode: "observed",
             });
           }}
           aria-label="Jump to latest weather"

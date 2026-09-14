@@ -1,3 +1,4 @@
+import type { WaterWorkspaceState } from "@/lib/water/types";
 import type { Feature, FeatureCollection, Geometry } from "geojson";
 import type { PipelineEngineeringState } from "@/lib/pipeline/types";
 import type { WeatherWorkspaceState } from "@/lib/weather/types";
@@ -329,6 +330,7 @@ export interface ProjectState {
   pipelineEngineering?: PipelineEngineeringState;
   /** Optional Weather workspace. Core GIS projects remain usable when this module is unopened. */
   weatherWorkspace?: WeatherWorkspaceState;
+  waterWorkspace?: WaterWorkspaceState;
   shareSource?: {
     shareId: string;
     sourceProjectId: string;

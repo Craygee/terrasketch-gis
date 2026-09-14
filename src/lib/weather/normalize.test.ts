@@ -9,7 +9,6 @@ import {
 import { hasWeatherCapability } from "./entitlements.ts";
 import {
   STORM_CHASER_PRO_RADAR_LAYERS,
-  STORM_CHASER_RADAR_COMPANIONS,
   STORM_CHASER_RECOMMENDED_LAYERS,
   weatherLayerRegistry,
 } from "./registry.ts";
@@ -66,14 +65,10 @@ test("storm chaser recommendations keep ProbSevere first and reference registere
   );
 });
 
-test("storm chaser professional radar tools reference registered layers and official HTTPS sites", () => {
+test("storm chaser professional radar tools reference registered public layers", () => {
   const registeredIds = new Set(weatherLayerRegistry.map((layer) => layer.id));
   assert.equal(
     STORM_CHASER_PRO_RADAR_LAYERS.every((id) => registeredIds.has(id)),
-    true,
-  );
-  assert.equal(
-    STORM_CHASER_RADAR_COMPANIONS.every((app) => new URL(app.href).protocol === "https:"),
     true,
   );
 });
@@ -94,13 +89,13 @@ test("older weather workspaces receive a complete persistent layer order", () =>
 
 test("weather layer menu visibility persists independently from map visibility", () => {
   const previous = defaultWeatherWorkspace();
-  const radar = previous.layerSettings["weather.radar.simple"]!;
-  previous.layerSettings["weather.radar.simple"] = {
+  const radar = previous.layerSettings["weather.radar.pro.reflectivity"]!;
+  previous.layerSettings["weather.radar.pro.reflectivity"] = {
     ...radar,
     visible: true,
     menuVisible: false,
   };
   const normalized = normalizeWeatherWorkspace(previous);
-  assert.equal(normalized.layerSettings["weather.radar.simple"]?.visible, true);
-  assert.equal(normalized.layerSettings["weather.radar.simple"]?.menuVisible, false);
+  assert.equal(normalized.layerSettings["weather.radar.pro.reflectivity"]?.visible, true);
+  assert.equal(normalized.layerSettings["weather.radar.pro.reflectivity"]?.menuVisible, false);
 });
