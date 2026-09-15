@@ -290,7 +290,10 @@ export function FieldModule({ active = true }: { active?: boolean }) {
       const startWatch = (highAccuracy: boolean): void => {
         try {
           const watchId = navigator.geolocation.watchPosition(
-            updateLocation,
+            (position) => {
+              if (watchIdRef.current !== watchId) return;
+              updateLocation(position);
+            },
             (error) => {
               if (watchIdRef.current !== watchId) return;
               navigator.geolocation.clearWatch(watchId);
