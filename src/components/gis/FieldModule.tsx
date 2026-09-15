@@ -177,7 +177,7 @@ export function FieldModule({ active = true }: { active?: boolean }) {
   const [trackPoints, setTrackPoints] = useState<Position[]>([]);
   const [trackDistance, setTrackDistance] = useState(0);
   const [clock, setClock] = useState(Date.now());
-  const [follow, setFollow] = useState(true);
+  const [follow, setFollow] = useState(false);
   const followRef = useRef(follow);
   followRef.current = follow;
   const [pending, setPending] = useState<PendingCapture | null>(null);
@@ -307,6 +307,8 @@ export function FieldModule({ active = true }: { active?: boolean }) {
                   ? "A location fix is unavailable. Turn on device Location Services or move outdoors, then retry."
                   : "The location request timed out. Check Location Services and try again.";
               setLocation(null);
+              followRef.current = false;
+              setFollow(false);
               setGpsStatus(denied ? "denied" : "error");
               setGpsMessage(message);
               if (!locationErrorShown.current) {
@@ -325,6 +327,8 @@ export function FieldModule({ active = true }: { active?: boolean }) {
           watchIdRef.current = watchId;
         } catch (error) {
           const message = error instanceof Error ? error.message : "Location could not be started";
+          followRef.current = false;
+          setFollow(false);
           setGpsStatus("error");
           setGpsMessage(message);
           toast.error("GPS could not start", { description: message });
@@ -335,6 +339,18 @@ export function FieldModule({ active = true }: { active?: boolean }) {
     },
     [updateLocation],
   );
+
+  const stopGps = useCallback(() => {
+    if (watchIdRef.current !== null && navigator.geolocation)
+      navigator.geolocation.clearWatch(watchIdRef.current);
+    watchIdRef.current = null;
+    followRef.current = false;
+    setFollow(false);
+    setLocation(null);
+    setGpsStatus("idle");
+    setGpsMessage("");
+    locationErrorShown.current = false;
+  }, []);
 
   useEffect(() => {
     const interval = window.setInterval(() => setClock(Date.now()), 1_000);
@@ -363,9 +379,8 @@ export function FieldModule({ active = true }: { active?: boolean }) {
 
   useEffect(() => {
     if (active || trackRef.current || watchIdRef.current === null) return;
-    navigator.geolocation.clearWatch(watchIdRef.current);
-    watchIdRef.current = null;
-  }, [active]);
+    stopGps();
+  }, [active, stopGps]);
 
   useEffect(() => {
     if (!map) return;
@@ -481,7 +496,11 @@ export function FieldModule({ active = true }: { active?: boolean }) {
   const locate = () => {
     followRef.current = true;
     setFollow(true);
-    if (!ensureWatch(gpsStatus === "error" || gpsStatus === "denied")) return;
+    if (!ensureWatch(gpsStatus === "error" || gpsStatus === "denied")) {
+      followRef.current = false;
+      setFollow(false);
+      return;
+    }
     if (location && map) {
       try {
         map.easeTo({ center: [location.lng, location.lat], zoom: Math.max(map.getZoom(), 16) });
@@ -508,6 +527,8 @@ export function FieldModule({ active = true }: { active?: boolean }) {
     void requestWakeLock();
     if (!ensureWatch()) {
       setTrack(null);
+      followRef.current = false;
+      setFollow(false);
       releaseWakeLock();
     }
   };
@@ -1128,18 +1149,25 @@ export function FieldModule({ active = true }: { active?: boolean }) {
               </div>
               <button
                 onClick={() => {
-                  if (follow) {
-                    followRef.current = false;
-                    setFollow(false);
-                  } else locate();
+                  if (watchIdRef.current !== null) stopGps();
+                  else locate();
                 }}
-                aria-pressed={follow}
+                aria-label={watchIdRef.current !== null ? "Stop device GPS" : "Follow device GPS"}
+                aria-pressed={watchIdRef.current !== null && follow}
+                title={
+                  watchIdRef.current !== null
+                    ? "Stop GPS and remove the current-location marker"
+                    : "Start GPS and follow the current location"
+                }
                 className={cn(
                   "flex items-center gap-1 rounded-xl px-3 py-2 text-[10px] font-semibold",
-                  follow ? "bg-primary text-primary-foreground" : "bg-secondary",
+                  watchIdRef.current !== null && follow
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-secondary",
                 )}
               >
-                <Crosshair className="size-3.5" /> Follow
+                <Crosshair className="size-3.5" />
+                {watchIdRef.current !== null ? "Stop GPS" : "Follow"}
               </button>
             </div>
             <div className="grid grid-cols-4 gap-1.5">
