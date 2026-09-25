@@ -7,9 +7,9 @@ const cors = {
 };
 
 const publicFile =
-  /^\/texas\/versions\/[a-f0-9]{16}\/(?:manifest\.json|part-\d{4}\.fgb|unmapped-\d{4}\.parquet|search\/[-a-z0-9_/]+\.ndjson\.gz)$/;
+  /^\/texas\/versions\/[a-f0-9]{16}\/(?:manifest\.json|part-\d{4}\.fgb|unmapped-\d{4}\.parquet|search\/[-a-z0-9_/]+\/(?:index\.json|data\.pack))$/;
 const publicKey =
-  /^texas\/versions\/[a-f0-9]{16}\/(?:manifest\.json|part-\d{4}\.fgb|unmapped-\d{4}\.parquet|search\/[-a-z0-9_/]+\.ndjson\.gz)$/;
+  /^texas\/versions\/[a-f0-9]{16}\/(?:manifest\.json|part-\d{4}\.fgb|unmapped-\d{4}\.parquet|search\/[-a-z0-9_/]+\/(?:index\.json|data\.pack))$/;
 const normalize = (value) =>
   String(value ?? "")
     .normalize("NFKD")
@@ -98,18 +98,18 @@ async function readMatches(object, filters, limit) {
   return { results, limited };
 }
 
-function selectSearchKey(manifest, filters, county) {
+function selectSearchTarget(manifest, filters, county) {
   const prefixLength = manifest.search.prefixLength ?? 3;
   const prefix = (value) => value.slice(0, prefixLength).toLowerCase();
   const root = `texas/versions/${manifest.version}/search`;
-  if (filters.parcelId) return `${root}/id/${prefix(filters.parcelId)}.ndjson.gz`;
-  if (filters.owner) return `${root}/owner/${prefix(filters.owner)}.ndjson.gz`;
-  if (filters.address) return `${root}/address/${prefix(filters.address)}.ndjson.gz`;
+  if (filters.parcelId) return { folder: `${root}/id`, prefix: prefix(filters.parcelId) };
+  if (filters.owner) return { folder: `${root}/owner`, prefix: prefix(filters.owner) };
+  if (filters.address) return { folder: `${root}/address`, prefix: prefix(filters.address) };
   if (filters.block && county)
-    return `${root}/block/${county.fips}/${prefix(filters.block)}.ndjson.gz`;
+    return { folder: `${root}/block/${county.fips}`, prefix: prefix(filters.block) };
   if (filters.section && county)
-    return `${root}/section/${county.fips}/${prefix(filters.section)}.ndjson.gz`;
-  if (county) return `${root}/county/${county.fips}.ndjson.gz`;
+    return { folder: `${root}/section/${county.fips}`, prefix: prefix(filters.section) };
+  if (county) return { folder: `${root}/county`, prefix: county.fips };
   return null;
 }
 
@@ -164,9 +164,16 @@ async function parcelSearch(request, env) {
     return json({ error: "Choose a county from the Texas parcel list." }, 400);
   if ((filters.block || filters.section) && !county)
     return json({ error: "Choose a county when searching by block or section." }, 400);
-  const key = selectSearchKey(manifest, filters, county);
-  if (!key) return json({ error: "Add a more specific parcel search filter." }, 400);
-  const object = await env.PARCELS.get(key);
+  const target = selectSearchTarget(manifest, filters, county);
+  if (!target) return json({ error: "Add a more specific parcel search filter." }, 400);
+  const indexObject = await env.PARCELS.get(`${target.folder}/index.json`);
+  const directory = indexObject ? await indexObject.json().catch(() => null) : null;
+  const entry = directory?.entries?.[target.prefix];
+  const object = entry
+    ? await env.PARCELS.get(`${target.folder}/data.pack`, {
+        range: { offset: entry.offset, length: entry.length },
+      })
+    : null;
   const limit = Math.max(
     1,
     Math.min(Number(url.searchParams.get("limit")) || 25, manifest.search.maximumResults ?? 50),
@@ -217,8 +224,8 @@ export default {
         ? "application/json"
         : path.endsWith(".fgb")
           ? "application/flatgeobuf"
-          : path.endsWith(".gz")
-            ? "application/gzip"
+          : path.endsWith(".pack")
+            ? "application/octet-stream"
             : "application/octet-stream",
     );
     headers.set(

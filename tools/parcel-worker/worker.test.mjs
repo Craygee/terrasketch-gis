@@ -29,7 +29,7 @@ test("publisher can put only an allowed public search shard", async () => {
   let saved = "";
   const response = await worker.fetch(
     new Request(
-      origin + "/admin/object?key=texas/versions/1234567890abcdef/search/owner/mil.ndjson.gz",
+      origin + "/admin/object?key=texas/versions/1234567890abcdef/search/owner/data.pack",
       { method: "PUT", headers: { Authorization: "Bearer test" }, body: "public" },
     ),
     {
@@ -42,7 +42,7 @@ test("publisher can put only an allowed public search shard", async () => {
     },
   );
   assert.equal(response.status, 200);
-  assert.equal(saved, "texas/versions/1234567890abcdef/search/owner/mil.ndjson.gz");
+  assert.equal(saved, "texas/versions/1234567890abcdef/search/owner/data.pack");
 });
 test("missing dataset is explicit, and byte ranges preserve CORS and lengths", async () => {
   assert.equal(
@@ -118,9 +118,16 @@ test("statewide parcel search validates filters and reads the selected prefix sh
   );
   const env = {
     PARCELS: {
-      get: async (key) => {
+      get: async (key, options) => {
         if (key === "texas/current.json") return { json: async () => manifest };
-        assert.equal(key, "texas/versions/1234567890abcdef/search/owner/mil.ndjson.gz");
+        if (key.endsWith("/index.json"))
+          return {
+            json: async () => ({
+              entries: { mil: { offset: 0, length: records.length } },
+            }),
+          };
+        assert.equal(key, "texas/versions/1234567890abcdef/search/owner/data.pack");
+        assert.deepEqual(options.range, { offset: 0, length: records.length });
         return { body: new Blob([records]).stream() };
       },
     },

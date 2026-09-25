@@ -108,7 +108,7 @@ for (let i = 0; i < files.length; i += 3) {
   await Promise.all(
     files.slice(i, i + 3).map(async (part) => {
       if (
-        !/^(?:part-\d{4}\.fgb|unmapped-\d{4}\.parquet|search\/(?:id|owner|address|county|block\/\d{5}|section\/\d{5})\/[a-z0-9]+\.ndjson\.gz)$/.test(
+        !/^(?:part-\d{4}\.fgb|unmapped-\d{4}\.parquet|search\/(?:id|owner|address|county|block\/\d{5}|section\/\d{5})\/(?:index\.json|data\.pack))$/.test(
           part.key,
         )
       )

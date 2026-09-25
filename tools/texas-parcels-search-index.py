@@ -106,6 +106,38 @@ def compress(input):
     }
 
 
+def file_metadata(path, search_folder):
+    with path.open("rb") as handle:
+        digest = hashlib.file_digest(handle, "sha256").hexdigest()
+    return {
+        "file": path.relative_to(search_folder).as_posix(),
+        "bytes": path.stat().st_size,
+        "sha256": digest,
+    }
+
+
+def pack_group(folder, search_folder, rows):
+    files = sorted(folder.glob("*.ndjson.gz"))
+    if not files:
+        return []
+    pack_path = folder / "data.pack"
+    directory = {}
+    offset = 0
+    with pack_path.open("wb") as output:
+        for path in files:
+            length = path.stat().st_size
+            prefix = path.name.removesuffix(".ndjson.gz")
+            raw_key = path.relative_to(search_folder).with_suffix("").with_suffix("").as_posix()
+            directory[prefix] = {"offset": offset, "length": length, "rows": rows.get(raw_key + ".ndjson", 0)}
+            with path.open("rb") as source:
+                shutil.copyfileobj(source, output, length=1024 * 1024)
+            offset += length
+            path.unlink()
+    index_path = folder / "index.json"
+    index_path.write_text(json.dumps({"schemaVersion": 1, "entries": directory}, separators=(",", ":")))
+    return [file_metadata(index_path, search_folder), file_metadata(pack_path, search_folder)]
+
+
 def main():
     store = pathlib.Path(os.environ.get("PARCEL_DATA_ROOT", str(root / ".data/texas-parcels")))
     source = json.loads((store / "current.json").read_text())
@@ -195,11 +227,19 @@ def main():
     if mapped != manifest["features"]:
         raise ValueError(f"Search index is incomplete: {mapped}/{manifest['features']}")
     raw_files = list(raw_folder.rglob("*.ndjson"))
-    objects = []
+    compressed = []
     with ThreadPoolExecutor(max_workers=4) as pool:
         for item in pool.map(compress, [(path, raw_folder, search_folder) for path in raw_files]):
-            objects.append(item)
+            compressed.append(item)
     shutil.rmtree(raw_folder)
+    objects = []
+    for category in ["id", "owner", "address", "county"]:
+        objects.extend(pack_group(search_folder / category, search_folder, shards.rows))
+    for category in ["block", "section"]:
+        parent = search_folder / category
+        if parent.exists():
+            for county_folder in sorted(path for path in parent.iterdir() if path.is_dir()):
+                objects.extend(pack_group(county_folder, search_folder, shards.rows))
     updated = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     manifest["schemaVersion"] = 2
     manifest["search"] = {
