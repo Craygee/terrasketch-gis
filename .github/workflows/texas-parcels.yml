@@ -1,7 +1,7 @@
 name: Texas public parcel refresh
 on:
   schedule:
-    - cron: '17 7 * * 1'
+    - cron: "17 7 * * 1"
   workflow_dispatch:
 permissions:
   contents: read
@@ -16,10 +16,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: "22"
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: "3.12"
       - name: Check public source and license
         run: node tools/texas-parcels-sync.mjs
       - name: Verify publisher credential and storage
@@ -43,6 +43,7 @@ jobs:
         run: |
           python tools/texas-parcels-inspect.py
           python tools/texas-parcels-index.py
+          python tools/texas-parcels-search-index.py
       - name: Publish verified version
         if: steps.edition.outputs.needed == 'true'
         env:

@@ -184,10 +184,10 @@ function MobileShell() {
 
       {!fieldMode && (
         <div className="pointer-events-none absolute inset-x-3 top-[calc(4.5rem+env(safe-area-inset-top))] z-20 flex min-w-0 items-start gap-2">
-          <div data-tour="map-search" className="pointer-events-auto hidden min-w-0 sm:block">
+          <div data-tour="map-search" className="pointer-events-auto min-w-0 flex-1">
             <SearchBox />
           </div>
-          <div className="pointer-events-auto ml-auto flex shrink-0 gap-2">
+          <div className="pointer-events-auto ml-auto hidden shrink-0 gap-2 sm:flex">
             <button
               onClick={() => setSheet(sheet === "help" ? null : "help")}
               aria-label="Help, tours, and account"

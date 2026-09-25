@@ -27,11 +27,13 @@ This direct collection license replaces the earlier unresolved TxDOT-mirror lice
 
 Dedicated Cloudflare R2 bucket/Worker `landdraft-public-parcels` contains only public parcel files, with no private-project bindings. Versioned spatial FlatGeobuf parts support HTTP byte ranges. Browser queries use viewport bounds and a feature budget. Missing-geometry records remain separate Parquet files. Source URLs, edition, retrieval time and license accompany displayed/exported features.
 
+Statewide attribute search is a separate index in the same public version. The main map can search outside the viewed extent by county, `Prop_ID`/`GEO_ID`, owner name, situs address, and parsed block/section values from `LEGAL_DESC`. The service selects a compressed prefix shard, stops at a bounded result limit, and returns source identifiers plus parcel bounds. Adding a result resolves the exact geometry from the existing FlatGeobuf archive; the search index does not duplicate or replace the map layer. Block and section are derived search fields because TxGIO does not publish dedicated block/section columns, and the original legal description remains attached to each result.
+
 The old project-area Supabase cache migration/function is an inactive prototype, superseded for this statewide request; do not apply it to enable statewide storage.
 
 ## Weekly refresh and rollback
 
-GitHub Actions `.github/workflows/texas-parcels.yml` on `Craygee/terrasketch-gis` checks Mondays at 07:17 UTC and supports manual dispatch. It checks the newest public collection's explicit license, inventories all resources, compares source ETag, downloads only when changed, verifies archive length/hash, validates index counts, uploads immutable parts, then publishes `texas/current.json` last. Failed ingestion keeps the previous manifest.
+GitHub Actions `.github/workflows/texas-parcels.yml` on `Craygee/terrasketch-gis` checks Mondays at 07:17 UTC and supports manual dispatch. It checks the newest public collection's explicit license, inventories all resources, compares source ETag, downloads only when changed, verifies archive length/hash, validates spatial and search-index counts, uploads immutable parts and search shards, then publishes `texas/current.json` last. Failed ingestion keeps the previous manifest.
 
 A dedicated `PARCEL_PUBLISH_TOKEN` secret is in GitHub Actions and the parcel Worker's `PUBLISH_TOKEN`; never copy it into client code, reports or logs. The publisher endpoint only permits the public parcel namespace. Rotation is supported by `tools/texas-parcels-provision.mjs` using in-memory generation and CLI stdin. Keep previous versions for rollback; storage usage grows with new editions and requires deliberate retention review.
 
@@ -39,7 +41,7 @@ Rollback: restore `texas/current.json` from a previously verified immutable vers
 
 ## Checks and remaining QA
 
-Automated checks cover retired-URL migration, index byte-range reads, viewport limits, license rejection, identifiers/provenance, public read/write isolation and missing-dataset responses. Run TypeScript, scoped ESLint, parcel tests and production build. Verify real urban/rural viewport queries, source controls and an authenticated saved-layer workflow before declaring live browser QA complete. Missing/incomplete reads must remain visible errors or truncated results, never falsely complete statewide downloads.
+Automated checks cover retired-URL migration, index byte-range reads, viewport limits, license rejection, identifiers/provenance, statewide search validation/shard selection, public read/write isolation and missing-dataset responses. Run TypeScript, scoped ESLint, parcel tests and production build. Verify real urban/rural viewport queries, representative ID/owner/block/section searches, source controls and an authenticated saved-layer workflow before declaring live browser QA complete. Missing/incomplete reads must remain visible errors or truncated results, never falsely complete statewide downloads.
 
 ## September 14 deployment verification
 

@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { Search, Loader2, LocateFixed, MapPinPlus, X } from "lucide-react";
+import { Search, Loader2, LocateFixed, MapPinPlus, LandPlot, X } from "lucide-react";
 import { toast } from "sonner";
 import { searchPlaces, type PlaceResult } from "@/lib/gis/geocode";
 import { useMapRef } from "@/lib/gis/mapRef";
 import { useWorkbench } from "@/lib/gis/store";
 import { defaultMarkerIcon } from "@/lib/gis/markerIcons";
+import { ParcelSearchPanel } from "./ParcelSearchPanel";
 
 export function SearchBox() {
   const { map } = useMapRef();
@@ -13,6 +14,7 @@ export function SearchBox() {
   const [results, setResults] = useState<PlaceResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
+  const [parcelSearchOpen, setParcelSearchOpen] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -118,7 +120,7 @@ export function SearchBox() {
   };
 
   return (
-    <div className="w-full sm:w-[22rem]">
+    <div className={parcelSearchOpen ? "w-full sm:w-[34rem]" : "w-full sm:w-[22rem]"}>
       <div className="float-surface flex items-center gap-2 rounded-2xl px-3 py-2">
         <Search className="size-4 shrink-0 text-muted-foreground" />
         <input
@@ -143,9 +145,28 @@ export function SearchBox() {
         >
           <LocateFixed className="size-4" />
         </button>
+        <button
+          onClick={() => {
+            setParcelSearchOpen((current) => !current);
+            setOpen(false);
+          }}
+          title="Search all Texas parcels"
+          aria-label="Search all Texas parcels"
+          aria-pressed={parcelSearchOpen}
+          className={
+            parcelSearchOpen
+              ? "flex items-center gap-1 rounded-lg bg-primary px-2 py-1 text-primary-foreground"
+              : "flex items-center gap-1 rounded-lg px-2 py-1 text-primary hover:bg-accent"
+          }
+        >
+          <LandPlot className="size-4" />
+          <span className="hidden text-[11px] font-semibold min-[480px]:inline">Parcels</span>
+        </button>
       </div>
 
-      {open && results.length > 0 && (
+      {parcelSearchOpen && <ParcelSearchPanel onClose={() => setParcelSearchOpen(false)} />}
+
+      {!parcelSearchOpen && open && results.length > 0 && (
         <div className="float-surface mt-2 max-h-72 overflow-auto rounded-2xl p-1">
           {results.map((r) => (
             <div
