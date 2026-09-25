@@ -42,12 +42,22 @@ jobs:
         if: steps.edition.outputs.needed == 'true'
         run: |
           python tools/texas-parcels-inspect.py
+      - name: Build spatial index for a new source edition
+        if: steps.edition.outputs.mode == 'full'
+        run: |
           python tools/texas-parcels-index.py
+      - name: Reuse hosted spatial manifest for search backfill
+        if: steps.edition.outputs.mode == 'search-only'
+        run: node tools/texas-parcels-prepare-search-backfill.mjs
+      - name: Build statewide attribute-search index
+        if: steps.edition.outputs.needed == 'true'
+        run: |
           python tools/texas-parcels-search-index.py
       - name: Publish verified version
         if: steps.edition.outputs.needed == 'true'
         env:
           PARCEL_PUBLISH_TOKEN: ${{ secrets.PARCEL_PUBLISH_TOKEN }}
+          PARCEL_SEARCH_ONLY: ${{ steps.edition.outputs.mode == 'search-only' && '1' || '0' }}
         run: node tools/texas-parcels-upload.mjs
       - uses: actions/upload-artifact@v4
         if: always()

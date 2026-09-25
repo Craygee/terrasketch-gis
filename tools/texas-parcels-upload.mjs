@@ -95,9 +95,10 @@ async function httpPut(file, key) {
 }
 const put = process.env.PARCEL_PUBLISH_TOKEN ? httpPut : cliPut;
 // Sequential receipts are durable; upload parts in bounded parallel batches.
+const spatialFiles =
+  process.env.PARCEL_SEARCH_ONLY === "1" ? [] : [...manifest.parts, ...manifest.unmapped];
 const files = [
-  ...manifest.parts.map((item) => ({ ...item, local: item.file, key: item.file })),
-  ...manifest.unmapped.map((item) => ({ ...item, local: item.file, key: item.file })),
+  ...spatialFiles.map((item) => ({ ...item, local: item.file, key: item.file })),
   ...searchObjects.map((item) => ({
     ...item,
     local: join("search", item.file),
