@@ -164,8 +164,20 @@ test("property ID search uses the narrow ID shard and requires an exact identifi
   const records = gzipSync(
     Buffer.from(
       [
-        { sourceFeatureId: "7", propertyId: "102197", geoId: "102050201", county: "TRAVIS", fips: "48453" },
-        { sourceFeatureId: "8", propertyId: "1021979", geoId: "OTHER", county: "TRAVIS", fips: "48453" },
+        {
+          sourceFeatureId: "7",
+          propertyId: "102197",
+          geoId: "102050201",
+          county: "TRAVIS",
+          fips: "48453",
+        },
+        {
+          sourceFeatureId: "8",
+          propertyId: "1021979",
+          geoId: "OTHER",
+          county: "TRAVIS",
+          fips: "48453",
+        },
       ]
         .map((record) => JSON.stringify(record))
         .join("\n"),
@@ -177,7 +189,9 @@ test("property ID search uses the narrow ID shard and requires an exact identifi
         if (key === "texas/current.json") return { json: async () => manifest };
         if (key.endsWith("/index.json")) {
           assert.equal(key, "texas/versions/1234567890abcdef/search/id/index.json");
-          return { json: async () => ({ entries: { 10219: { offset: 0, length: records.length } } }) };
+          return {
+            json: async () => ({ entries: { 10219: { offset: 0, length: records.length } } }),
+          };
         }
         assert.equal(key, "texas/versions/1234567890abcdef/search/id/data.pack");
         assert.deepEqual(options.range, { offset: 0, length: records.length });
@@ -191,7 +205,10 @@ test("property ID search uses the narrow ID shard and requires an exact identifi
   );
   assert.equal(response.status, 200);
   const payload = await response.json();
-  assert.deepEqual(payload.results.map((record) => record.propertyId), ["102197"]);
+  assert.deepEqual(
+    payload.results.map((record) => record.propertyId),
+    ["102197"],
+  );
 });
 test("search metadata lists only counties in the published index", async () => {
   const env = {

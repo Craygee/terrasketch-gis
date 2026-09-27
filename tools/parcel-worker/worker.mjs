@@ -45,9 +45,7 @@ const matches = (record, filters) => {
   if (filters.county && normalize(record.county) !== normalize(filters.county)) return false;
   if (
     filters.parcelId &&
-    ![record.propertyId, record.geoId].some((value) =>
-      normalize(value) === filters.parcelId,
-    )
+    ![record.propertyId, record.geoId].some((value) => normalize(value) === filters.parcelId)
   )
     return false;
   if (filters.owner && !normalize(record.ownerName).startsWith(filters.owner)) return false;
@@ -111,9 +109,15 @@ function selectSearchTarget(manifest, filters, county) {
   if (filters.address)
     return { folder: `${root}/address`, prefix: prefix(filters.address, textPrefixLength) };
   if (filters.block && county)
-    return { folder: `${root}/block/${county.fips}`, prefix: prefix(filters.block, legalPrefixLength) };
+    return {
+      folder: `${root}/block/${county.fips}`,
+      prefix: prefix(filters.block, legalPrefixLength),
+    };
   if (filters.section && county)
-    return { folder: `${root}/section/${county.fips}`, prefix: prefix(filters.section, legalPrefixLength) };
+    return {
+      folder: `${root}/section/${county.fips}`,
+      prefix: prefix(filters.section, legalPrefixLength),
+    };
   if (county) return { folder: `${root}/county`, prefix: county.fips };
   return null;
 }
