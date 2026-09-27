@@ -46,7 +46,7 @@ const matches = (record, filters) => {
   if (
     filters.parcelId &&
     ![record.propertyId, record.geoId].some((value) =>
-      normalize(value).startsWith(filters.parcelId),
+      normalize(value) === filters.parcelId,
     )
   )
     return false;
@@ -99,16 +99,21 @@ async function readMatches(object, filters, limit) {
 }
 
 function selectSearchTarget(manifest, filters, county) {
-  const prefixLength = manifest.search.prefixLength ?? 3;
-  const prefix = (value) => value.slice(0, prefixLength).toLowerCase();
+  const textPrefixLength = manifest.search.prefixLength ?? 3;
+  const idPrefixLength = manifest.search.idPrefixLength ?? textPrefixLength;
+  const legalPrefixLength = manifest.search.legalPrefixLength ?? textPrefixLength;
+  const prefix = (value, length) => value.slice(0, length).toLowerCase();
   const root = `texas/versions/${manifest.version}/search`;
-  if (filters.parcelId) return { folder: `${root}/id`, prefix: prefix(filters.parcelId) };
-  if (filters.owner) return { folder: `${root}/owner`, prefix: prefix(filters.owner) };
-  if (filters.address) return { folder: `${root}/address`, prefix: prefix(filters.address) };
+  if (filters.parcelId)
+    return { folder: `${root}/id`, prefix: prefix(filters.parcelId, idPrefixLength) };
+  if (filters.owner)
+    return { folder: `${root}/owner`, prefix: prefix(filters.owner, textPrefixLength) };
+  if (filters.address)
+    return { folder: `${root}/address`, prefix: prefix(filters.address, textPrefixLength) };
   if (filters.block && county)
-    return { folder: `${root}/block/${county.fips}`, prefix: prefix(filters.block) };
+    return { folder: `${root}/block/${county.fips}`, prefix: prefix(filters.block, legalPrefixLength) };
   if (filters.section && county)
-    return { folder: `${root}/section/${county.fips}`, prefix: prefix(filters.section) };
+    return { folder: `${root}/section/${county.fips}`, prefix: prefix(filters.section, legalPrefixLength) };
   if (county) return { folder: `${root}/county`, prefix: county.fips };
   return null;
 }

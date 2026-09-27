@@ -21,7 +21,9 @@ import pyogrio
 import pyproj
 import shapely
 
-PREFIX_LENGTH = 2
+TEXT_PREFIX_LENGTH = 3
+ID_PREFIX_LENGTH = 5
+LEGAL_PREFIX_LENGTH = 3
 MINIMUM_TEXT_LENGTH = 3
 COUNTY_PREVIEW_LIMIT = 5000
 BLOCK = re.compile(r"\b(?:BLK|BLOCK)\s*[-:#]?\s*([A-Z0-9][A-Z0-9.-]*)", re.I)
@@ -202,20 +204,20 @@ def main():
                 line = json.dumps(record, separators=(",", ":"), ensure_ascii=False) + "\n"
                 ids = {normalized(record["propertyId"]), normalized(record["geoId"])} - {""}
                 for identifier in ids:
-                    if len(identifier) >= PREFIX_LENGTH:
-                        shards.write(pathlib.Path("id") / f"{identifier[:PREFIX_LENGTH].lower()}.ndjson", line)
+                    if len(identifier) >= MINIMUM_TEXT_LENGTH:
+                        shards.write(pathlib.Path("id") / f"{identifier[:ID_PREFIX_LENGTH].lower()}.ndjson", line)
                 owner = normalized(record["ownerName"])
-                if len(owner) >= PREFIX_LENGTH:
-                    shards.write(pathlib.Path("owner") / f"{owner[:PREFIX_LENGTH].lower()}.ndjson", line)
+                if len(owner) >= MINIMUM_TEXT_LENGTH:
+                    shards.write(pathlib.Path("owner") / f"{owner[:TEXT_PREFIX_LENGTH].lower()}.ndjson", line)
                 address = normalized(record["situsAddress"])
-                if len(address) >= PREFIX_LENGTH:
-                    shards.write(pathlib.Path("address") / f"{address[:PREFIX_LENGTH].lower()}.ndjson", line)
+                if len(address) >= MINIMUM_TEXT_LENGTH:
+                    shards.write(pathlib.Path("address") / f"{address[:TEXT_PREFIX_LENGTH].lower()}.ndjson", line)
                 if fips and block:
                     key = normalized(block)
-                    shards.write(pathlib.Path("block") / fips / f"{key[:PREFIX_LENGTH].lower()}.ndjson", line)
+                    shards.write(pathlib.Path("block") / fips / f"{key[:LEGAL_PREFIX_LENGTH].lower()}.ndjson", line)
                 if fips and section:
                     key = normalized(section)
-                    shards.write(pathlib.Path("section") / fips / f"{key[:PREFIX_LENGTH].lower()}.ndjson", line)
+                    shards.write(pathlib.Path("section") / fips / f"{key[:LEGAL_PREFIX_LENGTH].lower()}.ndjson", line)
                 if fips and county_preview[fips] < COUNTY_PREVIEW_LIMIT:
                     shards.write(pathlib.Path("county") / f"{fips}.ndjson", line)
                     county_preview[fips] += 1
@@ -244,9 +246,11 @@ def main():
     manifest["schemaVersion"] = 2
     manifest["search"] = {
         "status": "ready",
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "updatedAt": updated,
-        "prefixLength": PREFIX_LENGTH,
+        "prefixLength": TEXT_PREFIX_LENGTH,
+        "idPrefixLength": ID_PREFIX_LENGTH,
+        "legalPrefixLength": LEGAL_PREFIX_LENGTH,
         "minimumTextLength": MINIMUM_TEXT_LENGTH,
         "maximumResults": 50,
         "countyPreviewLimit": COUNTY_PREVIEW_LIMIT,

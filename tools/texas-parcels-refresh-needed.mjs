@@ -7,7 +7,9 @@ const response = await fetch(
 const current = response.ok ? await response.json() : null;
 const sourceChanged =
   current?.sourceEtag !== latest.etag || current?.collectionId !== latest.collection.collection_id;
-const searchBackfill = !sourceChanged && current?.search?.status !== "ready";
+const searchBackfill =
+  !sourceChanged &&
+  (current?.search?.status !== "ready" || current?.search?.schemaVersion !== 2);
 const mode = sourceChanged ? "full" : searchBackfill ? "search-only" : "unchanged";
 const needed = mode !== "unchanged";
 if (process.env.GITHUB_OUTPUT)

@@ -145,6 +145,54 @@ test("statewide parcel search validates filters and reads the selected prefix sh
   assert.equal(bad.status, 400);
   assert.match((await bad.json()).error, /county/i);
 });
+test("property ID search uses the narrow ID shard and requires an exact identifier", async () => {
+  const manifest = {
+    status: "ready",
+    version: "1234567890abcdef",
+    sourceDate: "2025-06-01",
+    search: {
+      status: "ready",
+      schemaVersion: 2,
+      prefixLength: 3,
+      idPrefixLength: 5,
+      legalPrefixLength: 3,
+      minimumTextLength: 3,
+      maximumResults: 50,
+      counties: [{ name: "Travis", fips: "48453" }],
+    },
+  };
+  const records = gzipSync(
+    Buffer.from(
+      [
+        { sourceFeatureId: "7", propertyId: "102197", geoId: "102050201", county: "TRAVIS", fips: "48453" },
+        { sourceFeatureId: "8", propertyId: "1021979", geoId: "OTHER", county: "TRAVIS", fips: "48453" },
+      ]
+        .map((record) => JSON.stringify(record))
+        .join("\n"),
+    ),
+  );
+  const env = {
+    PARCELS: {
+      get: async (key, options) => {
+        if (key === "texas/current.json") return { json: async () => manifest };
+        if (key.endsWith("/index.json")) {
+          assert.equal(key, "texas/versions/1234567890abcdef/search/id/index.json");
+          return { json: async () => ({ entries: { 10219: { offset: 0, length: records.length } } }) };
+        }
+        assert.equal(key, "texas/versions/1234567890abcdef/search/id/data.pack");
+        assert.deepEqual(options.range, { offset: 0, length: records.length });
+        return { body: new Blob([records]).stream() };
+      },
+    },
+  };
+  const response = await worker.fetch(
+    new Request(origin + "/texas/search?county=Travis&parcelId=102197"),
+    env,
+  );
+  assert.equal(response.status, 200);
+  const payload = await response.json();
+  assert.deepEqual(payload.results.map((record) => record.propertyId), ["102197"]);
+});
 test("search metadata lists only counties in the published index", async () => {
   const env = {
     PARCELS: {
