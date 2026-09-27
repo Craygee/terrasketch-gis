@@ -114,8 +114,8 @@ for (let i = 0; i < files.length; i += 3) {
         )
       )
         throw new Error("Invalid part path");
-      if (part.bytes > 300000000)
-        throw new Error("Part exceeds upload limit; rebuild with smaller batches");
+      if (part.bytes > 30_000_000_000)
+        throw new Error("Part exceeds the bounded multipart upload limit");
       if (part.sha256 ? receipts[part.key]?.sha256 === part.sha256 : receipts[part.key]?.uploadedAt)
         return;
       await put(join(folder, part.local), `texas/versions/${version}/${part.key}`);
