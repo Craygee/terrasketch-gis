@@ -62,7 +62,7 @@ export function solveSteadyLiquid(input: {
       scenarioId: scenario.id,
       routeId: route.id,
       solverId: "liquid-steady-v1",
-      solverVersion: "0.1.0-preliminary",
+      solverVersion: "0.2.0-preliminary",
       readiness: "preliminary-unvalidated",
       status: "unsupported",
       inputHash,
@@ -126,7 +126,7 @@ export function solveSteadyLiquid(input: {
       scenarioId: scenario.id,
       routeId: route.id,
       solverId: "liquid-steady-v1",
-      solverVersion: "0.1.0-preliminary",
+      solverVersion: "0.2.0-preliminary",
       readiness: "preliminary-unvalidated",
       status: "failed",
       inputHash,
@@ -173,18 +173,22 @@ export function solveSteadyLiquid(input: {
     );
 
   const profile: PipelineProfilePoint[] = [];
-  let pressurePa = scenario.inletPressurePa;
+  let cumulativeElevationPressureChangePa = 0;
+  let cumulativeFrictionLossPa = 0;
+  let cumulativeMinorLossPa = 0;
+  let cumulativePressureBoostPa = 0;
   let remainingMinorK = scenario.totalMinorLossK;
   const originComponents = components.filter((component) => component.stationM <= 0.001);
-  pressurePa += originComponents.reduce(
+  cumulativePressureBoostPa = originComponents.reduce(
     (sum, component) => sum + numericComponentProperty(component, "pressureBoostPa"),
     0,
   );
-  pressurePa -=
+  cumulativeMinorLossPa =
     originComponents.reduce(
       (sum, component) => sum + numericComponentProperty(component, "minorLossK"),
       0,
     ) * dynamicPressurePa;
+  let pressurePa = scenario.inletPressurePa + cumulativePressureBoostPa - cumulativeMinorLossPa;
 
   analysisStations.forEach((station, index) => {
     if (index > 0) {
@@ -215,8 +219,12 @@ export function solveSteadyLiquid(input: {
       const segmentMinorK = componentMinorK + scenarioMinorK;
       remainingMinorK -= scenarioMinorK;
       const minorLossPa = segmentMinorK * dynamicPressurePa;
-      pressurePa +=
-        pressureBoostPa - frictionLossPa - minorLossPa - rho * GRAVITY_MS2 * elevationDeltaM;
+      const elevationPressureChangePa = -rho * GRAVITY_MS2 * elevationDeltaM;
+      cumulativePressureBoostPa += pressureBoostPa;
+      cumulativeFrictionLossPa += frictionLossPa;
+      cumulativeMinorLossPa += minorLossPa;
+      cumulativeElevationPressureChangePa += elevationPressureChangePa;
+      pressurePa += pressureBoostPa - frictionLossPa - minorLossPa + elevationPressureChangePa;
     }
 
     const elevation = station.pipelineElevationM ?? station.groundElevationM;
@@ -235,6 +243,10 @@ export function solveSteadyLiquid(input: {
       ...(elevation === undefined
         ? {}
         : { hydraulicGradeM: elevation + pressurePa / (rho * GRAVITY_MS2) }),
+      cumulativeElevationPressureChangePa,
+      cumulativeFrictionLossPa,
+      cumulativeMinorLossPa,
+      cumulativePressureBoostPa,
       pressureMarginPa,
       minimumPressureMarginPa,
       flowM3S: scenario.flowM3S,
@@ -313,7 +325,7 @@ export function solveSteadyLiquid(input: {
     scenarioId: scenario.id,
     routeId: route.id,
     solverId: "liquid-steady-v1",
-    solverVersion: "0.1.0-preliminary",
+    solverVersion: "0.2.0-preliminary",
     readiness: "preliminary-unvalidated",
     status,
     inputHash,
@@ -382,6 +394,16 @@ export function interpolateProfile(
     ...(optional(start.hydraulicGradeM, end.hydraulicGradeM) === undefined
       ? {}
       : { hydraulicGradeM: optional(start.hydraulicGradeM, end.hydraulicGradeM)! }),
+    cumulativeElevationPressureChangePa: number(
+      start.cumulativeElevationPressureChangePa,
+      end.cumulativeElevationPressureChangePa,
+    ),
+    cumulativeFrictionLossPa: number(start.cumulativeFrictionLossPa, end.cumulativeFrictionLossPa),
+    cumulativeMinorLossPa: number(start.cumulativeMinorLossPa, end.cumulativeMinorLossPa),
+    cumulativePressureBoostPa: number(
+      start.cumulativePressureBoostPa,
+      end.cumulativePressureBoostPa,
+    ),
     pressureMarginPa: number(start.pressureMarginPa, end.pressureMarginPa),
     minimumPressureMarginPa: number(start.minimumPressureMarginPa, end.minimumPressureMarginPa),
     flowM3S: number(start.flowM3S, end.flowM3S),

@@ -105,6 +105,12 @@ function money(value: number | null, currency = "USD") {
   }).format(value);
 }
 
+function signedPsi(valuePa: number) {
+  if (!Number.isFinite(valuePa)) return "Recalculate";
+  const valuePsi = valuePa * pipelineUnits.paToPsi;
+  return `${valuePsi >= 0 ? "+" : ""}${valuePsi.toFixed(1)} psi`;
+}
+
 export function PipelineWorkspace() {
   const wb = useWorkbench();
   const { map } = useMapRef();
@@ -185,6 +191,51 @@ export function PipelineWorkspace() {
     [activeScenario, updatePipeline],
   );
 
+  const replaceRouteAndSolve = useCallback(
+    (nextRoute: PipelineRoute) => {
+      updatePipeline((current) => {
+        const storedRoute = current.routes.find((route) => route.id === nextRoute.id);
+        if (!storedRoute || storedRoute.geometryHash !== nextRoute.geometryHash) return current;
+        const routes = current.routes.map((route) =>
+          route.id === nextRoute.id ? nextRoute : route,
+        );
+        const scenario =
+          current.scenarios.find(
+            (item) => item.id === current.activeScenarioId && item.routeId === nextRoute.id,
+          ) ?? current.scenarios.find((item) => item.routeId === nextRoute.id);
+        if (!scenario) return { ...current, routes };
+        const fluid = current.fluids.find((item) => item.id === scenario.fluidId);
+        const pipe = current.pipeSpecifications.find(
+          (item) => item.id === scenario.pipeSpecificationId,
+        );
+        if (!fluid || !pipe) return { ...current, routes };
+        const run = solvePipeline({
+          route: nextRoute,
+          scenario,
+          fluid,
+          pipe,
+          components: current.components.filter((component) => component.routeId === nextRoute.id),
+        });
+        const takeoff = buildPreliminaryTakeoff(nextRoute, scenario, pipe);
+        const estimate = calculatePreliminaryEstimate(nextRoute, scenario);
+        return {
+          ...current,
+          routes,
+          solverRuns: [
+            run,
+            ...current.solverRuns.filter((item) => item.scenarioId !== run.scenarioId),
+          ].slice(0, 25),
+          quantitySnapshots: [
+            takeoff,
+            ...current.quantitySnapshots.filter((item) => item.scenarioId !== takeoff.scenarioId),
+          ].slice(0, 25),
+          latestEstimate: estimate,
+        };
+      });
+    },
+    [updatePipeline],
+  );
+
   const refreshTerrain = useCallback(
     async (route: PipelineRoute, announce = true) => {
       const routeKey = `${route.id}:${route.geometryHash}`;
@@ -193,12 +244,7 @@ export function PipelineWorkspace() {
       try {
         const sampled = await sampleUsgsTerrain(route);
         const missing = sampled.stations.length - sampled.elevationSamples.length;
-        updatePipeline((current) => ({
-          ...current,
-          routes: current.routes.map((item) =>
-            item.id === sampled.id && item.geometryHash === sampled.geometryHash ? sampled : item,
-          ),
-        }));
+        replaceRouteAndSolve(sampled);
         setTerrainStatus({
           routeKey,
           state: missing > 0 ? "partial" : "current",
@@ -216,7 +262,7 @@ export function PipelineWorkspace() {
         if (announce) toast.error(message);
       }
     },
-    [updatePipeline],
+    [replaceRouteAndSolve],
   );
 
   useEffect(() => {
@@ -663,10 +709,7 @@ export function PipelineWorkspace() {
                       endElevationM: endElevationFt / pipelineUnits.mToFt,
                       source: "User-entered linear screening profile",
                     });
-                    updatePipeline((current) => ({
-                      ...current,
-                      routes: current.routes.map((item) => (item.id === route.id ? route : item)),
-                    }));
+                    replaceRouteAndSolve(route);
                   }}
                   onPreferenceChange={(change) =>
                     updatePipeline((current) => ({
@@ -705,10 +748,7 @@ export function PipelineWorkspace() {
                 endElevationM: endElevationFt / pipelineUnits.mToFt,
                 source: "User-entered linear screening profile",
               });
-              updatePipeline((current) => ({
-                ...current,
-                routes: current.routes.map((item) => (item.id === route.id ? route : item)),
-              }));
+              replaceRouteAndSolve(route);
             }}
             onPreferenceChange={(change) =>
               updatePipeline((current) => ({
@@ -998,6 +1038,12 @@ function PropertiesPanel({
   onPreferenceChange: (change: Partial<PipelineEngineeringState["preferences"]>) => void;
 }) {
   const activeRun = pipeline.solverRuns.find((run) => run.scenarioId === scenario?.id);
+  const startPoint = activeRun?.profile[0];
+  const endPoint = activeRun?.profile.at(-1);
+  const routeElevationChangeM =
+    startPoint?.pipelineElevationM === undefined || endPoint?.pipelineElevationM === undefined
+      ? undefined
+      : endPoint.pipelineElevationM - startPoint.pipelineElevationM;
   const panel = pipeline.preferences.selectedRightPanel;
   return (
     <div className="p-3">
@@ -1096,6 +1142,30 @@ function PropertiesPanel({
             onShowTopography={onShowTopography}
           />
           <ManualElevationControl route={route} onApply={onApplyElevation} />
+          {endPoint && routeElevationChangeM !== undefined && (
+            <div className="rounded-xl border border-primary/20 bg-primary/5 p-3 text-[10px]">
+              <strong className="block text-xs">Hydraulic pressure accounting</strong>
+              <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1">
+                <dt className="text-muted-foreground">Route elevation change</dt>
+                <dd>
+                  {routeElevationChangeM >= 0 ? "+" : ""}
+                  {(routeElevationChangeM * pipelineUnits.mToFt).toFixed(0)} ft
+                </dd>
+                <dt className="text-muted-foreground">Elevation pressure effect</dt>
+                <dd>{signedPsi(endPoint.cumulativeElevationPressureChangePa ?? 0)}</dd>
+                <dt className="text-muted-foreground">Friction loss</dt>
+                <dd>{signedPsi(-(endPoint.cumulativeFrictionLossPa ?? 0))}</dd>
+                <dt className="text-muted-foreground">Minor losses</dt>
+                <dd>{signedPsi(-(endPoint.cumulativeMinorLossPa ?? 0))}</dd>
+                <dt className="text-muted-foreground">Pump / booster gain</dt>
+                <dd>{signedPsi(endPoint.cumulativePressureBoostPa ?? 0)}</dd>
+              </dl>
+              <p className="mt-2 text-[9px] leading-relaxed text-muted-foreground">
+                Positive elevation effect means the route ends lower than it starts; negative means
+                static head is consumed climbing uphill.
+              </p>
+            </div>
+          )}
           <LabeledSelect
             label="Route color"
             value={pipeline.preferences.visualizationMode}
@@ -1125,6 +1195,7 @@ function PropertiesPanel({
             options={pipeline.pipeSpecifications.map((pipe) => ({
               value: pipe.id,
               label: pipe.name,
+              group: pipe.material === "hdpe" ? "Polyethylene · HDPE PE4710" : "Steel and other",
             }))}
           />
           {pipeline.pipeSpecifications
@@ -1142,6 +1213,18 @@ function PropertiesPanel({
                   <dd>{pipe.manufacturingSpecification}</dd>
                   <dt className="text-muted-foreground">Grade</dt>
                   <dd>{pipe.grade}</dd>
+                  {pipe.sizingSystem && (
+                    <>
+                      <dt className="text-muted-foreground">Sizing system</dt>
+                      <dd>{pipe.sizingSystem}</dd>
+                    </>
+                  )}
+                  {pipe.dimensionRatio !== undefined && (
+                    <>
+                      <dt className="text-muted-foreground">SDR / DR</dt>
+                      <dd>{pipe.dimensionRatio}</dd>
+                    </>
+                  )}
                   <dt className="text-muted-foreground">OD</dt>
                   <dd>{(pipe.outsideDiameterM / 0.0254).toFixed(3)} in</dd>
                   <dt className="text-muted-foreground">Wall</dt>
@@ -1475,6 +1558,10 @@ function PressureScrubTooltip({
         </dd>
         <dt className="text-muted-foreground">Pressure</dt>
         <dd>{(point.pressurePa * pipelineUnits.paToPsi).toFixed(1)} psi</dd>
+        <dt className="text-muted-foreground">Elevation effect</dt>
+        <dd>{signedPsi(point.cumulativeElevationPressureChangePa ?? 0)}</dd>
+        <dt className="text-muted-foreground">Friction loss</dt>
+        <dd>{signedPsi(-(point.cumulativeFrictionLossPa ?? 0))}</dd>
         <dt className="text-muted-foreground">MAOP</dt>
         <dd>{(maopPa * pipelineUnits.paToPsi).toFixed(0)} psi</dd>
         <dt className="text-muted-foreground">MAOP margin</dt>
@@ -1622,9 +1709,13 @@ function LabeledSelect({
 }: {
   label: string;
   value: string;
-  options: Array<{ value: string; label: string }>;
+  options: Array<{ value: string; label: string; group?: string }>;
   onChange: (value: string) => void;
 }) {
+  const groupNames = Array.from(
+    new Set(options.flatMap((option) => (option.group ? [option.group] : []))),
+  );
+  const ungrouped = options.filter((option) => !option.group);
   return (
     <label className="block">
       <span className="mb-1 block text-[10px] font-medium">{label}</span>
@@ -1633,10 +1724,21 @@ function LabeledSelect({
         onChange={(event) => onChange(event.target.value)}
         className="w-full rounded-xl border border-border bg-background px-3 py-2 text-xs"
       >
-        {options.map((option) => (
+        {ungrouped.map((option) => (
           <option key={option.value} value={option.value}>
             {option.label}
           </option>
+        ))}
+        {groupNames.map((group) => (
+          <optgroup key={group} label={group}>
+            {options
+              .filter((option) => option.group === group)
+              .map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+          </optgroup>
         ))}
       </select>
     </label>

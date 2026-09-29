@@ -121,6 +121,40 @@ test("the liquid solver applies terrain elevation to static head", () => {
   });
   const pressureDrop = run.profile[0]!.pressurePa - run.profile.at(-1)!.pressurePa;
   assert.ok(Math.abs(pressureDrop - 998.2 * 9.80665 * 100) < 1);
+  assert.ok(Math.abs(run.profile.at(-1)!.cumulativeElevationPressureChangePa + pressureDrop) < 1);
+  assert.equal(run.profile.at(-1)!.cumulativeFrictionLossPa, 0);
+});
+
+test("the pressure profile falls on an uphill segment and recovers on the descent", () => {
+  const base = routeFromLineFeature({
+    layerId: "routes",
+    layerName: "Routes",
+    featureIndex: 0,
+    feature: line([
+      [-97, 32],
+      [-96.995, 32],
+      [-96.99, 32],
+    ]),
+  });
+  const hill = {
+    ...base,
+    stations: base.stations.map((station, index) => ({
+      ...station,
+      groundElevationM: index === 1 ? 120 : 20,
+      pipelineElevationM: index === 1 ? 120 : 20,
+    })),
+  };
+  const scenario = { ...createDefaultScenario(hill.id), flowM3S: 0 };
+  const run = solveSteadyLiquid({
+    route: hill,
+    scenario,
+    fluid: SYSTEM_FLUIDS.find((fluid) => fluid.id === scenario.fluidId)!,
+    pipe: SYSTEM_PIPE_SPECIFICATIONS.find((pipe) => pipe.id === scenario.pipeSpecificationId)!,
+  });
+  assert.ok(run.profile[1]!.pressurePa < run.profile[0]!.pressurePa);
+  assert.ok(Math.abs(run.profile.at(-1)!.pressurePa - run.profile[0]!.pressurePa) < 1);
+  assert.ok(run.profile[1]!.cumulativeElevationPressureChangePa < 0);
+  assert.ok(Math.abs(run.profile.at(-1)!.cumulativeElevationPressureChangePa) < 1);
 });
 
 test("the terrain API normalizes the official USGS EPQS response", async () => {

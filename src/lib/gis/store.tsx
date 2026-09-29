@@ -28,6 +28,7 @@ import {
   emptyProjectRecords,
 } from "./types";
 import type { PipelineEngineeringState } from "@/lib/pipeline/types";
+import { normalizePipelineEngineeringState } from "@/lib/pipeline/model";
 import type { WeatherWorkspaceState } from "@/lib/weather/types";
 import { normalizeWeatherWorkspace } from "@/lib/weather/model";
 import {
@@ -307,7 +308,9 @@ const normalizedProject = (
       documents: stored.records?.documents ?? [],
       events: stored.records?.events ?? [],
     },
-    pipelineEngineering: stored.pipelineEngineering,
+    pipelineEngineering: stored.pipelineEngineering
+      ? normalizePipelineEngineeringState(stored.pipelineEngineering)
+      : undefined,
     waterWorkspace: stored.waterWorkspace,
     weatherWorkspace: stored.weatherWorkspace
       ? normalizeWeatherWorkspace(stored.weatherWorkspace)

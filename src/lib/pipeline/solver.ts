@@ -43,7 +43,7 @@ const preliminaryLiquidSolver: PipelineSolver = {
   descriptor: {
     id: "liquid-steady-v1",
     name: "Native steady incompressible liquid screening",
-    version: "0.1.0-preliminary",
+    version: "0.2.0-preliminary",
     phaseModel: "single-phase-liquid",
     timeModel: "steady",
     validationStatus: "preliminary-unvalidated",
