@@ -59,6 +59,14 @@ test("published aquifer extents remain interpretations and intersect the study b
   assert.equal(recordsInside([r], area).length, 1);
   assert.equal(recordsInside([r], bboxPolygon([-112, 33, -111.9, 33.1])).length, 0);
 });
+test("major and minor TWDB aquifer schemas retain their distinct published name fields", () => {
+  const major = bboxPolygon([-99.1, 29.1, -98.8, 29.4]);
+  major.properties = { OBJECTID: 1, AQ_NAME: "MAJOR UNIT" };
+  const minor = bboxPolygon([-99.1, 29.1, -98.8, 29.4]);
+  minor.properties = { OBJECTID: 2, AQU_NAME: "MINOR UNIT" };
+  assert.equal(normalizeWaterRecord("twdb-aquifers", major, at)?.aquifer, "MAJOR UNIT");
+  assert.equal(normalizeWaterRecord("twdb-minor-aquifers", minor, at)?.aquifer, "MINOR UNIT");
+});
 function usgs(depth: unknown = 100) {
   return {
     type: "Feature",
@@ -98,7 +106,7 @@ test("original data, aquifer term and source identity survive normalization", ()
   assert.equal(r.evidence, "Source reported");
   assert.match(r.sourceUrl, /USGS-123/);
 });
-test("TWDB chemistry availability does not invent a chemistry value or depth unit", () => {
+test("TWDB well depth retains the provider's documented feet unit without inventing chemistry", () => {
   const r = normalizeWaterRecord(
     "twdb-wells",
     {
@@ -107,7 +115,8 @@ test("TWDB chemistry availability does not invent a chemistry value or depth uni
     },
     at,
   )!;
-  assert.equal(r.depth, null);
+  assert.equal(r.depth, 300);
+  assert.equal(r.depthUnit, "ft");
   assert.equal(r.raw["WellDepth"], 300);
   assert.ok(r.flags.some((f) => f.includes("chemistry not retrieved")));
 });

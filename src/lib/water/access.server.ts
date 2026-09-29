@@ -1,4 +1,4 @@
-import { checkAccess } from '../access.server';
+import { checkAccess } from '../access.server.ts';
 const usage = new Map<string, { count: number; until: number }>();
 
 export function consumeWaterRequest(userId: string, now = Date.now()) {

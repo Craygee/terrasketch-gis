@@ -1,6 +1,6 @@
 # Water & Hydrogeology implementation record
 
-Discovery and design: 2026-09-13. Status: incremental foundation; not a completed hydrogeology platform.
+Discovery and design: 2026-09-13. Screening-analysis update: 2026-09-29. Status: operational public-data screening with validation-gated derived layers; not a numerical groundwater model or completed hydrogeology platform.
 
 ## Existing architecture and reuse
 
@@ -87,7 +87,24 @@ Authenticated browser workflow: enable, extent selection, analysis, record inspe
 
 ### Outstanding Phase 1 work
 
-NGWMN ingestion, national aquifer polygons, complete lab chemistry and dated level histories, surface-water network geometries/HUC selection, county selection, project-boundary aggregation UX, full report builder and centralized account-module grants remain incomplete. The optional-source catalog labels those dependencies honestly. Later interpolation, recharge, 3D, drilling favorability, Deep Research and MODFLOW are not enabled. This preview must not be described as the full Phase 1 or six-phase module completed.
+NGWMN ingestion, national aquifer polygons, complete lab chemistry and dated level histories, county selection, project-boundary aggregation UX, full report builder and centralized account-module grants remain incomplete. The optional-source catalog labels those dependencies honestly. Screening interpolation is available only under the gates documented below; recharge, 3D, drilling favorability, Deep Research and MODFLOW are not enabled. This preview must not be described as the full Phase 1 or six-phase module completed.
+
+## 2026-09-29 screening-analysis update
+
+Analyze Water now builds a separate, versioned `hydro-screening-1` result after the source adapters finish. It adds a combined well layer with selectable constructed-depth, aquifer-assignment, or well-type symbology; mapped-well density; clipped major/minor aquifer footprint summaries; well-depth distributions; and validation-gated IDW screening surfaces. Groundwater-gradient vectors are generated only from USGS parameter 62610 groundwater elevations above NGVD29. Parameter 72019 depth below land surface can produce a separate depth-to-water surface, but never flow-direction arrows. Each surface requires at least three unique, comparable monitoring locations. Zero remains a valid observation while missing values remain null.
+
+TWDB `WellDepth` is retained as feet, consistent with the agency's published groundwater viewer and field definition. Major and minor aquifer extents remain published interpretations. Aquifer footprint plus well construction depth is insufficient for groundwater volume; LandDraft reports storage volume as unavailable until defensible saturated thickness and storage coefficient or specific-yield inputs exist.
+
+Verified live ArcGIS layer metadata on 2026-09-29 for TWDB minor aquifers, TCEQ public-water-system wells, USGS NHD large-scale flowlines, USGS WBD HUC12 subwatersheds, and FEMA NFHL flood-hazard zones. These official references can be added from the Hydrology tab and retain agency attribution. They are visual context and do not silently become interpolation inputs. NRCS Web Soil Survey/SSURGO hydrologic-soil data, TWDB BRACS, and TWDB Groundwater Availability Models remain linked research candidates until a bounded adapter, dataset version, units, and analysis method are implemented. EPA ATTAINS now requires a data.gov API key, so it is not queried anonymously.
+
+Primary workflow and data references for this update:
+
+- [USGS Water Data APIs](https://www.usgs.gov/tools/usgs-water-data-apis) and [National Ground-Water Monitoring Network](https://www.usgs.gov/apps/ngwmn/)
+- [TWDB Groundwater Data](https://www.twdb.texas.gov/groundwater/data/), [TWDB GIS Data](https://www.twdb.texas.gov/mapping/gisdata.asp), [BRACS GIS Data](https://www.twdb.texas.gov/groundwater/bracs/GISdata.asp), and [Groundwater Availability Models](https://www.twdb.texas.gov/groundwater/models/gam/)
+- [NRCS Web Soil Survey](https://www.nrcs.usda.gov/resources/data-and-reports/web-soil-survey)
+- [EPA ATTAINS web-service access](https://www.epa.gov/waterdata/how-access-and-use-attains-web-services)
+
+The Markdown report and JSON snapshot now carry study counts, measurement status/method/limitations, aquifer summaries, and explicit storage-volume unavailability. Derived layers are named `Hydrology analysis · …`; source records remain `Water evidence · …`; official visual context remains `Hydrology reference · …`.
 
 ### Manual QA / release checks
 

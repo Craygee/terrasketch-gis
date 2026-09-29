@@ -138,6 +138,7 @@ export function ProjectRecordsPanel() {
   const [noteTitle, setNoteTitle] = useState("");
   const [noteBody, setNoteBody] = useState("");
   const [notePinned, setNotePinned] = useState(false);
+  const [pendingNoteFiles, setPendingNoteFiles] = useState<File[]>([]);
   const [noteEditor, setNoteEditor] = useState<ProjectNote | null>(null);
   const [layerNoteEditor, setLayerNoteEditor] = useState<LayerNoteRecord | null>(null);
   const [layerNoteEditorTagText, setLayerNoteEditorTagText] = useState("");
@@ -161,28 +162,28 @@ export function ProjectRecordsPanel() {
   const [accountEmailAlias, setAccountEmailAlias] = useState<ProjectEmailAlias | null>(null);
   const [inboundEmails, setInboundEmails] = useState<InboundProjectEmail[]>([]);
   const fileInput = useRef<HTMLInputElement>(null);
+  const noteFileInput = useRef<HTMLInputElement>(null);
   const emailInput = useRef<HTMLInputElement>(null);
   const records = wb.records;
   const allLayerNoteTags = [...new Set(records.layerNotes.flatMap((note) => note.tags))].sort(
     (left, right) => left.localeCompare(right),
   );
   const layerNoteRows = records.layerNotes
-    .flatMap((note) => {
+    .map((note) => {
       const order = wb.displayLayers.findIndex((item) => item.id === note.layerId);
-      const layer = wb.layers[order];
-      if (!layer) return [];
-      const group = wb.groups.find((item) => item.id === layer.groupId);
-      return [{ note, layer, group, order: order + 1 }];
+      const layer = order >= 0 ? wb.displayLayers[order] : undefined;
+      const group = wb.groups.find((item) => item.id === layer?.groupId);
+      return { note, layer, group, order: order >= 0 ? order + 1 : Number.MAX_SAFE_INTEGER };
     })
     .sort((left, right) => left.order - right.order || right.note.createdAt - left.note.createdAt);
   const filteredLayerNoteRows = layerNoteRows.filter(({ note, layer, group }) => {
     const needle = layerNoteQuery.trim().toLowerCase();
     return (
       (layerNoteGroupFilter === "all" || group?.id === layerNoteGroupFilter) &&
-      (layerNoteLayerFilter === "all" || layer.id === layerNoteLayerFilter) &&
+      (layerNoteLayerFilter === "all" || layer?.id === layerNoteLayerFilter) &&
       (layerNoteTagFilter === "all" || note.tags.includes(layerNoteTagFilter)) &&
       (!needle ||
-        `${note.subject} ${note.body} ${note.tags.join(" ")} ${note.author} ${layer.name} ${group?.name ?? ""}`
+        `${note.subject} ${note.body} ${note.tags.join(" ")} ${note.author} ${layer?.name ?? "Detached layer"} ${group?.name ?? ""}`
           .toLowerCase()
           .includes(needle))
     );
@@ -305,7 +306,93 @@ export function ProjectRecordsPanel() {
     );
   }, [eventType, query, records.events]);
 
-  const addNote = () => {
+  const relatedRecordKind = (relatedId?: string) => {
+    if (!relatedId) return null;
+    if (records.notes.some((note) => note.id === relatedId)) return "project-note" as const;
+    if (records.layerNotes.some((note) => note.id === relatedId)) return "layer-note" as const;
+    if (records.documents.some((document) => document.id === relatedId)) return "file" as const;
+    return null;
+  };
+
+  const openRelatedRecord = (relatedId?: string) => {
+    const kind = relatedRecordKind(relatedId);
+    if (!relatedId || !kind) return;
+    if (kind === "project-note") {
+      const note = records.notes.find((item) => item.id === relatedId);
+      if (note) setNoteEditor({ ...note });
+      setTab("notes");
+      return;
+    }
+    if (kind === "layer-note") {
+      const note = records.layerNotes.find((item) => item.id === relatedId);
+      if (note) {
+        setLayerNoteEditor({ ...note });
+        setLayerNoteEditorTagText(layerNoteTagDraft(note.tags));
+        setLayerNoteTimestampOpen(false);
+      }
+      setTab("layer-notes");
+      return;
+    }
+    setTab("files");
+  };
+
+  const restoreActivityNote = (event: ProjectRecords["events"][number]) => {
+    if (!event.relatedId || event.type !== "note" || /^deleted\b/i.test(event.title)) return;
+    const history = records.events
+      .filter((item) => item.type === "note" && item.relatedId === event.relatedId)
+      .sort((left, right) => left.createdAt - right.createdAt);
+    const latest = history.at(-1) ?? event;
+    if (/^deleted\b/i.test(latest.title)) {
+      toast.info("This note was deleted after the recorded activity.");
+      return;
+    }
+    const title = latest.title
+      .replace(/^(added|updated)\s+(map\s+|layer\s+|project\s+)?note\s*:\s*/i, "")
+      .trim();
+    const note: ProjectNote = {
+      id: event.relatedId,
+      title: title && title !== latest.title ? title : `Recovered: ${latest.title}`,
+      body:
+        [...history].reverse().find((item) => item.detail.trim())?.detail ||
+        "Recovered from project activity. The original note body was not present in this project snapshot.",
+      createdAt: history[0]?.createdAt ?? event.createdAt,
+      updatedAt: latest.createdAt,
+      author: latest.actor || "LandDraft user",
+      includeInPacket: true,
+      pinned: false,
+    };
+    update({ notes: [note, ...records.notes] });
+    setNoteEditor(note);
+    setTab("notes");
+    toast.success("Recovered the available note summary from project activity", {
+      description: "Review and save it to keep the restored project note.",
+    });
+  };
+
+  const queueNoteFiles = (files: FileList | null) => {
+    if (!files?.length) return;
+    setPendingNoteFiles((current) => {
+      const next = [...current];
+      for (const file of Array.from(files)) {
+        if (file.size > 50 * 1024 * 1024) {
+          toast.error(`${file.name} is larger than the 50 MB project-file limit`);
+          continue;
+        }
+        if (
+          !next.some(
+            (item) =>
+              item.name === file.name &&
+              item.size === file.size &&
+              item.lastModified === file.lastModified,
+          )
+        )
+          next.push(file);
+      }
+      return next;
+    });
+  };
+
+  const addNote = async () => {
     const body = noteBody.trim();
     if (!body) {
       toast.error("Enter a note");
@@ -323,16 +410,57 @@ export function ProjectRecordsPanel() {
       includeInPacket: true,
       pinned: notePinned,
     };
-    update({ notes: [note, ...records.notes] });
+    const attachments: ProjectDocument[] = [];
+    if (pendingNoteFiles.length && auth.user) {
+      setProjectNoteAttachmentBusyId(id);
+      for (const file of pendingNoteFiles) {
+        if (file.size > 50 * 1024 * 1024) {
+          toast.error(`${file.name} is larger than the 50 MB project-file limit`);
+          continue;
+        }
+        try {
+          attachments.push(
+            await uploadProjectAsset({
+              userId: auth.user.id,
+              projectId: wb.projectId,
+              folderId: "general",
+              fileName: file.name,
+              data: file,
+              source: "upload",
+              uploadedBy: auth.user.name || auth.user.email,
+              projectNoteId: id,
+            }),
+          );
+        } catch (error) {
+          toast.error(`${file.name} could not be attached`, {
+            description: error instanceof Error ? error.message : "Cloud storage is unavailable",
+          });
+        }
+      }
+      setProjectNoteAttachmentBusyId(null);
+    }
+    update({
+      notes: [note, ...records.notes],
+      documents: [...attachments, ...records.documents],
+    });
     wb.addProjectEvent({
       type: "note",
       title: noteTitle.trim() || "Added project note",
       detail: body.slice(0, 180),
       relatedId: id,
     });
+    for (const document of attachments)
+      wb.addProjectEvent({
+        type: "upload",
+        title: `Attached ${document.name} to ${note.title}`,
+        detail: `${formatBytes(document.size)} · Project note attachment`,
+        relatedId: id,
+      });
     setNoteTitle("");
     setNoteBody("");
     setNotePinned(false);
+    setPendingNoteFiles([]);
+    if (noteFileInput.current) noteFileInput.current.value = "";
     setNoteEditor(note);
     toast.success("Note added to this project");
   };
@@ -451,7 +579,7 @@ export function ProjectRecordsPanel() {
       return;
     }
     const layer = wb.displayLayers.find((item) => item.id === layerId);
-    if (!layer) return;
+    const layerName = layer?.name ?? "detached layer note";
     setLayerAttachmentBusyId(layerId);
     try {
       const added: ProjectDocument[] = [];
@@ -479,12 +607,12 @@ export function ProjectRecordsPanel() {
       for (const document of added)
         wb.addProjectEvent({
           type: "upload",
-          title: `Attached ${document.name} to ${layer.name}`,
+          title: `Attached ${document.name} to ${layerName}`,
           detail: `${formatBytes(document.size)} · Layer note attachment`,
           relatedId: layerNoteId,
         });
       toast.success(
-        `${added.length} attachment${added.length === 1 ? "" : "s"} added to ${layer.name}`,
+        `${added.length} attachment${added.length === 1 ? "" : "s"} added to ${layerName}`,
       );
     } catch (error) {
       toast.error("Layer attachment could not be stored", {
@@ -495,7 +623,10 @@ export function ProjectRecordsPanel() {
     }
   };
 
-  const uploadProjectNoteAttachments = async (projectNoteId: string, files: FileList | null) => {
+  const uploadProjectNoteAttachments = async (
+    projectNoteId: string,
+    files: FileList | File[] | null,
+  ) => {
     if (!files?.length) return;
     if (!auth.user) {
       toast.error("Sign in before attaching files to a project note");
@@ -885,9 +1016,72 @@ export function ProjectRecordsPanel() {
                   rows={4}
                   className="mt-1 w-full resize-y rounded-xl border border-border bg-card px-3 py-2 text-sm outline-none focus:border-primary"
                 />
+                <section
+                  onDragOver={(event) => {
+                    event.preventDefault();
+                    event.dataTransfer.dropEffect = "copy";
+                  }}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    queueNoteFiles(event.dataTransfer.files);
+                  }}
+                  className="mt-2 rounded-xl border border-dashed border-primary/40 bg-card/70 p-3"
+                >
+                  <div className="flex items-center gap-2">
+                    <Paperclip className="size-3.5 text-primary" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[10px] font-semibold">Drop files onto this note</p>
+                      <p className="text-[9px] text-muted-foreground">
+                        Files are stored with the note and remain downloadable from it.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => noteFileInput.current?.click()}
+                      className="flex items-center gap-1 rounded-lg bg-secondary px-2 py-1.5 text-[10px] font-semibold hover:bg-accent"
+                    >
+                      <Plus className="size-3" /> Choose files
+                    </button>
+                    <input
+                      ref={noteFileInput}
+                      type="file"
+                      multiple
+                      className="hidden"
+                      onChange={(event) => queueNoteFiles(event.target.files)}
+                    />
+                  </div>
+                  {pendingNoteFiles.length > 0 && (
+                    <div className="mt-2 space-y-1">
+                      {pendingNoteFiles.map((file) => (
+                        <div
+                          key={`${file.name}-${file.size}-${file.lastModified}`}
+                          className="flex items-center gap-2 rounded-lg bg-secondary px-2 py-1.5"
+                        >
+                          <FileText className="size-3.5 shrink-0 text-muted-foreground" />
+                          <span className="min-w-0 flex-1 truncate text-[10px] font-semibold">
+                            {file.name} · {formatBytes(file.size)}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setPendingNoteFiles((current) =>
+                                current.filter((item) => item !== file),
+                              )
+                            }
+                            className="rounded-md p-1 text-destructive hover:bg-destructive/10"
+                            aria-label={`Remove ${file.name} from this note`}
+                          >
+                            <X className="size-3" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </section>
                 <div className="mt-2 flex flex-wrap items-center gap-2">
                   <button
-                    onClick={addNote}
+                    disabled={projectNoteAttachmentBusyId !== null}
+                    onClick={() => void addNote()}
                     className="flex items-center gap-1.5 rounded-xl bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground"
                   >
                     <Plus className="size-3.5" /> Add note
@@ -923,7 +1117,7 @@ export function ProjectRecordsPanel() {
                       const detail =
                         entry.kind === "project"
                           ? `Project note · ${new Date(entry.createdAt).toLocaleString()}`
-                          : `${entry.layer.name} · ${entry.group?.name ?? "Layer group"} · ${new Date(entry.createdAt).toLocaleString()}`;
+                          : `${entry.layer?.name ?? "Detached layer"} · ${entry.group?.name ?? "Original layer unavailable"} · ${new Date(entry.createdAt).toLocaleString()}`;
                       return (
                         <button
                           key={`${entry.kind}-${entry.note.id}`}
@@ -982,7 +1176,7 @@ export function ProjectRecordsPanel() {
                         className="flex w-full items-center gap-2 rounded-xl bg-secondary px-2.5 py-2 text-left hover:bg-accent"
                       >
                         <span className="num flex size-6 shrink-0 items-center justify-center rounded-lg bg-card text-[9px] font-semibold">
-                          {order}
+                          {Number.isFinite(order) ? order : "—"}
                         </span>
                         <span className="min-w-0 flex-1">
                           <span className="block truncate text-[11px] font-semibold">
@@ -990,7 +1184,8 @@ export function ProjectRecordsPanel() {
                             {note.subject}
                           </span>
                           <span className="block truncate text-[9px] text-muted-foreground">
-                            {layer.name} · {group?.name ?? "Layer group"}
+                            {layer?.name ?? "Detached layer"} ·{" "}
+                            {group?.name ?? "Original layer unavailable"}
                             {note.tags.length ? ` · ${layerNoteTagDraft(note.tags)}` : ""}
                           </span>
                         </span>
@@ -1332,7 +1527,7 @@ export function ProjectRecordsPanel() {
                     )}
                   >
                     <span className="num flex size-6 shrink-0 items-center justify-center rounded-lg bg-card text-[9px] font-semibold">
-                      {order}
+                      {Number.isFinite(order) ? order : "—"}
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-[11px] font-semibold">
@@ -1340,7 +1535,8 @@ export function ProjectRecordsPanel() {
                         {note.subject}
                       </span>
                       <span className="block truncate text-[9px] text-muted-foreground">
-                        {layer.name} · {group?.name ?? "Layer group"} ·{" "}
+                        {layer?.name ?? "Detached layer"} ·{" "}
+                        {group?.name ?? "Original layer unavailable"} ·{" "}
                         {new Date(note.createdAt).toLocaleString()}
                       </span>
                       {note.tags.length > 0 && (
@@ -1375,16 +1571,19 @@ export function ProjectRecordsPanel() {
                   const layer = wb.displayLayers.find(
                     (item) => item.id === layerNoteEditor.layerId,
                   );
-                  if (!layer) return null;
-                  const group = wb.groups.find((item) => item.id === layer.groupId);
-                  const attachments = attachmentsForLayerNote(layer.id, layerNoteEditor.id);
+                  const group = wb.groups.find((item) => item.id === layer?.groupId);
+                  const attachments = attachmentsForLayerNote(
+                    layerNoteEditor.layerId,
+                    layerNoteEditor.id,
+                  );
                   return (
                     <section className="rounded-2xl border border-primary/30 bg-primary/5 p-3">
                       <div className="flex items-center gap-2">
                         <div className="min-w-0 flex-1">
                           <h3 className="truncate text-xs font-semibold">Edit layer note</h3>
                           <p className="truncate text-[9px] text-muted-foreground">
-                            {layer.name} · {group?.name ?? "Layer group"}
+                            {layer?.name ?? "Detached layer"} ·{" "}
+                            {group?.name ?? "Original layer unavailable"}
                           </p>
                         </div>
                         <button
@@ -1511,7 +1710,7 @@ export function ProjectRecordsPanel() {
                         onDrop={(event) => {
                           event.preventDefault();
                           void uploadLayerAttachments(
-                            layer.id,
+                            layerNoteEditor.layerId,
                             layerNoteEditor.id,
                             event.dataTransfer.files,
                           );
@@ -1526,7 +1725,7 @@ export function ProjectRecordsPanel() {
                           <label
                             className={cn(
                               "flex cursor-pointer items-center gap-1 rounded-lg bg-secondary px-2 py-1.5 text-[10px] font-semibold hover:bg-accent",
-                              layerAttachmentBusyId === layer.id &&
+                              layerAttachmentBusyId === layerNoteEditor.layerId &&
                                 "pointer-events-none opacity-50",
                             )}
                           >
@@ -1535,10 +1734,10 @@ export function ProjectRecordsPanel() {
                               type="file"
                               multiple
                               className="hidden"
-                              disabled={layerAttachmentBusyId === layer.id}
+                              disabled={layerAttachmentBusyId === layerNoteEditor.layerId}
                               onChange={(event) => {
                                 void uploadLayerAttachments(
-                                  layer.id,
+                                  layerNoteEditor.layerId,
                                   layerNoteEditor.id,
                                   event.target.files,
                                 );
@@ -1628,7 +1827,7 @@ export function ProjectRecordsPanel() {
                         </label>
                         <button
                           type="button"
-                          disabled={layerAttachmentBusyId === layer.id}
+                          disabled={layerAttachmentBusyId === layerNoteEditor.layerId}
                           onClick={() => void deleteLayerNote(layerNoteEditor)}
                           className="ml-auto flex items-center gap-1 rounded-lg px-2 py-1.5 text-[10px] font-semibold text-destructive hover:bg-destructive/10 disabled:opacity-50"
                         >
@@ -1798,25 +1997,54 @@ export function ProjectRecordsPanel() {
                   />
                 </label>
               </div>
-              {filteredEvents.map((event) => (
-                <div key={event.id} className="rounded-2xl border border-border p-3">
-                  <div className="flex items-center gap-2">
-                    <span className="rounded-full bg-secondary px-2 py-0.5 text-[9px] font-semibold uppercase">
-                      {event.type.replace("-", " ")}
-                    </span>
-                    <p className="min-w-0 flex-1 truncate text-xs font-semibold">{event.title}</p>
-                    <time className="text-[9px] text-muted-foreground">
-                      {new Date(event.createdAt).toLocaleString()}
-                    </time>
-                  </div>
-                  {event.detail && (
-                    <p className="mt-1 text-[10px] text-muted-foreground">{event.detail}</p>
-                  )}
-                  <p className="mt-1 text-[9px] text-muted-foreground">
-                    {event.actor} · {event.projectName}
-                  </p>
-                </div>
-              ))}
+              {filteredEvents.map((event) => {
+                const linkedKind = relatedRecordKind(event.relatedId);
+                const recoverableNote =
+                  !linkedKind &&
+                  event.type === "note" &&
+                  Boolean(event.relatedId) &&
+                  !/^deleted\b/i.test(event.title);
+                return (
+                  <button
+                    key={event.id}
+                    type="button"
+                    disabled={!linkedKind && !recoverableNote}
+                    onClick={() =>
+                      linkedKind ? openRelatedRecord(event.relatedId) : restoreActivityNote(event)
+                    }
+                    className={cn(
+                      "w-full rounded-2xl border border-border p-3 text-left",
+                      linkedKind || recoverableNote
+                        ? "hover:border-primary hover:bg-primary/5"
+                        : "cursor-default",
+                    )}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="rounded-full bg-secondary px-2 py-0.5 text-[9px] font-semibold uppercase">
+                        {event.type.replace("-", " ")}
+                      </span>
+                      <p className="min-w-0 flex-1 truncate text-xs font-semibold">{event.title}</p>
+                      <time className="text-[9px] text-muted-foreground">
+                        {new Date(event.createdAt).toLocaleString()}
+                      </time>
+                      {(linkedKind || recoverableNote) && (
+                        <ChevronRight className="size-3.5 text-primary" />
+                      )}
+                    </div>
+                    {event.detail && (
+                      <p className="mt-1 text-[10px] text-muted-foreground">{event.detail}</p>
+                    )}
+                    <p className="mt-1 text-[9px] text-muted-foreground">
+                      {event.actor} · {event.projectName}
+                    </p>
+                    {recoverableNote && (
+                      <p className="mt-2 text-[9px] font-semibold text-amber-700">
+                        Original note object unavailable · open to recover the activity summary
+                      </p>
+                    )}
+                  </button>
+                );
+              })}
               {!filteredEvents.length && (
                 <Empty text="Project events will appear here with timestamps and the person who made the change." />
               )}
