@@ -8,6 +8,7 @@ import {
   ChevronDown,
   ChevronUp,
   CircleDollarSign,
+  Crosshair,
   FlaskConical,
   Gauge,
   Mountain,
@@ -22,6 +23,7 @@ import {
   SlidersHorizontal,
   Sparkles,
   TableProperties,
+  Trash2,
 } from "lucide-react";
 import { LngLatBounds } from "maplibre-gl";
 import { toast } from "sonner";
@@ -39,13 +41,21 @@ import {
   geometryHash,
   pipelineInputHash,
   pipelineUnits,
+  pointAtStation,
   routeFromLineFeature,
 } from "@/lib/pipeline/model";
 import { buildPreliminaryTakeoff, calculatePreliminaryEstimate } from "@/lib/pipeline/estimating";
+import {
+  PIPELINE_COMPONENT_TEMPLATES,
+  createPipelineComponent,
+  reprojectRouteComponents,
+} from "@/lib/pipeline/components";
 import { applyLinearManualElevation, sampleUsgsTerrain } from "@/lib/pipeline/elevation";
 import { interpolateProfile } from "@/lib/pipeline/liquidSolver";
 import { solvePipeline } from "@/lib/pipeline/solver";
 import type {
+  PipelineComponent,
+  PipelineComponentKind,
   PipelineEngineeringState,
   PipelineProfilePoint,
   PipelineRoute,
@@ -101,6 +111,9 @@ export function PipelineWorkspace() {
   const [mobilePanel, setMobilePanel] = useState<MobilePanel>(null);
   const [scrubStationM, setScrubStationM] = useState<number | null>(null);
   const [terrainStatus, setTerrainStatus] = useState<TerrainStatus | null>(null);
+  const [pendingComponentKind, setPendingComponentKind] = useState<PipelineComponentKind | null>(
+    null,
+  );
   const initializedProjectRef = useRef<string | null>(null);
   const terrainAttemptsRef = useRef(new Set<string>());
 
@@ -243,8 +256,14 @@ export function PipelineWorkspace() {
 
   const currentInputHash = useMemo(() => {
     if (!activeRoute || !activeScenario || !activeFluid || !activePipe) return null;
-    return pipelineInputHash(activeRoute, activeScenario, activeFluid, activePipe);
-  }, [activeFluid, activePipe, activeRoute, activeScenario]);
+    return pipelineInputHash(
+      activeRoute,
+      activeScenario,
+      activeFluid,
+      activePipe,
+      pipeline?.components.filter((component) => component.routeId === activeRoute.id) ?? [],
+    );
+  }, [activeFluid, activePipe, activeRoute, activeScenario, pipeline?.components]);
 
   useEffect(() => {
     if (
@@ -274,6 +293,7 @@ export function PipelineWorkspace() {
     updatePipeline((current) => ({
       ...current,
       routes: current.routes.map((route) => (route.id === refreshed.id ? refreshed : route)),
+      components: reprojectRouteComponents(current.components, activeRoute, refreshed),
     }));
   }, [activeRoute, pipeline, updatePipeline, wb.layers]);
 
@@ -317,6 +337,82 @@ export function PipelineWorkspace() {
       map.fitBounds(bounds, { padding: 80, duration: 500, maxZoom: 15 });
     }
   };
+
+  const placePendingComponent = useCallback(
+    (stationM: number) => {
+      if (!activeRoute || !pendingComponentKind) return;
+      updatePipeline((current) => {
+        const movable =
+          pendingComponentKind === "source" || pendingComponentKind === "destination"
+            ? current.components.find(
+                (component) =>
+                  component.routeId === activeRoute.id && component.kind === pendingComponentKind,
+              )
+            : undefined;
+        if (movable) {
+          const boundedStationM = Math.max(0, Math.min(activeRoute.lengthM, stationM));
+          return {
+            ...current,
+            components: current.components.map((component) =>
+              component.id === movable.id
+                ? {
+                    ...component,
+                    stationM: boundedStationM,
+                    coordinate: pointAtStation(activeRoute, boundedStationM),
+                    updatedAt: Date.now(),
+                  }
+                : component,
+            ),
+          };
+        }
+        const sequence =
+          current.components.filter(
+            (component) =>
+              component.routeId === activeRoute.id && component.kind === pendingComponentKind,
+          ).length + 1;
+        return {
+          ...current,
+          components: [
+            ...current.components,
+            createPipelineComponent({
+              route: activeRoute,
+              kind: pendingComponentKind,
+              stationM,
+              sequence,
+            }),
+          ],
+        };
+      });
+      const label =
+        PIPELINE_COMPONENT_TEMPLATES.find((item) => item.kind === pendingComponentKind)?.label ??
+        "Component";
+      toast.success(`${label} placed on the route`);
+      setPendingComponentKind(null);
+    },
+    [activeRoute, pendingComponentKind, updatePipeline],
+  );
+
+  const updateComponent = useCallback(
+    (componentId: string, change: Partial<PipelineComponent>) =>
+      updatePipeline((current) => ({
+        ...current,
+        components: current.components.map((component) =>
+          component.id === componentId
+            ? { ...component, ...change, updatedAt: Date.now() }
+            : component,
+        ),
+      })),
+    [updatePipeline],
+  );
+
+  const removeComponent = useCallback(
+    (componentId: string) =>
+      updatePipeline((current) => ({
+        ...current,
+        components: current.components.filter((component) => component.id !== componentId),
+      })),
+    [updatePipeline],
+  );
 
   const scrubPoint = useMemo(
     () =>
@@ -435,6 +531,7 @@ export function PipelineWorkspace() {
             pipeline={pipeline}
             lineCandidates={lineCandidates}
             activeRoute={activeRoute}
+            pendingComponentKind={pendingComponentKind}
             onChooseCandidate={chooseCandidate}
             onSelectRoute={(routeId) => {
               const scenario = pipeline.scenarios.find((item) => item.routeId === routeId);
@@ -445,6 +542,11 @@ export function PipelineWorkspace() {
               }));
             }}
             onDraw={() => wb.setDrawMode("line")}
+            onBeginComponent={(kind) =>
+              setPendingComponentKind((current) => (current === kind ? null : kind))
+            }
+            onUpdateComponent={updateComponent}
+            onRemoveComponent={removeComponent}
           />
         </aside>
 
@@ -454,9 +556,14 @@ export function PipelineWorkspace() {
             route={activeRoute}
             profile={activeRun?.profile ?? []}
             scenario={activeScenario}
+            components={pipeline.components.filter(
+              (component) => component.routeId === activeRoute?.id,
+            )}
             mode={visualizationMode}
             scrubPoint={scrubPoint}
             onScrub={setScrubStationM}
+            placementActive={pendingComponentKind !== null}
+            onPlaceComponent={placePendingComponent}
           />
           <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-start gap-2 p-3">
             <div className="pointer-events-auto hidden sm:block">
@@ -520,6 +627,7 @@ export function PipelineWorkspace() {
                   pipeline={pipeline}
                   lineCandidates={lineCandidates}
                   activeRoute={activeRoute}
+                  pendingComponentKind={pendingComponentKind}
                   onChooseCandidate={chooseCandidate}
                   onSelectRoute={(routeId) => {
                     const scenario = pipeline.scenarios.find((item) => item.routeId === routeId);
@@ -530,6 +638,11 @@ export function PipelineWorkspace() {
                     }));
                   }}
                   onDraw={() => wb.setDrawMode("line")}
+                  onBeginComponent={(kind) =>
+                    setPendingComponentKind((current) => (current === kind ? null : kind))
+                  }
+                  onUpdateComponent={updateComponent}
+                  onRemoveComponent={removeComponent}
                 />
               ) : mobilePanel === "properties" ? (
                 <PropertiesPanel
@@ -662,16 +775,24 @@ function ModelPanel({
   pipeline,
   lineCandidates,
   activeRoute,
+  pendingComponentKind,
   onChooseCandidate,
   onSelectRoute,
   onDraw,
+  onBeginComponent,
+  onUpdateComponent,
+  onRemoveComponent,
 }: {
   pipeline: PipelineEngineeringState;
   lineCandidates: LineCandidate[];
   activeRoute: PipelineRoute | undefined;
+  pendingComponentKind: PipelineComponentKind | null;
   onChooseCandidate: (key: string) => void;
   onSelectRoute: (id: string) => void;
   onDraw: () => void;
+  onBeginComponent: (kind: PipelineComponentKind) => void;
+  onUpdateComponent: (componentId: string, change: Partial<PipelineComponent>) => void;
+  onRemoveComponent: (componentId: string) => void;
 }) {
   return (
     <div className="space-y-4 p-3">
@@ -732,22 +853,121 @@ function ModelPanel({
           <Boxes className="size-4 text-primary" /> Components
         </div>
         <div className="mt-2 grid grid-cols-2 gap-1">
-          {["Source", "Destination", "Valve", "Pump", "Meter", "Booster"].map((name) => (
+          {PIPELINE_COMPONENT_TEMPLATES.map((template) => (
             <button
-              key={name}
-              disabled
-              className="rounded-lg border border-dashed border-border px-2 py-2 text-[9px] text-muted-foreground disabled:opacity-70"
-              title="Component placement is scheduled for the next validated workspace increment"
+              key={template.kind}
+              type="button"
+              disabled={!activeRoute}
+              onClick={() => onBeginComponent(template.kind)}
+              className={cn(
+                "rounded-lg border px-2 py-2 text-[9px] font-semibold disabled:opacity-50",
+                pendingComponentKind === template.kind
+                  ? "border-primary bg-primary text-primary-foreground"
+                  : "border-border bg-background hover:bg-accent",
+              )}
+              title={
+                activeRoute
+                  ? `Place ${template.label} on the selected route`
+                  : "Select a route first"
+              }
             >
-              {name}
+              {template.label}
             </button>
           ))}
         </div>
         <p className="mt-2 text-[9px] text-muted-foreground">
-          Drag/drop component insertion is architected but intentionally disabled until segment
-          splitting and equipment equations are verified.
+          {pendingComponentKind
+            ? "Tap or click the pipeline to place the selected component. Select it again to cancel."
+            : activeRoute
+              ? "Choose a component, then place it directly on the pipeline."
+              : "Select a route before adding components."}
         </p>
+        {pendingComponentKind && (
+          <div className="mt-2 flex items-center gap-2 rounded-lg bg-primary/10 p-2 text-[9px] font-semibold text-primary">
+            <Crosshair className="size-3.5" /> Placement active
+          </div>
+        )}
+        <div className="mt-3 space-y-2">
+          {pipeline.components
+            .filter((component) => component.routeId === activeRoute?.id)
+            .sort((a, b) => a.stationM - b.stationM)
+            .map((component) => (
+              <ComponentCard
+                key={component.id}
+                component={component}
+                onUpdate={onUpdateComponent}
+                onRemove={onRemoveComponent}
+              />
+            ))}
+        </div>
       </div>
+    </div>
+  );
+}
+
+function ComponentCard({
+  component,
+  onUpdate,
+  onRemove,
+}: {
+  component: PipelineComponent;
+  onUpdate: (componentId: string, change: Partial<PipelineComponent>) => void;
+  onRemove: (componentId: string) => void;
+}) {
+  const hasMinorLoss = component.kind === "block-valve" || component.kind === "flow-meter";
+  const hasPressureBoost =
+    component.kind === "centrifugal-pump" || component.kind === "booster-station";
+  return (
+    <div className="rounded-xl border border-border bg-background p-2">
+      <div className="flex items-start gap-2">
+        <div className="min-w-0 flex-1">
+          <input
+            value={component.name}
+            onChange={(event) => onUpdate(component.id, { name: event.target.value })}
+            className="w-full bg-transparent text-[10px] font-semibold outline-none"
+            aria-label="Component name"
+          />
+          <span className="num text-[9px] text-muted-foreground">
+            Station {formatStation(component.stationM)}
+          </span>
+        </div>
+        <button
+          type="button"
+          onClick={() => onRemove(component.id)}
+          className="rounded-md p-1 text-muted-foreground hover:bg-red-50 hover:text-red-700"
+          aria-label={`Remove ${component.name}`}
+          title={`Remove ${component.name}`}
+        >
+          <Trash2 className="size-3.5" />
+        </button>
+      </div>
+      {hasMinorLoss && (
+        <NumericField
+          label="Minor-loss coefficient"
+          unit="K"
+          value={Number(component.properties["minorLossK"] ?? 0)}
+          onChange={(minorLossK) =>
+            onUpdate(component.id, {
+              properties: { ...component.properties, minorLossK: Math.max(0, minorLossK) },
+            })
+          }
+        />
+      )}
+      {hasPressureBoost && (
+        <NumericField
+          label="Pressure boost"
+          unit="psi"
+          value={Number(component.properties["pressureBoostPa"] ?? 0) * pipelineUnits.paToPsi}
+          onChange={(pressureBoostPsi) =>
+            onUpdate(component.id, {
+              properties: {
+                ...component.properties,
+                pressureBoostPa: Math.max(0, pressureBoostPsi) * pipelineUnits.psiToPa,
+              },
+            })
+          }
+        />
+      )}
     </div>
   );
 }

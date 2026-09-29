@@ -3,6 +3,7 @@ import type {
   PipeSpecification,
   PipelineEngineeringState,
   PipelineFluid,
+  PipelineComponent,
   PipelineRoute,
   PipelineScenario,
 } from "./types.ts";
@@ -258,6 +259,7 @@ export function pipelineInputHash(
   scenario: PipelineScenario,
   fluid: PipelineFluid,
   pipe: PipeSpecification,
+  components: PipelineComponent[] = [],
 ): string {
   const source = JSON.stringify({
     route: route.geometryHash,
@@ -275,6 +277,12 @@ export function pipelineInputHash(
     },
     fluid,
     pipe,
+    components: components.map((component) => ({
+      id: component.id,
+      kind: component.kind,
+      stationM: component.stationM,
+      properties: component.properties,
+    })),
   });
   let hash = 0;
   for (let index = 0; index < source.length; index += 1)
