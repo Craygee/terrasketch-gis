@@ -67,12 +67,19 @@ export default {
         const access = await accessMiddleware(request, {
           enabled: import.meta.env["VITE_LANDDRAFT_ACCESS_ENFORCEMENT"] === "true",
           url: import.meta.env["VITE_SUPABASE_URL"],
-          key: import.meta.env["VITE_SUPABASE_PUBLISHABLE_KEY"] || import.meta.env["VITE_SUPABASE_ANON_KEY"],
+          key:
+            import.meta.env["VITE_SUPABASE_PUBLISHABLE_KEY"] ||
+            import.meta.env["VITE_SUPABASE_ANON_KEY"],
         });
         if (access) return access;
         if (new URL(request.url).pathname === "/api/weather/point") {
           const { handleWeatherPointRequest } = await import("./lib/weather/pointRequest.server");
           const response = await handleWeatherPointRequest(request);
+          if (response) return applyEnvironmentHeaders(response);
+        }
+        if (new URL(request.url).pathname === "/api/pipeline/elevation") {
+          const { handlePipelineElevationRequest } = await import("./lib/pipeline/terrain.server");
+          const response = await handlePipelineElevationRequest(request);
           if (response) return applyEnvironmentHeaders(response);
         }
         const nativeRadar = await handleNativeRadarProxy(request, env);

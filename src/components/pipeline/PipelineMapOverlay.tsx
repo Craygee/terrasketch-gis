@@ -96,6 +96,66 @@ function buildSegments(
   };
 }
 
+function buildVisibleRoute(
+  route: PipelineRoute | undefined,
+  profile: PipelineProfilePoint[],
+  scenario: PipelineScenario | undefined,
+  mode: PipelineVisualizationMode,
+): FeatureCollection<LineString> {
+  if (scenario && profile.length >= 2) return buildSegments(profile, scenario, mode);
+  if (!route || route.coordinates.length < 2) return { type: "FeatureCollection", features: [] };
+  const elevations = route.stations
+    .map((station) => station.pipelineElevationM ?? station.groundElevationM)
+    .filter((value): value is number => value !== undefined);
+  const range: [number, number] = elevations.length
+    ? [Math.min(...elevations), Math.max(...elevations)]
+    : [0, 1];
+  const fallbackScenario = scenario ?? {
+    limits: {
+      maximumVelocityMS: 1,
+      minimumPressureMarginPa: 1,
+      maopPa: 1,
+      minimumPressurePa: 0,
+    },
+  };
+  return {
+    type: "FeatureCollection",
+    features: route.stations.slice(1).map((station, index) => {
+      const start = route.stations[index]!;
+      const elevation = station.pipelineElevationM ?? station.groundElevationM;
+      const color =
+        mode === "elevation" && elevation !== undefined
+          ? resultColor(
+              {
+                stationM: station.stationM,
+                coordinate: station.coordinate,
+                groundElevationM: elevation,
+                pipelineElevationM: elevation,
+                pressurePa: 0,
+                pressureMarginPa: 0,
+                minimumPressureMarginPa: 0,
+                flowM3S: 0,
+                velocityMS: 0,
+                temperatureK: 0,
+                reynoldsNumber: 0,
+                frictionFactor: 0,
+                pressureLossPaPerM: 0,
+                provenance: "provider",
+              },
+              fallbackScenario as PipelineScenario,
+              mode,
+              range,
+            )
+          : "#177542";
+      return {
+        type: "Feature",
+        properties: { color, startStationM: start.stationM, endStationM: station.stationM },
+        geometry: { type: "LineString", coordinates: [start.coordinate, station.coordinate] },
+      };
+    }),
+  };
+}
+
 function emptyPoint(): FeatureCollection<Point> {
   return { type: "FeatureCollection", features: [] };
 }
@@ -193,9 +253,7 @@ export function PipelineMapOverlay({
     const update = () => {
       if (!map.isStyleLoaded()) return;
       ensureLayers(map);
-      const data = scenario
-        ? buildSegments(profile, scenario, mode)
-        : { type: "FeatureCollection", features: [] };
+      const data = buildVisibleRoute(route, profile, scenario, mode);
       (map.getSource(SOURCE_ID) as GeoJSONSource | undefined)?.setData(data as FeatureCollection);
       if (map.getLayer(LINE_ID)) map.moveLayer(LINE_ID);
       if (map.getLayer(HIT_ID)) map.moveLayer(HIT_ID);
@@ -206,7 +264,7 @@ export function PipelineMapOverlay({
     return () => {
       map.off("style.load", update);
     };
-  }, [map, mode, profile, scenario]);
+  }, [map, mode, profile, route, scenario]);
 
   useEffect(() => {
     if (!map || !map.isStyleLoaded() || !map.getSource(SCRUB_SOURCE_ID)) return;

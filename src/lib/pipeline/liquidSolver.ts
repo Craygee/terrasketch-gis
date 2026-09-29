@@ -6,8 +6,8 @@ import type {
   PipelineScenario,
   PipelineSolverRun,
   SolverFinding,
-} from "./types";
-import { pipelineInputHash } from "./model";
+} from "./types.ts";
+import { pipelineInputHash } from "./model.ts";
 
 const GRAVITY_MS2 = 9.80665;
 

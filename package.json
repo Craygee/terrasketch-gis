@@ -11,6 +11,7 @@
     "preview": "vite preview",
     "lint": "eslint .",
     "test:weather": "node --experimental-strip-types --test src/lib/weather/*.test.ts",
+    "test:pipeline": "node --experimental-strip-types --test src/lib/pipeline/*.test.ts",
     "format": "prettier --write ."
   },
   "overrides": {

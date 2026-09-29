@@ -10,12 +10,14 @@ import {
   CircleDollarSign,
   FlaskConical,
   Gauge,
+  Mountain,
   PackageSearch,
   PanelLeft,
   PanelRight,
   Play,
   Plus,
   Route,
+  RefreshCw,
   Save,
   SlidersHorizontal,
   Sparkles,
@@ -40,7 +42,7 @@ import {
   routeFromLineFeature,
 } from "@/lib/pipeline/model";
 import { buildPreliminaryTakeoff, calculatePreliminaryEstimate } from "@/lib/pipeline/estimating";
-import { applyLinearManualElevation } from "@/lib/pipeline/elevation";
+import { applyLinearManualElevation, sampleUsgsTerrain } from "@/lib/pipeline/elevation";
 import { interpolateProfile } from "@/lib/pipeline/liquidSolver";
 import { solvePipeline } from "@/lib/pipeline/solver";
 import type {
@@ -63,6 +65,11 @@ type LineCandidate = {
 };
 
 type MobilePanel = "model" | "properties" | "profile" | null;
+type TerrainStatus = {
+  routeKey: string;
+  state: "loading" | "current" | "partial" | "error";
+  message?: string;
+};
 
 function displayFeatureName(feature: Feature<LineString>, fallback: string) {
   const properties = feature.properties ?? {};
@@ -93,7 +100,9 @@ export function PipelineWorkspace() {
   const { map } = useMapRef();
   const [mobilePanel, setMobilePanel] = useState<MobilePanel>(null);
   const [scrubStationM, setScrubStationM] = useState<number | null>(null);
+  const [terrainStatus, setTerrainStatus] = useState<TerrainStatus | null>(null);
   const initializedProjectRef = useRef<string | null>(null);
+  const terrainAttemptsRef = useRef(new Set<string>());
 
   useEffect(() => {
     if (!wb.projectReady || wb.pipelineEngineering || !wb.canEditProject) return;
@@ -162,6 +171,47 @@ export function PipelineWorkspace() {
     },
     [activeScenario, updatePipeline],
   );
+
+  const refreshTerrain = useCallback(
+    async (route: PipelineRoute, announce = true) => {
+      const routeKey = `${route.id}:${route.geometryHash}`;
+      terrainAttemptsRef.current.add(routeKey);
+      setTerrainStatus({ routeKey, state: "loading" });
+      try {
+        const sampled = await sampleUsgsTerrain(route);
+        const missing = sampled.stations.length - sampled.elevationSamples.length;
+        updatePipeline((current) => ({
+          ...current,
+          routes: current.routes.map((item) =>
+            item.id === sampled.id && item.geometryHash === sampled.geometryHash ? sampled : item,
+          ),
+        }));
+        setTerrainStatus({
+          routeKey,
+          state: missing > 0 ? "partial" : "current",
+          ...(missing > 0 ? { message: `${missing} terrain stations were unavailable.` } : {}),
+        });
+        if (announce)
+          toast.success(
+            missing > 0
+              ? "USGS terrain profile loaded with partial coverage"
+              : "USGS terrain profile loaded",
+          );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Terrain profile unavailable";
+        setTerrainStatus({ routeKey, state: "error", message });
+        if (announce) toast.error(message);
+      }
+    },
+    [updatePipeline],
+  );
+
+  useEffect(() => {
+    if (!activeRoute || activeRoute.elevationSamples.length > 0) return;
+    const routeKey = `${activeRoute.id}:${activeRoute.geometryHash}`;
+    if (terrainAttemptsRef.current.has(routeKey)) return;
+    void refreshTerrain(activeRoute, false);
+  }, [activeRoute, refreshTerrain]);
 
   const runNow = useCallback(() => {
     if (!activeRoute || !activeScenario || !activeFluid || !activePipe) return;
@@ -488,7 +538,10 @@ export function PipelineWorkspace() {
                   scenario={activeScenario}
                   findingCount={findingCount}
                   takeoff={activeTakeoff}
+                  terrainStatus={terrainStatus}
                   onScenarioChange={updateScenario}
+                  onRefreshTerrain={() => activeRoute && void refreshTerrain(activeRoute)}
+                  onShowTopography={() => wb.setBasemapId("topo")}
                   onApplyElevation={(startElevationFt, endElevationFt) => {
                     if (!activeRoute) return;
                     const route = applyLinearManualElevation({
@@ -527,7 +580,10 @@ export function PipelineWorkspace() {
             scenario={activeScenario}
             findingCount={findingCount}
             takeoff={activeTakeoff}
+            terrainStatus={terrainStatus}
             onScenarioChange={updateScenario}
+            onRefreshTerrain={() => activeRoute && void refreshTerrain(activeRoute)}
+            onShowTopography={() => wb.setBasemapId("topo")}
             onApplyElevation={(startElevationFt, endElevationFt) => {
               if (!activeRoute) return;
               const route = applyLinearManualElevation({
@@ -702,7 +758,10 @@ function PropertiesPanel({
   scenario,
   findingCount,
   takeoff,
+  terrainStatus,
   onScenarioChange,
+  onRefreshTerrain,
+  onShowTopography,
   onApplyElevation,
   onPreferenceChange,
 }: {
@@ -711,7 +770,10 @@ function PropertiesPanel({
   scenario: PipelineScenario | undefined;
   findingCount: number;
   takeoff: PipelineEngineeringState["quantitySnapshots"][number] | undefined;
+  terrainStatus: TerrainStatus | null;
   onScenarioChange: (change: Partial<PipelineScenario>) => void;
+  onRefreshTerrain: () => void;
+  onShowTopography: () => void;
   onApplyElevation: (startElevationFt: number, endElevationFt: number) => void;
   onPreferenceChange: (change: Partial<PipelineEngineeringState["preferences"]>) => void;
 }) {
@@ -807,6 +869,12 @@ function PropertiesPanel({
               })
             }
           />
+          <TerrainElevationControl
+            route={route}
+            status={terrainStatus}
+            onRefresh={onRefreshTerrain}
+            onShowTopography={onShowTopography}
+          />
           <ManualElevationControl route={route} onApply={onApplyElevation} />
           <LabeledSelect
             label="Route color"
@@ -823,8 +891,9 @@ function PropertiesPanel({
             ]}
           />
           <p className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-[10px] leading-relaxed text-amber-900">
-            Static head is omitted wherever elevation is missing. Add authoritative DEM/survey data
-            in the next terrain increment before relying on pressure results.
+            USGS 3DEP elevations are interpolated terrain data for screening. The solver now uses
+            the sampled grade for static head and high/low-point pressure, but final design still
+            requires surveyed pipeline elevations and a confirmed vertical datum.
           </p>
         </div>
       ) : panel === "materials" ? (
@@ -1038,6 +1107,20 @@ function StatusCallout({
 }
 
 function ResultLegend({ mode, stale }: { mode: PipelineVisualizationMode; stale: boolean }) {
+  const items =
+    mode === "elevation"
+      ? [
+          ["#0f766e", "lower"],
+          ["#0891b2", "low-mid"],
+          ["#2563eb", "high-mid"],
+          ["#7c3aed", "higher"],
+        ]
+      : [
+          ["#15803d", "comfortable"],
+          ["#d6a10d", "approaching"],
+          ["#ea580c", "near limit"],
+          ["#b91c1c", "exceeds"],
+        ];
   return (
     <div className="pointer-events-none absolute bottom-16 left-3 z-20 rounded-xl border border-border bg-card/95 p-2 text-[9px] shadow-panel lg:bottom-3">
       <div className="font-semibold">
@@ -1045,10 +1128,91 @@ function ResultLegend({ mode, stale }: { mode: PipelineVisualizationMode; stale:
         {stale ? " · stale" : ""}
       </div>
       <div className="mt-1 flex items-center gap-2">
-        <LegendDot color="#15803d" label="comfortable" />
-        <LegendDot color="#d6a10d" label="approaching" />
-        <LegendDot color="#ea580c" label="near limit" />
-        <LegendDot color="#b91c1c" label="exceeds" />
+        {items.map(([color, label]) => (
+          <LegendDot key={label} color={color!} label={label!} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function TerrainElevationControl({
+  route,
+  status,
+  onRefresh,
+  onShowTopography,
+}: {
+  route: PipelineRoute;
+  status: TerrainStatus | null;
+  onRefresh: () => void;
+  onShowTopography: () => void;
+}) {
+  const routeKey = `${route.id}:${route.geometryHash}`;
+  const currentStatus = status?.routeKey === routeKey ? status : null;
+  const elevations = route.stations
+    .map((station) => station.pipelineElevationM ?? station.groundElevationM)
+    .filter((value): value is number => value !== undefined);
+  const demSamples = route.elevationSamples.filter((sample) => sample.sourceKind === "dem");
+  const minimumM = elevations.length ? Math.min(...elevations) : undefined;
+  const maximumM = elevations.length ? Math.max(...elevations) : undefined;
+  const coverage = route.stations.length
+    ? Math.round((elevations.length / route.stations.length) * 100)
+    : 0;
+  return (
+    <div className="rounded-xl border border-border p-3">
+      <div className="flex items-start gap-2">
+        <Mountain className="mt-0.5 size-4 shrink-0 text-primary" />
+        <div className="min-w-0 flex-1">
+          <strong className="block text-[10px]">Terrain-following route profile</strong>
+          <span className="block text-[9px] text-muted-foreground">
+            {demSamples.length
+              ? `USGS 3DEP · ${demSamples.length} samples · ${coverage}% coverage`
+              : currentStatus?.state === "loading"
+                ? "Sampling USGS 3DEP terrain…"
+                : "Terrain has not been sampled"}
+          </span>
+        </div>
+        {currentStatus?.state === "loading" && (
+          <RefreshCw className="size-3.5 animate-spin text-primary" aria-label="Loading terrain" />
+        )}
+      </div>
+      {minimumM !== undefined && maximumM !== undefined && (
+        <dl className="mt-2 grid grid-cols-3 gap-1 rounded-lg bg-secondary p-2 text-center text-[9px]">
+          <div>
+            <dt className="text-muted-foreground">Low</dt>
+            <dd className="num font-semibold">{(minimumM * pipelineUnits.mToFt).toFixed(0)} ft</dd>
+          </div>
+          <div>
+            <dt className="text-muted-foreground">High</dt>
+            <dd className="num font-semibold">{(maximumM * pipelineUnits.mToFt).toFixed(0)} ft</dd>
+          </div>
+          <div>
+            <dt className="text-muted-foreground">Relief</dt>
+            <dd className="num font-semibold">
+              {((maximumM - minimumM) * pipelineUnits.mToFt).toFixed(0)} ft
+            </dd>
+          </div>
+        </dl>
+      )}
+      {currentStatus?.message && (
+        <p className="mt-2 text-[9px] text-amber-800">{currentStatus.message}</p>
+      )}
+      <div className="mt-2 grid grid-cols-2 gap-1">
+        <button
+          type="button"
+          onClick={onRefresh}
+          disabled={currentStatus?.state === "loading"}
+          className="flex items-center justify-center gap-1 rounded-lg bg-primary px-2 py-2 text-[9px] font-semibold text-primary-foreground disabled:opacity-50"
+        >
+          <RefreshCw className="size-3" /> {demSamples.length ? "Refresh terrain" : "Load terrain"}
+        </button>
+        <button
+          type="button"
+          onClick={onShowTopography}
+          className="flex items-center justify-center gap-1 rounded-lg bg-secondary px-2 py-2 text-[9px] font-semibold hover:bg-accent"
+        >
+          <Mountain className="size-3" /> Show topo map
+        </button>
       </div>
     </div>
   );
