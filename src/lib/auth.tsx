@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Apple, Cloud, KeyRound, LockKeyhole, LogIn, MailCheck, UserPlus } from "lucide-react";
 import { LandDraftMark } from "@/components/brand/LandDraftMark";
+import { AccessGate } from "./AccessGate";
 import {
   clearCloudSession,
   cloudAuthRequest,
@@ -321,7 +322,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
       </div>
     );
   if (auth.recoveryMode) return <RecoveryScreen />;
-  return auth.user ? children : <LoginScreen />;
+  return auth.user ? <AccessGate>{children}</AccessGate> : <LoginScreen />;
 }
 
 function RecoveryScreen() {

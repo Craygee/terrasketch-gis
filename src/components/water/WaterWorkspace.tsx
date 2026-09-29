@@ -1,6 +1,15 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { area as turfArea, bbox, bboxPolygon } from "@turf/turf";
-import { ArrowLeft, Droplets, PanelLeft, Play, Save, Download } from "lucide-react";
+import {
+  ArrowLeft,
+  Droplets,
+  PanelLeft,
+  Play,
+  Save,
+  Download,
+  Layers3,
+  ExternalLink,
+} from "lucide-react";
 import { toast } from "sonner";
 import { MapCanvas } from "@/components/gis/MapCanvas";
 import { FeatureDestinationDialog } from "@/components/gis/FeatureDestinationDialog";
@@ -12,13 +21,16 @@ import { importFile } from "@/lib/gis/import";
 import { getCloudSession } from "@/lib/cloud";
 import { analyzeWaterSource } from "@/lib/water/api";
 import { measurementAge, validateWaterArea, waterCsv } from "@/lib/water/model";
+import { buildHydrologyProducts, wellStyle } from "@/lib/water/analysis";
 import { WATER_OPTIONAL_SOURCES, WATER_SOURCES } from "@/lib/water/registry";
+import { defaultStyle } from "@/lib/gis/types";
 import {
   WATER_DISCLAIMER,
   type WaterAnalysis,
   type WaterArea,
   type WaterRecord,
   type WaterSourceResult,
+  type WellColorMode,
 } from "@/lib/water/types";
 
 const PrintComposer = lazy(() =>
@@ -27,6 +39,66 @@ const PrintComposer = lazy(() =>
 
 const button =
   "min-h-11 rounded-lg border px-3 py-2 text-sm hover:bg-secondary disabled:opacity-40";
+const WATER_LAYER_PREFIX = "Water evidence ·";
+const HYDROLOGY_LAYER_PREFIX = "Hydrology analysis ·";
+const HYDROLOGY_REFERENCE_PREFIX = "Hydrology reference ·";
+const isWaterModuleLayer = (name: string) =>
+  name.startsWith(WATER_LAYER_PREFIX) ||
+  name.startsWith(HYDROLOGY_LAYER_PREFIX) ||
+  name.startsWith(HYDROLOGY_REFERENCE_PREFIX);
+
+const HYDROLOGY_REFERENCES = [
+  {
+    id: "tx-minor-aquifers",
+    name: "Texas minor aquifers",
+    agency: "Texas Water Development Board",
+    url: "https://services2.arcgis.com/LYMgRMwHfrWWEg3s/arcgis/rest/services/TWDB_Minor_Aquifers/FeatureServer/0",
+    geometry: "polygon" as const,
+    minZoom: 5,
+    color: "#a16207",
+    sourceUrl: "https://www.twdb.texas.gov/groundwater/aquifer/minor.asp",
+  },
+  {
+    id: "tx-public-water-wells",
+    name: "Texas public water system wells",
+    agency: "Texas Commission on Environmental Quality",
+    url: "https://services2.arcgis.com/LYMgRMwHfrWWEg3s/arcgis/rest/services/TCEQ_Public_Water_System_Wells/FeatureServer/0",
+    geometry: "point" as const,
+    minZoom: 8,
+    color: "#0891b2",
+    sourceUrl: "https://gis-tceq.opendata.arcgis.com/",
+  },
+  {
+    id: "nhd-flowlines",
+    name: "National Hydrography flowlines",
+    agency: "U.S. Geological Survey",
+    url: "https://hydro.nationalmap.gov/arcgis/rest/services/nhd/MapServer/6",
+    geometry: "line" as const,
+    minZoom: 8,
+    color: "#0284c7",
+    sourceUrl: "https://www.usgs.gov/the-national-map-data-delivery/gis-data-download",
+  },
+  {
+    id: "wbd-huc12",
+    name: "Watershed boundaries (HUC12)",
+    agency: "U.S. Geological Survey",
+    url: "https://hydro.nationalmap.gov/arcgis/rest/services/wbd/MapServer/6",
+    geometry: "polygon" as const,
+    minZoom: 7,
+    color: "#4f46e5",
+    sourceUrl: "https://www.usgs.gov/national-hydrography/watershed-boundary-dataset",
+  },
+  {
+    id: "fema-nfhl-zones",
+    name: "FEMA flood hazard zones",
+    agency: "Federal Emergency Management Agency",
+    url: "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/28",
+    geometry: "polygon" as const,
+    minZoom: 8,
+    color: "#0e7490",
+    sourceUrl: "https://www.fema.gov/flood-maps/national-flood-hazard-layer",
+  },
+];
 function download(name: string, body: string, mime: string) {
   const url = URL.createObjectURL(new Blob([body], { type: mime }));
   const a = document.createElement("a");
@@ -40,12 +112,13 @@ export function WaterWorkspace() {
   const wb = useWorkbench();
   const { map, printOpen, setPrintOpen } = useMapRef();
   const [panel, setPanel] = useState(true);
-  const [tab, setTab] = useState<"Overview" | "Records" | "Sources">("Overview");
+  const [tab, setTab] = useState<"Overview" | "Hydrology" | "Records" | "Sources">("Overview");
   const [optional, setOptional] = useState(false);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<WaterSourceResult[] | null>(null);
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<string | null>(null);
+  const [wellColorMode, setWellColorMode] = useState<WellColorMode>("depth");
   const run = useRef(0);
   const upload = useRef<HTMLInputElement>(null);
   useEffect(
@@ -92,7 +165,9 @@ export function WaterWorkspace() {
       setSelected(null);
       wb.setWaterWorkspace({ version: 1, enabled: true, area: valid });
       // Old study outputs cannot remain visible as results for the new area.
-      for (const l of wb.layers.filter((l) => l.name.startsWith("Water evidence ·")))
+      for (const l of wb.layers.filter(
+        (l) => l.name.startsWith(WATER_LAYER_PREFIX) || l.name.startsWith(HYDROLOGY_LAYER_PREFIX),
+      ))
         wb.updateLayer(l.id, { visible: false });
       const boundary = wb.layers.find((l) => l.name === "Water study boundary");
       const data = { type: "FeatureCollection" as const, features: [valid] };
@@ -156,7 +231,9 @@ export function WaterWorkspace() {
     const groupId =
       wb.groups.find((g) => g.name === "Water & Hydrogeology")?.id ??
       wb.addGroup("Water & Hydrogeology");
-    for (const old of wb.layers.filter((l) => l.name.startsWith("Water evidence ·")))
+    for (const old of wb.layers.filter(
+      (l) => l.name.startsWith(WATER_LAYER_PREFIX) || l.name.startsWith(HYDROLOGY_LAYER_PREFIX),
+    ))
       wb.updateLayer(old.id, { visible: false });
     for (const source of WATER_SOURCES.filter((s) => s.enabled)) {
       if (token !== run.current) return;
@@ -198,12 +275,29 @@ export function WaterWorkspace() {
               classification: r.classification,
               evidence: r.evidence,
               aquifer: r.aquifer,
+              wellType: r.kind,
+              depthFt: r.depth,
+              depthClass:
+                r.depth === null
+                  ? "Unknown"
+                  : r.depth < 100
+                    ? "0–99 ft"
+                    : r.depth < 300
+                      ? "100–299 ft"
+                      : r.depth < 600
+                        ? "300–599 ft"
+                        : r.depth < 1_000
+                          ? "600–999 ft"
+                          : "1,000+ ft",
+              parameterCode: r.measurement?.parameterCode,
+              measurementValue: r.measurement?.value,
+              measurementUnit: r.measurement?.unit,
               observationTime: r.observationTime,
               retrievedAt: r.retrievedAt,
             },
           })),
         };
-        const name = `Water evidence · ${source.title}`;
+        const name = `${WATER_LAYER_PREFIX} ${source.title}`;
         const existing = wb.layers.find((l) => l.name === name);
         if (existing) wb.updateLayer(existing.id, { data, visible: true });
         else
@@ -212,28 +306,111 @@ export function WaterWorkspace() {
             groupId,
             data,
             source: { kind: "import", fileName: `${source.id}-public-records.geojson` },
-            style: {
-              fillColor:
-                source.id === "twdb-aquifers"
-                  ? "#b45309"
-                  : source.id === "twdb-wells"
-                    ? "#0d9488"
-                    : "#0284c7",
-              fillOpacity: source.id === "twdb-aquifers" ? 0.15 : 0.8,
-              pointSize: 5,
-            },
+            style:
+              source.id === "twdb-wells"
+                ? wellStyle("depth", result.records)
+                : source.id === "usgs-sites"
+                  ? wellStyle("aquifer", result.records)
+                  : {
+                      ...defaultStyle(source.id === "usgs-measurements" ? 2 : 1),
+                      fillColor:
+                        source.id === "twdb-aquifers"
+                          ? "#b45309"
+                          : source.id === "twdb-minor-aquifers"
+                            ? "#a16207"
+                            : "#0284c7",
+                      fillOpacity:
+                        source.id === "twdb-aquifers" || source.id === "twdb-minor-aquifers"
+                          ? 0.15
+                          : 0.8,
+                      pointSize: 5,
+                    },
           });
       }
     }
+    const hydrology = buildHydrologyProducts(
+      collected.flatMap((result) => result.records),
+      study,
+      wellColorMode,
+    );
+    for (const product of hydrology.layers) {
+      const existing = wb.layers.find((layer) => layer.name === product.name);
+      if (existing)
+        wb.updateLayer(existing.id, {
+          data: product.data,
+          style: product.style,
+          visible: true,
+        });
+      else
+        wb.addLayer({
+          name: product.name,
+          groupId,
+          data: product.data,
+          source: {
+            kind: "derived",
+            sourceLayerId: "water-analysis",
+            query: product.description,
+            cachedAt: new Date().toISOString(),
+          },
+          style: product.style,
+        });
+    }
     const analysis: WaterAnalysis = {
       id: crypto.randomUUID(),
-      version: "water-evidence-1",
+      version: "water-analysis-2",
       area: study,
       createdAt: new Date().toISOString(),
       results: collected,
+      studies: hydrology.studies,
     };
     wb.setWaterWorkspace({ version: 1, enabled: true, area: study, analysis });
     setBusy(false);
+  }
+  function changeWellColorMode(mode: WellColorMode) {
+    setWellColorMode(mode);
+    const layer = wb.layers.find(
+      (item) => item.name === `${HYDROLOGY_LAYER_PREFIX} Wells by attributes`,
+    );
+    if (layer) wb.updateStyle(layer.id, wellStyle(mode, records));
+  }
+  function addHydrologyReference(reference: (typeof HYDROLOGY_REFERENCES)[number]) {
+    const existing = wb.layers.find(
+      (layer) => layer.source.kind === "remote" && layer.source.catalogId === reference.id,
+    );
+    if (existing) {
+      wb.updateLayer(existing.id, { visible: true });
+      wb.setActiveLayer(existing.id);
+      toast.success(`${reference.name} is visible`);
+      return;
+    }
+    const groupId =
+      wb.groups.find((group) => group.name === "Water & Hydrogeology")?.id ??
+      wb.addGroup("Water & Hydrogeology");
+    const style = {
+      ...defaultStyle(reference.geometry === "line" ? 2 : reference.geometry === "point" ? 5 : 3),
+      fillColor: reference.color,
+      strokeColor: reference.color,
+      fillOpacity: reference.geometry === "polygon" ? 0.18 : 0.82,
+      strokeWidth: reference.geometry === "line" ? 2 : 1.5,
+      pointSize: 5,
+    };
+    wb.addLayer({
+      name: `${HYDROLOGY_REFERENCE_PREFIX} ${reference.name}`,
+      groupId,
+      data: { type: "FeatureCollection", features: [] },
+      source: {
+        kind: "remote",
+        url: reference.url,
+        catalogId: reference.id,
+        attribution: reference.agency,
+        requiresViewport: true,
+        minZoom: reference.minZoom,
+      },
+      style,
+    });
+    toast.success(`${reference.name} added`, {
+      description: `Loads for the visible map at zoom ${reference.minZoom} or closer.`,
+    });
   }
   function inspect(r: WaterRecord) {
     setSelected(r.id);
@@ -247,12 +424,39 @@ export function WaterWorkspace() {
   function exportReport() {
     const analysis = state?.analysis;
     if (!analysis) return;
+    const studies = analysis.studies;
     const body = [
       `# LandDraft Water evidence report`,
       `Analysis ${analysis.id} · ${analysis.createdAt} · ${analysis.version}`,
       WATER_DISCLAIMER,
       `## Study area\n${(turfArea(analysis.area) / 4046.8564224).toFixed(1)} acres. Study boundary included in the JSON snapshot.`,
-      "## Executive screening summary\nSource-record inventory only. Water availability, current quality, sustainable yield, aquifer thickness and drilling suitability are NOT established.",
+      studies
+        ? `## Executive screening summary\nLandDraft created hydrogeology screening products from ${studies.wellCount} mapped wells, ${studies.depthSampleCount} usable constructed-depth values, and available comparable groundwater measurements. These products do not establish water availability, current quality, sustainable yield, saturated aquifer thickness, storage volume or drilling suitability.`
+        : "## Executive screening summary\nPublic source records were retrieved. No derived hydrogeology study is stored with this earlier analysis. Water availability, current quality, sustainable yield, aquifer thickness and drilling suitability are not established.",
+      ...(studies
+        ? [
+            `## Well-depth distribution\n${Object.entries(studies.depthBands)
+              .map(([band, count]) => `- ${band}: ${count}`)
+              .join("\n")}`,
+            `## Measurement surfaces\n${studies.interpolation
+              .map(
+                (item) =>
+                  `- ${item.label}: ${item.status.replaceAll("_", " ")}; ${item.sampleCount} comparable measurements${item.minimum === null ? "" : `; range ${item.minimum.toFixed(1)}–${item.maximum?.toFixed(1)} ${item.unit ?? ""}`}. ${item.method}. ${item.limitation}`,
+              )
+              .join("\n")}`,
+            `## Aquifer screening\n${
+              studies.aquifers.length
+                ? studies.aquifers
+                    .map(
+                      (item) =>
+                        `- ${item.name} (${item.extentType.replaceAll("-", " ")}): ${item.wellCount} assigned wells; ${item.depthSampleCount} depth values; ${item.mappedAreaAcres === null ? "mapped footprint unavailable" : `${item.mappedAreaAcres.toFixed(0)} mapped acres`}; storage volume ${item.storageVolumeStatus.toLowerCase()} — ${item.storageVolumeReason}`,
+                    )
+                    .join("\n")
+                : "No source aquifer extent or well-assignment terms were returned."
+            }`,
+            `## Analysis limitations\n${studies.limitations.map((item) => `- ${item}`).join("\n")}`,
+          ]
+        : []),
       ...analysis.results.map(
         (r) =>
           `## ${WATER_SOURCES.find((s) => s.id === r.sourceId)?.title}\n${r.status}: ${r.message}\nRetrieved ${r.retrievedAt}. Rejected records: ${r.rejectedCount}.\nSource: ${r.requestUrl || WATER_SOURCES.find((s) => s.id === r.sourceId)?.url}`,
@@ -331,7 +535,7 @@ export function WaterWorkspace() {
             ) : (
               <>
                 <nav className="mb-4 flex gap-1" aria-label="Water sections">
-                  {(["Overview", "Records", "Sources"] as const).map((t) => (
+                  {(["Overview", "Hydrology", "Records", "Sources"] as const).map((t) => (
                     <button
                       key={t}
                       aria-pressed={tab === t}
@@ -488,6 +692,215 @@ export function WaterWorkspace() {
                     )}
                   </>
                 )}
+                {tab === "Hydrology" && (
+                  <div className="space-y-3">
+                    <section className="rounded-xl border bg-secondary/35 p-3">
+                      <div className="flex items-start gap-2">
+                        <Layers3 className="mt-0.5 size-4 shrink-0 text-sky-700" />
+                        <div>
+                          <h2 className="text-sm font-semibold">Hydrogeology screening studies</h2>
+                          <p className="mt-1 text-[11px] text-muted-foreground">
+                            Derived LandDraft layers remain separate from official source records.
+                            Missing measurements stay unavailable rather than becoming zero.
+                          </p>
+                        </div>
+                      </div>
+                    </section>
+
+                    <label className="block text-xs font-semibold">
+                      Color the combined well layer by
+                      <select
+                        value={wellColorMode}
+                        onChange={(event) =>
+                          changeWellColorMode(event.target.value as WellColorMode)
+                        }
+                        disabled={!records.length}
+                        className="mt-1 min-h-11 w-full rounded-lg border bg-background px-3 py-2 text-sm"
+                      >
+                        <option value="depth">Constructed depth</option>
+                        <option value="aquifer">Source aquifer assignment</option>
+                        <option value="type">Well or site type</option>
+                      </select>
+                    </label>
+
+                    {state?.analysis?.studies ? (
+                      <>
+                        <section className="rounded-xl border p-3 text-xs">
+                          <h3 className="font-semibold">Well depth study</h3>
+                          <p className="mt-1 text-muted-foreground">
+                            {state.analysis.studies.wellCount} mapped wells ·{" "}
+                            {state.analysis.studies.depthSampleCount} usable depth values
+                          </p>
+                          <div className="mt-2 grid grid-cols-2 gap-1">
+                            {Object.entries(state.analysis.studies.depthBands).map(
+                              ([band, count]) => (
+                                <div
+                                  key={band}
+                                  className="flex items-center justify-between rounded-lg bg-secondary px-2 py-1.5"
+                                >
+                                  <span>{band}</span>
+                                  <strong>{count}</strong>
+                                </div>
+                              ),
+                            )}
+                          </div>
+                        </section>
+
+                        <section className="rounded-xl border p-3 text-xs">
+                          <h3 className="font-semibold">Groundwater surfaces and gradients</h3>
+                          <div className="mt-2 space-y-2">
+                            {state.analysis.studies.interpolation.map((studyResult) => (
+                              <div key={studyResult.id} className="rounded-lg bg-secondary p-2">
+                                <div className="flex items-center justify-between gap-2">
+                                  <strong>{studyResult.label}</strong>
+                                  <span
+                                    className={
+                                      studyResult.status === "AVAILABLE"
+                                        ? "font-semibold text-emerald-700"
+                                        : "font-semibold text-amber-700"
+                                    }
+                                  >
+                                    {studyResult.status.replaceAll("_", " ")}
+                                  </span>
+                                </div>
+                                <p className="mt-1">
+                                  {studyResult.sampleCount} comparable measurement
+                                  {studyResult.sampleCount === 1 ? "" : "s"}
+                                  {studyResult.minimum !== null
+                                    ? ` · ${studyResult.minimum.toFixed(1)}–${studyResult.maximum?.toFixed(1)} ${studyResult.unit ?? ""}`
+                                    : ""}
+                                </p>
+                                <p className="mt-1 text-muted-foreground">
+                                  {studyResult.method}. {studyResult.limitation}
+                                </p>
+                              </div>
+                            ))}
+                          </div>
+                        </section>
+
+                        <section className="rounded-xl border p-3 text-xs">
+                          <h3 className="font-semibold">Aquifer evidence by study area</h3>
+                          <p className="mt-1 text-muted-foreground">
+                            Footprint area is clipped to the selected study boundary. Storage volume
+                            remains unavailable without saturated thickness and storage properties.
+                          </p>
+                          <div className="mt-2 max-h-72 space-y-2 overflow-y-auto">
+                            {state.analysis.studies.aquifers.slice(0, 40).map((aquifer) => (
+                              <div key={aquifer.name} className="rounded-lg bg-secondary p-2">
+                                <strong>{aquifer.name}</strong>
+                                <p className="mt-0.5 text-muted-foreground">
+                                  {aquifer.extentType.replaceAll("-", " ")} · {aquifer.wellCount}{" "}
+                                  assigned wells · {aquifer.depthSampleCount} depth samples
+                                </p>
+                                <p>
+                                  {aquifer.mappedAreaAcres === null
+                                    ? "Mapped footprint unavailable"
+                                    : `${aquifer.mappedAreaAcres.toLocaleString(undefined, { maximumFractionDigits: 0 })} mapped acres`}
+                                  {aquifer.medianDepthFt === null
+                                    ? " · depth unavailable"
+                                    : ` · median well depth ${aquifer.medianDepthFt.toFixed(0)} ft`}
+                                </p>
+                                <p className="mt-1 text-[10px] font-semibold text-amber-700">
+                                  Storage volume: unavailable
+                                </p>
+                              </div>
+                            ))}
+                            {!state.analysis.studies.aquifers.length && (
+                              <p className="text-muted-foreground">
+                                No aquifer extent or well-assignment terms were returned.
+                              </p>
+                            )}
+                          </div>
+                        </section>
+                      </>
+                    ) : (
+                      <p className="rounded-xl border p-3 text-sm text-muted-foreground">
+                        Run Analyze Water to build the well, aquifer, density, and measurement
+                        studies for this boundary.
+                      </p>
+                    )}
+
+                    <section className="rounded-xl border p-3 text-xs">
+                      <h3 className="font-semibold">Public hydrology reference layers</h3>
+                      <p className="mt-1 text-muted-foreground">
+                        Add official visual context. These layers do not become groundwater
+                        measurements or inputs to the interpolation automatically.
+                      </p>
+                      <div className="mt-2 space-y-2">
+                        {HYDROLOGY_REFERENCES.map((reference) => {
+                          const added = wb.layers.some(
+                            (layer) =>
+                              layer.source.kind === "remote" &&
+                              layer.source.catalogId === reference.id,
+                          );
+                          return (
+                            <div
+                              key={reference.id}
+                              className="flex items-center gap-2 rounded-lg bg-secondary p-2"
+                            >
+                              <div className="min-w-0 flex-1">
+                                <strong className="block truncate">{reference.name}</strong>
+                                <span className="text-[10px] text-muted-foreground">
+                                  {reference.agency} · zoom {reference.minZoom}+
+                                </span>
+                              </div>
+                              <a
+                                href={reference.sourceUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                aria-label={`Open source for ${reference.name}`}
+                                className="rounded-lg p-2 hover:bg-accent"
+                              >
+                                <ExternalLink className="size-3.5" />
+                              </a>
+                              <button
+                                type="button"
+                                className={button}
+                                onClick={() => addHydrologyReference(reference)}
+                              >
+                                {added ? "Show" : "Add"}
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </section>
+
+                    {wb.layers.some(
+                      (layer) =>
+                        layer.name.startsWith(HYDROLOGY_LAYER_PREFIX) ||
+                        layer.name.startsWith(HYDROLOGY_REFERENCE_PREFIX),
+                    ) && (
+                      <section className="rounded-xl border p-3 text-xs">
+                        <h3 className="font-semibold">Hydrology layers</h3>
+                        <div className="mt-2 space-y-1">
+                          {wb.layers
+                            .filter(
+                              (layer) =>
+                                layer.name.startsWith(HYDROLOGY_LAYER_PREFIX) ||
+                                layer.name.startsWith(HYDROLOGY_REFERENCE_PREFIX),
+                            )
+                            .map((layer) => (
+                              <label
+                                key={layer.id}
+                                className="flex min-h-11 items-center gap-2 rounded-lg bg-secondary px-2"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={layer.visible}
+                                  onChange={() => wb.toggleVisible(layer.id)}
+                                />
+                                <span className="min-w-0 flex-1 truncate">{layer.name}</span>
+                                <span className="text-[9px] text-muted-foreground">
+                                  {layer.data.features.length.toLocaleString()}
+                                </span>
+                              </label>
+                            ))}
+                        </div>
+                      </section>
+                    )}
+                  </div>
+                )}
                 {tab === "Records" && (
                   <>
                     <label className="text-xs">
@@ -574,17 +987,13 @@ export function WaterWorkspace() {
                       ))}
                   </>
                 )}
-                {wb.layers.some(
-                  (l) => l.name.startsWith("Water evidence ·") && l.data.features.length,
-                ) && (
+                {wb.layers.some((l) => isWaterModuleLayer(l.name) && l.data.features.length) && (
                   <details className="mt-3">
                     <summary className="min-h-11 cursor-pointer py-2 text-sm">
                       Map layers & legends
                     </summary>
                     {wb.layers
-                      .filter(
-                        (l) => l.name.startsWith("Water evidence ·") && l.data.features.length,
-                      )
+                      .filter((l) => isWaterModuleLayer(l.name) && l.data.features.length)
                       .map((l) => (
                         <div key={l.id} className="mb-2 rounded-lg border p-2 text-xs">
                           <label className="flex min-h-11 items-center gap-2">
@@ -623,8 +1032,9 @@ export function WaterWorkspace() {
                   </summary>
                   <p>{WATER_DISCLAIMER}</p>
                   <p className="my-2">
-                    Project enablement is a preference, not a subscription grant. Advanced analytics
-                    and Deep Research are not active in this preview.
+                    Project enablement is a preference, not a subscription grant. Derived screening
+                    layers are identified separately from official source data and retain their
+                    stated limitations.
                   </p>
                   <button
                     disabled={!wb.canEditProject}
@@ -633,9 +1043,7 @@ export function WaterWorkspace() {
                       run.current++;
                       setBusy(false);
                       wb.setWaterWorkspace({ ...state, enabled: false });
-                      for (const l of wb.layers.filter((l) =>
-                        l.name.startsWith("Water evidence ·"),
-                      ))
+                      for (const l of wb.layers.filter((l) => isWaterModuleLayer(l.name)))
                         wb.updateLayer(l.id, { visible: false });
                     }}
                   >

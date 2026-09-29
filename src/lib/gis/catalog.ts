@@ -36,20 +36,22 @@ const live = { connection: "live" as const, updateCadence: "Publisher managed" }
 export const catalog: CatalogEntry[] = [
   tx({
     id: "tx-parcels",
-    name: "Texas Land Parcels by County",
+    name: "Texas Land Parcels — Statewide",
     agency: "Texas Geographic Information Office",
     category: "Property",
     geometry: "polygon",
-    ...live,
+    connection: "refresh",
+    updateCadence: "County editions vary; generally annual",
     description:
-      "County appraisal parcel boundaries with owner, situs, legal area, land/improvement/market value and tax-year fields where supplied.",
-    url: "https://services1.arcgis.com/1mtXwieMId59thmg/ArcGIS/rest/services/2019_Texas_Parcels_StratMap/FeatureServer/0",
+      "Statewide TxGIO 2025 archive, stored by LandDraft and queried by map area. 253 counties; Donley is absent from this release. Original county dates and appraisal attributes are preserved. Not a survey.",
+    url: "https://landdraft-public-parcels.tight-sky-0ae1.workers.dev/texas/current.json",
     sourcePage: "https://gio.texas.gov/stratmap/land-parcels.html",
     keywords: ["parcel", "property", "tax", "owner", "appraisal", "cad"],
     requiresViewport: true,
     minZoom: 12,
     countyField: "county",
-    license: "TxGIO / contributing appraisal districts",
+    license:
+      "CC0-1.0 — TxGIO collection license. Contributing appraisal districts; provided AS-IS, not authoritative cadastral surveys.",
   }),
   tx({
     id: "txdot-roadways",

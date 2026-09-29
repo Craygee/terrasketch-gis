@@ -1,4 +1,4 @@
-const env = import.meta.env as Record<string, string | undefined>;
+const env = (import.meta.env ?? {}) as Record<string, string | undefined>;
 
 const cloudUrl = env["VITE_SUPABASE_URL"]?.trim().replace(/\/$/, "") ?? "";
 const publishableKey =

@@ -1,5 +1,30 @@
 import type { Position } from "geojson";
-import type { ElevationSample, PipelineRoute } from "./types";
+import { pointAtStation } from "./model.ts";
+import type { ElevationSample, PipelineRoute, PipelineStation } from "./types.ts";
+
+export const USGS_3DEP_PROVIDER_ID = "usgs-3dep";
+export const USGS_TERRAIN_TARGET_SPACING_M = 100;
+export const USGS_TERRAIN_MAX_SAMPLES = 96;
+
+export interface TerrainSampleRequestPoint {
+  stationM: number;
+  longitude: number;
+  latitude: number;
+}
+
+export interface TerrainSampleResponsePoint extends TerrainSampleRequestPoint {
+  elevationM: number | null;
+  resolutionM?: number;
+}
+
+export interface TerrainSampleResponse {
+  providerId: typeof USGS_3DEP_PROVIDER_ID;
+  source: string;
+  verticalDatum: string;
+  retrievedAt: number;
+  points: TerrainSampleResponsePoint[];
+  failedCount: number;
+}
 
 export interface ElevationProviderDescriptor {
   id: string;
@@ -41,12 +66,12 @@ export const elevationProviderCatalog: ElevationProviderDescriptor[] = [
     sourceUrl: "project://manual-survey",
   },
   {
-    id: "usgs-3dep",
-    name: "USGS 3DEP",
+    id: USGS_3DEP_PROVIDER_ID,
+    name: "USGS 3DEP terrain profile",
     authority: "U.S. Geological Survey",
-    availability: "planned",
+    availability: "available",
     potentialCost: "free-public-service",
-    sourceUrl: "https://www.usgs.gov/the-national-map-data-delivery/gis-data-download",
+    sourceUrl: "https://apps.nationalmap.gov/epqs/",
   },
   {
     id: "esri-elevation",
@@ -57,6 +82,83 @@ export const elevationProviderCatalog: ElevationProviderDescriptor[] = [
     sourceUrl: "https://developers.arcgis.com/rest/elevation/index.html",
   },
 ];
+
+export function terrainStationsForRoute(
+  route: PipelineRoute,
+  targetSpacingM = USGS_TERRAIN_TARGET_SPACING_M,
+  maximumSamples = USGS_TERRAIN_MAX_SAMPLES,
+): PipelineStation[] {
+  if (route.lengthM <= 0 || route.coordinates.length < 2) return route.stations;
+  const boundedMaximum = Math.max(2, Math.floor(maximumSamples));
+  const spacingM = Math.max(1, targetSpacingM, route.lengthM / (boundedMaximum - 1));
+  const segmentCount = Math.max(1, Math.ceil(route.lengthM / spacingM));
+  return Array.from({ length: segmentCount + 1 }, (_, index) => {
+    const stationM =
+      index === segmentCount ? route.lengthM : (route.lengthM * index) / segmentCount;
+    return { stationM, coordinate: pointAtStation(route, stationM) };
+  });
+}
+
+export async function sampleUsgsTerrain(
+  route: PipelineRoute,
+  signal?: AbortSignal,
+): Promise<PipelineRoute> {
+  const stations = terrainStationsForRoute(route);
+  const response = await fetch("/api/pipeline/elevation", {
+    method: "POST",
+    credentials: "same-origin",
+    cache: "no-store",
+    ...(signal ? { signal } : {}),
+    headers: { "content-type": "application/json", accept: "application/json" },
+    body: JSON.stringify({
+      points: stations.map((station) => ({
+        stationM: station.stationM,
+        longitude: Number(station.coordinate[0]),
+        latitude: Number(station.coordinate[1]),
+      })),
+    }),
+  });
+  if (!response.ok) throw new Error(`USGS terrain request failed (${response.status})`);
+  const result = (await response.json()) as TerrainSampleResponse;
+  if (!Array.isArray(result.points) || result.points.length !== stations.length)
+    throw new Error("USGS terrain response did not match the route profile");
+
+  const now = result.retrievedAt || Date.now();
+  const samples: ElevationSample[] = [];
+  const sampledStations = stations.map((station, index): PipelineStation => {
+    const point = result.points[index];
+    if (!point || point.elevationM === null || !Number.isFinite(point.elevationM)) return station;
+    const sample: ElevationSample = {
+      id: `usgs-3dep-${route.id}-${index}-${now}`,
+      stationM: station.stationM,
+      coordinate: [...station.coordinate] as Position,
+      groundElevationM: point.elevationM,
+      source: result.source,
+      sourceKind: "dem",
+      ...(point.resolutionM === undefined ? {} : { resolutionM: point.resolutionM }),
+      verticalDatum: result.verticalDatum,
+      capturedAt: now,
+      quality: point.resolutionM !== undefined && point.resolutionM <= 10 ? "high" : "medium",
+      provenance: "provider",
+    };
+    samples.push(sample);
+    return {
+      ...station,
+      groundElevationM: sample.groundElevationM,
+      // This preliminary model follows grade. Future burial-depth tools may offset the pipeline
+      // profile from ground while retaining these terrain elevations.
+      pipelineElevationM: sample.groundElevationM,
+      elevationSampleId: sample.id,
+    };
+  });
+  if (samples.length < 2) throw new Error("USGS 3DEP returned insufficient terrain coverage");
+  return {
+    ...route,
+    stations: sampledStations,
+    elevationSamples: samples,
+    updatedAt: Date.now(),
+  };
+}
 
 export function applyLinearManualElevation(input: {
   route: PipelineRoute;

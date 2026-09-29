@@ -20,6 +20,7 @@ import {
   Waypoints,
   CloudSun,
   Droplets,
+  LayoutGrid,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -70,6 +71,7 @@ export function TopBar({
   const [showShare, setShowShare] = useState(false);
   const [showDataMenu, setShowDataMenu] = useState(false);
   const [showFileMenu, setShowFileMenu] = useState(false);
+  const [showModulesMenu, setShowModulesMenu] = useState(false);
 
   const save = async () => {
     await wb.saveProject();
@@ -79,6 +81,7 @@ export function TopBar({
   const closeCompactMenus = () => {
     setShowDataMenu(false);
     setShowFileMenu(false);
+    setShowModulesMenu(false);
   };
 
   return (
@@ -163,26 +166,22 @@ export function TopBar({
             tourId="top-public-data"
           />
         )}
-        <BarBtn
-          icon={<Droplets className="size-4" />}
-          label="Water"
-          help="Open optional Water & Hydrogeology"
-          onClick={() => window.location.assign("/water")}
+        <MenuBarButton
+          icon={<LayoutGrid className="size-4" />}
+          label="Modules"
+          help="Open Water, Weather, or Pipeline"
+          open={showModulesMenu}
+          tourId="top-modules"
+          onClick={() => {
+            setShowModulesMenu((value) => !value);
+            setShowDataMenu(false);
+            setShowFileMenu(false);
+            setShowProjects(false);
+            setShowExport(false);
+            setShowShare(false);
+            setShowAbout(false);
+          }}
         />
-        <BarBtn
-          icon={<CloudSun className="size-4" />}
-          label="Weather"
-          help="Open the optional Weather & Meteorology workspace"
-          onClick={() => window.location.assign("/weather")}
-        />
-        {wb.canEditProject && (
-          <BarBtn
-            icon={<Waypoints className="size-4" />}
-            label="Pipeline"
-            help="Open the optional Pipeline Engineering & Estimating workspace"
-            onClick={() => window.location.assign("/pipeline")}
-          />
-        )}
         {wb.canEditProject && (
           <BarBtn
             icon={<Beaker className="size-4" />}
@@ -285,6 +284,22 @@ export function TopBar({
           tourId="top-ai"
         />
         <MenuBarButton
+          icon={<LayoutGrid className="size-4" />}
+          label="Modules"
+          help="Open Water, Weather, or Pipeline"
+          open={showModulesMenu}
+          tourId="compact-modules-menu"
+          onClick={() => {
+            setShowModulesMenu((value) => !value);
+            setShowDataMenu(false);
+            setShowFileMenu(false);
+            setShowProjects(false);
+            setShowExport(false);
+            setShowShare(false);
+            setShowAbout(false);
+          }}
+        />
+        <MenuBarButton
           icon={<Database className="size-4" />}
           label="Data"
           help="Public data, analysis, and attribute tables"
@@ -292,6 +307,7 @@ export function TopBar({
           tourId="compact-data-menu"
           onClick={() => {
             setShowDataMenu((value) => !value);
+            setShowModulesMenu(false);
             setShowFileMenu(false);
             setShowProjects(false);
             setShowExport(false);
@@ -307,6 +323,7 @@ export function TopBar({
           tourId="compact-file-menu"
           onClick={() => {
             setShowFileMenu((value) => !value);
+            setShowModulesMenu(false);
             setShowDataMenu(false);
             setShowProjects(false);
             setShowExport(false);
@@ -376,26 +393,6 @@ export function TopBar({
               }}
             />
           )}
-          <MenuAction
-            icon={<Droplets className="size-4" />}
-            label="Water & Hydrogeology"
-            help="Explore aquifers, wells, water observations, and sources"
-            onClick={() => window.location.assign("/water")}
-          />
-          <MenuAction
-            icon={<CloudSun className="size-4" />}
-            label="Weather & meteorology"
-            help="Radar, warnings, forecasts, weather inspection, and professional layers"
-            onClick={() => window.location.assign("/weather")}
-          />
-          {wb.canEditProject && (
-            <MenuAction
-              icon={<Waypoints className="size-4" />}
-              label="Pipeline engineering"
-              help="Open routing, hydraulic screening, quantities, and estimating"
-              onClick={() => window.location.assign("/pipeline")}
-            />
-          )}
           {wb.canEditProject && (
             <MenuAction
               icon={<Beaker className="size-4" />}
@@ -418,6 +415,37 @@ export function TopBar({
               setTableOpen(!tableOpen);
             }}
           />
+        </div>
+      )}
+
+      {showModulesMenu && (
+        <div
+          role="menu"
+          className="float-surface absolute right-2 top-14 max-h-[calc(100dvh-4rem)] w-72 overflow-y-auto rounded-2xl p-2"
+        >
+          <div className="px-2 pb-1 pt-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            LandDraft modules
+          </div>
+          <MenuAction
+            icon={<Droplets className="size-4" />}
+            label="Water & Hydrogeology"
+            help="Aquifers, wells, hydrology studies, water observations, and sources"
+            onClick={() => window.location.assign("/water")}
+          />
+          <MenuAction
+            icon={<CloudSun className="size-4" />}
+            label="Weather & Meteorology"
+            help="Radar, warnings, forecasts, inspection, and professional layers"
+            onClick={() => window.location.assign("/weather")}
+          />
+          {wb.canEditProject && (
+            <MenuAction
+              icon={<Waypoints className="size-4" />}
+              label="Pipeline Engineering"
+              help="Terrain-aware routing, hydraulic screening, quantities, and estimating"
+              onClick={() => window.location.assign("/pipeline")}
+            />
+          )}
         </div>
       )}
 

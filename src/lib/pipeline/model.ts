@@ -3,9 +3,10 @@ import type {
   PipeSpecification,
   PipelineEngineeringState,
   PipelineFluid,
+  PipelineComponent,
   PipelineRoute,
   PipelineScenario,
-} from "./types";
+} from "./types.ts";
 
 const uid = () => Math.random().toString(36).slice(2, 10);
 const INCH_TO_M = 0.0254;
@@ -82,12 +83,79 @@ function steelPipe(
   };
 }
 
+const HDPE_IPS_OUTSIDE_DIAMETERS_IN: Array<[nominalSizeIn: number, outsideDiameterIn: number]> = [
+  [4, 4.5],
+  [6, 6.625],
+  [8, 8.625],
+  [10, 10.75],
+  [12, 12.75],
+  [14, 14],
+  [16, 16],
+  [18, 18],
+  [20, 20],
+  [24, 24],
+];
+
+export const HDPE_DIMENSION_RATIOS = [7, 9, 11, 13.5, 17, 21, 26] as const;
+
+function hdpePipe(
+  nominalSizeIn: number,
+  outsideDiameterIn: number,
+  dimensionRatio: number,
+): PipeSpecification {
+  const wallThicknessIn = outsideDiameterIn / dimensionRatio;
+  return {
+    id: `pipe-hdpe-ips-${nominalSizeIn}-dr-${String(dimensionRatio).replace(".", "-")}`,
+    name: `${nominalSizeIn}" IPS HDPE PE4710 · SDR/DR ${dimensionRatio}`,
+    serviceFamilies: ["liquid"],
+    nominalSizeIn,
+    outsideDiameterM: outsideDiameterIn * INCH_TO_M,
+    wallThicknessM: wallThicknessIn * INCH_TO_M,
+    insideDiameterM: (outsideDiameterIn - 2 * wallThicknessIn) * INCH_TO_M,
+    sizingSystem: "IPS",
+    dimensionRatio,
+    material: "hdpe",
+    grade: "PE4710 — confirm resin and application",
+    manufacturingSpecification:
+      "ASTM F714 / AWWA C906 dimensional screening — edition and application must be confirmed",
+    roughnessM: 0.0000015,
+    corrosionAllowanceM: 0,
+    jointType: "butt-fused — confirm",
+    joiningMethod: "heat fusion — confirm procedure and operator qualification",
+    source:
+      "LandDraft PE4710 IPS screening geometry; wall = OD / DR. Confirm manufacturer dimensions, pressure class, surge, temperature and installation loads.",
+  };
+}
+
+const HDPE_PIPE_SPECIFICATIONS = HDPE_IPS_OUTSIDE_DIAMETERS_IN.flatMap(
+  ([nominalSizeIn, outsideDiameterIn]) =>
+    HDPE_DIMENSION_RATIOS.map((dimensionRatio) =>
+      hdpePipe(nominalSizeIn, outsideDiameterIn, dimensionRatio),
+    ),
+);
+
 export const SYSTEM_PIPE_SPECIFICATIONS: PipeSpecification[] = [
   steelPipe("pipe-steel-8", 8, 8.625, 0.322),
   steelPipe("pipe-steel-12", 12, 12.75, 0.375),
   steelPipe("pipe-steel-16", 16, 16, 0.5),
   steelPipe("pipe-steel-24", 24, 24, 0.5),
+  ...HDPE_PIPE_SPECIFICATIONS,
 ];
+
+export function normalizePipelineEngineeringState(
+  state: PipelineEngineeringState,
+): PipelineEngineeringState {
+  const existingIds = new Set(state.pipeSpecifications.map((pipe) => pipe.id));
+  const missingSystemPipes = SYSTEM_PIPE_SPECIFICATIONS.filter((pipe) => !existingIds.has(pipe.id));
+  if (missingSystemPipes.length === 0) return state;
+  return {
+    ...state,
+    pipeSpecifications: [
+      ...state.pipeSpecifications,
+      ...missingSystemPipes.map((pipe) => ({ ...pipe })),
+    ],
+  };
+}
 
 export function emptyPipelineEngineeringState(): PipelineEngineeringState {
   const now = Date.now();
@@ -179,22 +247,25 @@ export function routeFromLineFeature(input: {
   previous?: PipelineRoute;
 }): PipelineRoute {
   const coordinates = input.feature.geometry.coordinates.map((coordinate) => [...coordinate]);
+  const nextGeometryHash = geometryHash(coordinates);
+  const geometryUnchanged = input.previous?.geometryHash === nextGeometryHash;
+  if (input.previous && geometryUnchanged) {
+    return {
+      ...input.previous,
+      name: input.previous.name,
+      sourceLayerId: input.layerId,
+      sourceFeatureIndex: input.featureIndex,
+      ...(input.feature.id === undefined ? {} : { sourceFeatureId: String(input.feature.id) }),
+      coordinates,
+      updatedAt: Date.now(),
+    };
+  }
   let stationM = 0;
   const stations = coordinates.map((coordinate, index) => {
     if (index > 0) stationM += coordinateDistanceM(coordinates[index - 1]!, coordinate);
-    const prior = input.previous?.stations.find(
-      (sample) => Math.abs(sample.stationM - stationM) < 0.01,
-    );
     return {
       stationM,
       coordinate,
-      ...(prior?.groundElevationM !== undefined
-        ? { groundElevationM: prior.groundElevationM }
-        : {}),
-      ...(prior?.pipelineElevationM !== undefined
-        ? { pipelineElevationM: prior.pipelineElevationM }
-        : {}),
-      ...(prior?.elevationSampleId ? { elevationSampleId: prior.elevationSampleId } : {}),
     };
   });
   const properties = input.feature.properties ?? {};
@@ -212,11 +283,14 @@ export function routeFromLineFeature(input: {
     sourceLayerId: input.layerId,
     sourceFeatureIndex: input.featureIndex,
     ...(input.feature.id === undefined ? {} : { sourceFeatureId: String(input.feature.id) }),
-    geometryHash: geometryHash(coordinates),
+    geometryHash: nextGeometryHash,
     geometryRevision: (input.previous?.geometryRevision ?? 0) + 1,
     coordinates,
     stations,
-    elevationSamples: input.previous?.elevationSamples ?? [],
+    // Elevation samples are geometry-specific. Keeping them after an edit can put an old hill or
+    // valley at the wrong station and corrupt the static-head result. The workspace resamples the
+    // edited route automatically.
+    elevationSamples: [],
     lengthM: stationM,
     sourceNodeName: input.previous?.sourceNodeName ?? "Source",
     destinationNodeName: input.previous?.destinationNodeName ?? "Destination",
@@ -252,8 +326,10 @@ export function pipelineInputHash(
   scenario: PipelineScenario,
   fluid: PipelineFluid,
   pipe: PipeSpecification,
+  components: PipelineComponent[] = [],
 ): string {
   const source = JSON.stringify({
+    solverModelVersion: "liquid-steady-v2-elevation-accounting",
     route: route.geometryHash,
     elevations: route.stations.map(
       (station) => station.pipelineElevationM ?? station.groundElevationM,
@@ -269,6 +345,12 @@ export function pipelineInputHash(
     },
     fluid,
     pipe,
+    components: components.map((component) => ({
+      id: component.id,
+      kind: component.kind,
+      stationM: component.stationM,
+      properties: component.properties,
+    })),
   });
   let hash = 0;
   for (let index = 0; index < source.length; index += 1)

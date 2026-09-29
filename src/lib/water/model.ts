@@ -60,7 +60,8 @@ export function normalizeWaterRecord(
   retrievedAt: string,
 ): WaterRecord | null {
   if (sourceId === "usgs-measurements") return normalizeMeasurement(value, retrievedAt);
-  if (sourceId === "twdb-aquifers") return normalizeAquifer(value, retrievedAt);
+  if (sourceId === "twdb-aquifers" || sourceId === "twdb-minor-aquifers")
+    return normalizeAquifer(sourceId, value, retrievedAt);
   const f = value as {
     id?: unknown;
     properties?: Record<string, unknown>;
@@ -94,9 +95,8 @@ export function normalizeWaterRecord(
   if (!text(p["vertical_datum"])) flags.push("Vertical datum unknown; do not combine elevations");
   if (p["WaterQualityAvailable"] === "Y")
     flags.push("Quality records available at source; chemistry not retrieved");
-  // TWDB GIS field metadata does not specify depth units: retain raw value without assuming feet.
   if (!usgs && rawDepth !== null)
-    flags.push("Depth unit unverified; original WellDepth retained without conversion");
+    flags.push("TWDB Groundwater Data Viewer identifies WellDepth as feet; source value retained");
   return {
     id: `${sourceId}:${id}`,
     sourceId,
@@ -110,8 +110,8 @@ export function normalizeWaterRecord(
     county: text(usgs ? p["county_name"] : p["CountyName"]),
     state: usgs ? text(p["state_name"]) : "Texas",
     huc: text(p["hydrologic_unit_code"]),
-    depth: usgs && rawDepth !== null && rawDepth >= 0 ? rawDepth : null,
-    depthUnit: usgs && rawDepth !== null && rawDepth >= 0 ? "ft" : null,
+    depth: rawDepth !== null && rawDepth >= 0 ? rawDepth : null,
+    depthUnit: rawDepth !== null && rawDepth >= 0 ? "ft" : null,
     verticalDatum: text(p["vertical_datum"]),
     locationAccuracy: text(p["horizontal_positional_accuracy"]),
     observationTime: null,
@@ -199,11 +199,15 @@ export function recordsInside(records: WaterRecord[], a: WaterArea) {
   });
 }
 
-function normalizeAquifer(value: unknown, retrievedAt: string): WaterRecord | null {
+function normalizeAquifer(
+  sourceId: "twdb-aquifers" | "twdb-minor-aquifers",
+  value: unknown,
+  retrievedAt: string,
+): WaterRecord | null {
   const f = value as WaterArea & { id?: number };
   if (!f?.properties || !["Polygon", "MultiPolygon"].includes(f.geometry?.type)) return null;
   const id = f.properties["OBJECTID"];
-  const name = text(f.properties["AQ_NAME"]);
+  const name = text(f.properties["AQ_NAME"] ?? f.properties["AQU_NAME"]);
   if (!Number.isInteger(id) || !name) return null;
   const rings =
     f.geometry.type === "Polygon" ? f.geometry.coordinates : f.geometry.coordinates.flat();
@@ -225,11 +229,14 @@ function normalizeAquifer(value: unknown, retrievedAt: string): WaterRecord | nu
   )
     return null;
   return {
-    id: `twdb-aquifers:${String(id)}`,
-    sourceId: "twdb-aquifers",
+    id: `${sourceId}:${String(id)}`,
+    sourceId,
     sourceRecordId: String(id),
     name,
-    kind: "Published aquifer extent",
+    kind:
+      sourceId === "twdb-aquifers"
+        ? "Published major aquifer extent"
+        : "Published minor aquifer extent",
     geometry: f.geometry,
     classification: "INFERRED",
     evidence: "Source reported",
@@ -243,7 +250,10 @@ function normalizeAquifer(value: unknown, retrievedAt: string): WaterRecord | nu
     locationAccuracy: null,
     observationTime: null,
     retrievedAt,
-    sourceUrl: "https://www.twdb.texas.gov/groundwater/aquifer/major.asp",
+    sourceUrl:
+      sourceId === "twdb-aquifers"
+        ? "https://www.twdb.texas.gov/groundwater/aquifer/major.asp"
+        : "https://www.twdb.texas.gov/groundwater/aquifer/minor.asp",
     raw: f.properties,
     flags: [
       "Published geologic interpretation; not proof of productive or accessible water",

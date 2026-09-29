@@ -18,6 +18,22 @@ export const WATER_SOURCES: WaterSource[] = [
     reviewedAt: "2026-09-13",
   },
   {
+    id: "twdb-minor-aquifers",
+    agency: "Texas Water Development Board",
+    title: "Texas minor aquifer extents",
+    url: "https://www.twdb.texas.gov/groundwater/aquifer/minor.asp",
+    endpoint:
+      "https://services2.arcgis.com/LYMgRMwHfrWWEg3s/arcgis/rest/services/TWDB_Minor_Aquifers/FeatureServer/0/query",
+    terms: "https://www.twdb.texas.gov/policies/site/index.asp",
+    attribution: "Texas Water Development Board",
+    coverage: "Texas",
+    license: "PUBLIC_OPEN",
+    enabled: true,
+    exportAllowed: true,
+    cacheSeconds: 3600,
+    reviewedAt: "2026-09-29",
+  },
+  {
     id: "usgs-measurements",
     agency: "U.S. Geological Survey",
     title: "USGS latest sensor measurements",
@@ -75,6 +91,24 @@ export const WATER_OPTIONAL_SOURCES = [
     title: "USGS Principal Aquifers",
     url: "https://www.usgs.gov/mission-areas/water-resources/science/principal-aquifers-united-states",
     requirement: "Aquifer polygon adapter pending; well assignments are not aquifer boundaries",
+  },
+  {
+    title: "USGS Watershed Boundary Dataset (HUC12)",
+    url: "https://hydro.nationalmap.gov/arcgis/rest/services/wbd/MapServer/6",
+    requirement:
+      "Connected as an optional visual reference; watershed boundaries are not aquifer boundaries",
+  },
+  {
+    title: "FEMA National Flood Hazard Layer",
+    url: "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/28",
+    requirement:
+      "Connected as an optional flood-hazard reference; it does not describe groundwater availability",
+  },
+  {
+    title: "USDA NRCS Web Soil Survey",
+    url: "https://websoilsurvey.nrcs.usda.gov/",
+    requirement:
+      "Hydrologic soil groups and infiltration interpretations require a dedicated SSURGO adapter",
   },
   {
     title: "TWDB BRACS and geophysical logs",

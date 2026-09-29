@@ -169,6 +169,8 @@ export interface PipeSpecification {
   wallThicknessM: number;
   insideDiameterM: number;
   schedule?: string;
+  sizingSystem?: "IPS" | "DIPS" | "CTS" | "metric";
+  dimensionRatio?: number;
   material: "carbon-steel" | "ductile-iron" | "hdpe" | "pvc" | "other";
   grade?: string;
   manufacturingSpecification?: string;
@@ -299,6 +301,10 @@ export interface PipelineProfilePoint {
   pipelineElevationM?: number;
   pressurePa: number;
   hydraulicGradeM?: number;
+  cumulativeElevationPressureChangePa: number;
+  cumulativeFrictionLossPa: number;
+  cumulativeMinorLossPa: number;
+  cumulativePressureBoostPa: number;
   pressureMarginPa: number;
   minimumPressureMarginPa: number;
   flowM3S: number;

@@ -1,4 +1,4 @@
-import { solveSteadyLiquid } from "./liquidSolver";
+import { solveSteadyLiquid } from "./liquidSolver.ts";
 import type {
   PipeSpecification,
   PipelineComponent,
@@ -7,8 +7,8 @@ import type {
   PipelineScenario,
   PipelineSolverRun,
   SolverFinding,
-} from "./types";
-import { pipelineInputHash } from "./model";
+} from "./types.ts";
+import { pipelineInputHash } from "./model.ts";
 
 export interface SolverDescriptor {
   id: string;
@@ -43,11 +43,18 @@ const preliminaryLiquidSolver: PipelineSolver = {
   descriptor: {
     id: "liquid-steady-v1",
     name: "Native steady incompressible liquid screening",
-    version: "0.1.0-preliminary",
+    version: "0.2.0-preliminary",
     phaseModel: "single-phase-liquid",
     timeModel: "steady",
     validationStatus: "preliminary-unvalidated",
-    supportedComponentKinds: ["source", "destination"],
+    supportedComponentKinds: [
+      "source",
+      "destination",
+      "block-valve",
+      "centrifugal-pump",
+      "flow-meter",
+      "booster-station",
+    ],
   },
   supports(context) {
     const findings: SolverFinding[] = [];
@@ -110,7 +117,13 @@ function unsupportedRun(context: SolverContext, detail: string): PipelineSolverR
     solverVersion: "unavailable",
     readiness: "preliminary-unvalidated",
     status: "unsupported",
-    inputHash: pipelineInputHash(context.route, context.scenario, context.fluid, context.pipe),
+    inputHash: pipelineInputHash(
+      context.route,
+      context.scenario,
+      context.fluid,
+      context.pipe,
+      context.components,
+    ),
     geometryRevision: context.route.geometryRevision,
     startedAt: now,
     completedAt: now,

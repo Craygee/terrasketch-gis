@@ -1,4 +1,5 @@
 import type { FeatureCollection } from "geojson";
+import { fetchTexasParcels, isTexasParcelSource, TEXAS_PARCEL_URL } from "./texasParcels.ts";
 
 /**
  * Remote source adapter. Converts ArcGIS FeatureServer / MapServer layer URLs
@@ -21,6 +22,12 @@ export function normalizeArcgisLayerUrl(raw: string): string {
     .trim()
     .replace(/\?.*$/, "")
     .replace(/\/query$/i, "");
+  if (
+    /^https:\/\/services1\.arcgis\.com\/1mtXwieMId59thmg\/ArcGIS\/rest\/services\/2019_Texas_Parcels_StratMap\/FeatureServer(?:\/0)?\/?$/i.test(
+      url,
+    )
+  )
+    return TEXAS_PARCEL_URL;
   if (ARCGIS_LAYER_RE.test(url)) return url;
   if (ARCGIS_SERVICE_RE.test(url)) return `${url.replace(/\/$/, "")}/0`;
   return url;
@@ -103,6 +110,7 @@ export async function fetchArcgisFields(
   layerUrl: string,
   signal?: AbortSignal,
 ): Promise<ArcgisField[]> {
+  if (isTexasParcelSource(layerUrl)) return [];
   if (classifyUrl(layerUrl) !== "arcgis") return [];
   const response = await fetch(`${normalizeArcgisLayerUrl(layerUrl)}?f=json`, {
     signal: signal ?? null,
@@ -154,6 +162,7 @@ export async function fetchRemoteGeoJSON(
   url: string,
   opts: RemoteQueryOptions = {},
 ): Promise<FeatureCollection> {
+  if (isTexasParcelSource(url)) return (await fetchTexasParcels(opts)).data;
   const kind = classifyUrl(url);
   const requestUrl = kind === "arcgis" ? buildArcgisQueryUrl(url, opts) : url;
   const res = await fetchWithTimeout(requestUrl, opts.signal, opts.timeoutMs);
@@ -203,6 +212,7 @@ export async function fetchRemoteGeoJSONPaged(
   url: string,
   opts: PagedRemoteQueryOptions = {},
 ): Promise<RemoteLoadProgress> {
+  if (isTexasParcelSource(url)) return fetchTexasParcels(opts);
   if (classifyUrl(url) !== "arcgis") {
     const data = await fetchRemoteGeoJSON(url, opts);
     const result = {

@@ -8,18 +8,22 @@ import {
   ChevronDown,
   ChevronUp,
   CircleDollarSign,
+  Crosshair,
   FlaskConical,
   Gauge,
+  Mountain,
   PackageSearch,
   PanelLeft,
   PanelRight,
   Play,
   Plus,
   Route,
+  RefreshCw,
   Save,
   SlidersHorizontal,
   Sparkles,
   TableProperties,
+  Trash2,
 } from "lucide-react";
 import { LngLatBounds } from "maplibre-gl";
 import { toast } from "sonner";
@@ -37,13 +41,21 @@ import {
   geometryHash,
   pipelineInputHash,
   pipelineUnits,
+  pointAtStation,
   routeFromLineFeature,
 } from "@/lib/pipeline/model";
 import { buildPreliminaryTakeoff, calculatePreliminaryEstimate } from "@/lib/pipeline/estimating";
-import { applyLinearManualElevation } from "@/lib/pipeline/elevation";
+import {
+  PIPELINE_COMPONENT_TEMPLATES,
+  createPipelineComponent,
+  reprojectRouteComponents,
+} from "@/lib/pipeline/components";
+import { applyLinearManualElevation, sampleUsgsTerrain } from "@/lib/pipeline/elevation";
 import { interpolateProfile } from "@/lib/pipeline/liquidSolver";
 import { solvePipeline } from "@/lib/pipeline/solver";
 import type {
+  PipelineComponent,
+  PipelineComponentKind,
   PipelineEngineeringState,
   PipelineProfilePoint,
   PipelineRoute,
@@ -63,6 +75,11 @@ type LineCandidate = {
 };
 
 type MobilePanel = "model" | "properties" | "profile" | null;
+type TerrainStatus = {
+  routeKey: string;
+  state: "loading" | "current" | "partial" | "error";
+  message?: string;
+};
 
 function displayFeatureName(feature: Feature<LineString>, fallback: string) {
   const properties = feature.properties ?? {};
@@ -88,12 +105,23 @@ function money(value: number | null, currency = "USD") {
   }).format(value);
 }
 
+function signedPsi(valuePa: number) {
+  if (!Number.isFinite(valuePa)) return "Recalculate";
+  const valuePsi = valuePa * pipelineUnits.paToPsi;
+  return `${valuePsi >= 0 ? "+" : ""}${valuePsi.toFixed(1)} psi`;
+}
+
 export function PipelineWorkspace() {
   const wb = useWorkbench();
   const { map } = useMapRef();
   const [mobilePanel, setMobilePanel] = useState<MobilePanel>(null);
   const [scrubStationM, setScrubStationM] = useState<number | null>(null);
+  const [terrainStatus, setTerrainStatus] = useState<TerrainStatus | null>(null);
+  const [pendingComponentKind, setPendingComponentKind] = useState<PipelineComponentKind | null>(
+    null,
+  );
   const initializedProjectRef = useRef<string | null>(null);
+  const terrainAttemptsRef = useRef(new Set<string>());
 
   useEffect(() => {
     if (!wb.projectReady || wb.pipelineEngineering || !wb.canEditProject) return;
@@ -163,6 +191,87 @@ export function PipelineWorkspace() {
     [activeScenario, updatePipeline],
   );
 
+  const replaceRouteAndSolve = useCallback(
+    (nextRoute: PipelineRoute) => {
+      updatePipeline((current) => {
+        const storedRoute = current.routes.find((route) => route.id === nextRoute.id);
+        if (!storedRoute || storedRoute.geometryHash !== nextRoute.geometryHash) return current;
+        const routes = current.routes.map((route) =>
+          route.id === nextRoute.id ? nextRoute : route,
+        );
+        const scenario =
+          current.scenarios.find(
+            (item) => item.id === current.activeScenarioId && item.routeId === nextRoute.id,
+          ) ?? current.scenarios.find((item) => item.routeId === nextRoute.id);
+        if (!scenario) return { ...current, routes };
+        const fluid = current.fluids.find((item) => item.id === scenario.fluidId);
+        const pipe = current.pipeSpecifications.find(
+          (item) => item.id === scenario.pipeSpecificationId,
+        );
+        if (!fluid || !pipe) return { ...current, routes };
+        const run = solvePipeline({
+          route: nextRoute,
+          scenario,
+          fluid,
+          pipe,
+          components: current.components.filter((component) => component.routeId === nextRoute.id),
+        });
+        const takeoff = buildPreliminaryTakeoff(nextRoute, scenario, pipe);
+        const estimate = calculatePreliminaryEstimate(nextRoute, scenario);
+        return {
+          ...current,
+          routes,
+          solverRuns: [
+            run,
+            ...current.solverRuns.filter((item) => item.scenarioId !== run.scenarioId),
+          ].slice(0, 25),
+          quantitySnapshots: [
+            takeoff,
+            ...current.quantitySnapshots.filter((item) => item.scenarioId !== takeoff.scenarioId),
+          ].slice(0, 25),
+          latestEstimate: estimate,
+        };
+      });
+    },
+    [updatePipeline],
+  );
+
+  const refreshTerrain = useCallback(
+    async (route: PipelineRoute, announce = true) => {
+      const routeKey = `${route.id}:${route.geometryHash}`;
+      terrainAttemptsRef.current.add(routeKey);
+      setTerrainStatus({ routeKey, state: "loading" });
+      try {
+        const sampled = await sampleUsgsTerrain(route);
+        const missing = sampled.stations.length - sampled.elevationSamples.length;
+        replaceRouteAndSolve(sampled);
+        setTerrainStatus({
+          routeKey,
+          state: missing > 0 ? "partial" : "current",
+          ...(missing > 0 ? { message: `${missing} terrain stations were unavailable.` } : {}),
+        });
+        if (announce)
+          toast.success(
+            missing > 0
+              ? "USGS terrain profile loaded with partial coverage"
+              : "USGS terrain profile loaded",
+          );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Terrain profile unavailable";
+        setTerrainStatus({ routeKey, state: "error", message });
+        if (announce) toast.error(message);
+      }
+    },
+    [replaceRouteAndSolve],
+  );
+
+  useEffect(() => {
+    if (!activeRoute || activeRoute.elevationSamples.length > 0) return;
+    const routeKey = `${activeRoute.id}:${activeRoute.geometryHash}`;
+    if (terrainAttemptsRef.current.has(routeKey)) return;
+    void refreshTerrain(activeRoute, false);
+  }, [activeRoute, refreshTerrain]);
+
   const runNow = useCallback(() => {
     if (!activeRoute || !activeScenario || !activeFluid || !activePipe) return;
     const run = solvePipeline({
@@ -193,8 +302,14 @@ export function PipelineWorkspace() {
 
   const currentInputHash = useMemo(() => {
     if (!activeRoute || !activeScenario || !activeFluid || !activePipe) return null;
-    return pipelineInputHash(activeRoute, activeScenario, activeFluid, activePipe);
-  }, [activeFluid, activePipe, activeRoute, activeScenario]);
+    return pipelineInputHash(
+      activeRoute,
+      activeScenario,
+      activeFluid,
+      activePipe,
+      pipeline?.components.filter((component) => component.routeId === activeRoute.id) ?? [],
+    );
+  }, [activeFluid, activePipe, activeRoute, activeScenario, pipeline?.components]);
 
   useEffect(() => {
     if (
@@ -224,6 +339,7 @@ export function PipelineWorkspace() {
     updatePipeline((current) => ({
       ...current,
       routes: current.routes.map((route) => (route.id === refreshed.id ? refreshed : route)),
+      components: reprojectRouteComponents(current.components, activeRoute, refreshed),
     }));
   }, [activeRoute, pipeline, updatePipeline, wb.layers]);
 
@@ -267,6 +383,82 @@ export function PipelineWorkspace() {
       map.fitBounds(bounds, { padding: 80, duration: 500, maxZoom: 15 });
     }
   };
+
+  const placePendingComponent = useCallback(
+    (stationM: number) => {
+      if (!activeRoute || !pendingComponentKind) return;
+      updatePipeline((current) => {
+        const movable =
+          pendingComponentKind === "source" || pendingComponentKind === "destination"
+            ? current.components.find(
+                (component) =>
+                  component.routeId === activeRoute.id && component.kind === pendingComponentKind,
+              )
+            : undefined;
+        if (movable) {
+          const boundedStationM = Math.max(0, Math.min(activeRoute.lengthM, stationM));
+          return {
+            ...current,
+            components: current.components.map((component) =>
+              component.id === movable.id
+                ? {
+                    ...component,
+                    stationM: boundedStationM,
+                    coordinate: pointAtStation(activeRoute, boundedStationM),
+                    updatedAt: Date.now(),
+                  }
+                : component,
+            ),
+          };
+        }
+        const sequence =
+          current.components.filter(
+            (component) =>
+              component.routeId === activeRoute.id && component.kind === pendingComponentKind,
+          ).length + 1;
+        return {
+          ...current,
+          components: [
+            ...current.components,
+            createPipelineComponent({
+              route: activeRoute,
+              kind: pendingComponentKind,
+              stationM,
+              sequence,
+            }),
+          ],
+        };
+      });
+      const label =
+        PIPELINE_COMPONENT_TEMPLATES.find((item) => item.kind === pendingComponentKind)?.label ??
+        "Component";
+      toast.success(`${label} placed on the route`);
+      setPendingComponentKind(null);
+    },
+    [activeRoute, pendingComponentKind, updatePipeline],
+  );
+
+  const updateComponent = useCallback(
+    (componentId: string, change: Partial<PipelineComponent>) =>
+      updatePipeline((current) => ({
+        ...current,
+        components: current.components.map((component) =>
+          component.id === componentId
+            ? { ...component, ...change, updatedAt: Date.now() }
+            : component,
+        ),
+      })),
+    [updatePipeline],
+  );
+
+  const removeComponent = useCallback(
+    (componentId: string) =>
+      updatePipeline((current) => ({
+        ...current,
+        components: current.components.filter((component) => component.id !== componentId),
+      })),
+    [updatePipeline],
+  );
 
   const scrubPoint = useMemo(
     () =>
@@ -385,6 +577,7 @@ export function PipelineWorkspace() {
             pipeline={pipeline}
             lineCandidates={lineCandidates}
             activeRoute={activeRoute}
+            pendingComponentKind={pendingComponentKind}
             onChooseCandidate={chooseCandidate}
             onSelectRoute={(routeId) => {
               const scenario = pipeline.scenarios.find((item) => item.routeId === routeId);
@@ -395,6 +588,11 @@ export function PipelineWorkspace() {
               }));
             }}
             onDraw={() => wb.setDrawMode("line")}
+            onBeginComponent={(kind) =>
+              setPendingComponentKind((current) => (current === kind ? null : kind))
+            }
+            onUpdateComponent={updateComponent}
+            onRemoveComponent={removeComponent}
           />
         </aside>
 
@@ -404,9 +602,14 @@ export function PipelineWorkspace() {
             route={activeRoute}
             profile={activeRun?.profile ?? []}
             scenario={activeScenario}
+            components={pipeline.components.filter(
+              (component) => component.routeId === activeRoute?.id,
+            )}
             mode={visualizationMode}
             scrubPoint={scrubPoint}
             onScrub={setScrubStationM}
+            placementActive={pendingComponentKind !== null}
+            onPlaceComponent={placePendingComponent}
           />
           <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-start gap-2 p-3">
             <div className="pointer-events-auto hidden sm:block">
@@ -470,6 +673,7 @@ export function PipelineWorkspace() {
                   pipeline={pipeline}
                   lineCandidates={lineCandidates}
                   activeRoute={activeRoute}
+                  pendingComponentKind={pendingComponentKind}
                   onChooseCandidate={chooseCandidate}
                   onSelectRoute={(routeId) => {
                     const scenario = pipeline.scenarios.find((item) => item.routeId === routeId);
@@ -480,6 +684,11 @@ export function PipelineWorkspace() {
                     }));
                   }}
                   onDraw={() => wb.setDrawMode("line")}
+                  onBeginComponent={(kind) =>
+                    setPendingComponentKind((current) => (current === kind ? null : kind))
+                  }
+                  onUpdateComponent={updateComponent}
+                  onRemoveComponent={removeComponent}
                 />
               ) : mobilePanel === "properties" ? (
                 <PropertiesPanel
@@ -488,7 +697,10 @@ export function PipelineWorkspace() {
                   scenario={activeScenario}
                   findingCount={findingCount}
                   takeoff={activeTakeoff}
+                  terrainStatus={terrainStatus}
                   onScenarioChange={updateScenario}
+                  onRefreshTerrain={() => activeRoute && void refreshTerrain(activeRoute)}
+                  onShowTopography={() => wb.setBasemapId("topo")}
                   onApplyElevation={(startElevationFt, endElevationFt) => {
                     if (!activeRoute) return;
                     const route = applyLinearManualElevation({
@@ -497,10 +709,7 @@ export function PipelineWorkspace() {
                       endElevationM: endElevationFt / pipelineUnits.mToFt,
                       source: "User-entered linear screening profile",
                     });
-                    updatePipeline((current) => ({
-                      ...current,
-                      routes: current.routes.map((item) => (item.id === route.id ? route : item)),
-                    }));
+                    replaceRouteAndSolve(route);
                   }}
                   onPreferenceChange={(change) =>
                     updatePipeline((current) => ({
@@ -527,7 +736,10 @@ export function PipelineWorkspace() {
             scenario={activeScenario}
             findingCount={findingCount}
             takeoff={activeTakeoff}
+            terrainStatus={terrainStatus}
             onScenarioChange={updateScenario}
+            onRefreshTerrain={() => activeRoute && void refreshTerrain(activeRoute)}
+            onShowTopography={() => wb.setBasemapId("topo")}
             onApplyElevation={(startElevationFt, endElevationFt) => {
               if (!activeRoute) return;
               const route = applyLinearManualElevation({
@@ -536,10 +748,7 @@ export function PipelineWorkspace() {
                 endElevationM: endElevationFt / pipelineUnits.mToFt,
                 source: "User-entered linear screening profile",
               });
-              updatePipeline((current) => ({
-                ...current,
-                routes: current.routes.map((item) => (item.id === route.id ? route : item)),
-              }));
+              replaceRouteAndSolve(route);
             }}
             onPreferenceChange={(change) =>
               updatePipeline((current) => ({
@@ -606,16 +815,24 @@ function ModelPanel({
   pipeline,
   lineCandidates,
   activeRoute,
+  pendingComponentKind,
   onChooseCandidate,
   onSelectRoute,
   onDraw,
+  onBeginComponent,
+  onUpdateComponent,
+  onRemoveComponent,
 }: {
   pipeline: PipelineEngineeringState;
   lineCandidates: LineCandidate[];
   activeRoute: PipelineRoute | undefined;
+  pendingComponentKind: PipelineComponentKind | null;
   onChooseCandidate: (key: string) => void;
   onSelectRoute: (id: string) => void;
   onDraw: () => void;
+  onBeginComponent: (kind: PipelineComponentKind) => void;
+  onUpdateComponent: (componentId: string, change: Partial<PipelineComponent>) => void;
+  onRemoveComponent: (componentId: string) => void;
 }) {
   return (
     <div className="space-y-4 p-3">
@@ -676,22 +893,121 @@ function ModelPanel({
           <Boxes className="size-4 text-primary" /> Components
         </div>
         <div className="mt-2 grid grid-cols-2 gap-1">
-          {["Source", "Destination", "Valve", "Pump", "Meter", "Booster"].map((name) => (
+          {PIPELINE_COMPONENT_TEMPLATES.map((template) => (
             <button
-              key={name}
-              disabled
-              className="rounded-lg border border-dashed border-border px-2 py-2 text-[9px] text-muted-foreground disabled:opacity-70"
-              title="Component placement is scheduled for the next validated workspace increment"
+              key={template.kind}
+              type="button"
+              disabled={!activeRoute}
+              onClick={() => onBeginComponent(template.kind)}
+              className={cn(
+                "rounded-lg border px-2 py-2 text-[9px] font-semibold disabled:opacity-50",
+                pendingComponentKind === template.kind
+                  ? "border-primary bg-primary text-primary-foreground"
+                  : "border-border bg-background hover:bg-accent",
+              )}
+              title={
+                activeRoute
+                  ? `Place ${template.label} on the selected route`
+                  : "Select a route first"
+              }
             >
-              {name}
+              {template.label}
             </button>
           ))}
         </div>
         <p className="mt-2 text-[9px] text-muted-foreground">
-          Drag/drop component insertion is architected but intentionally disabled until segment
-          splitting and equipment equations are verified.
+          {pendingComponentKind
+            ? "Tap or click the pipeline to place the selected component. Select it again to cancel."
+            : activeRoute
+              ? "Choose a component, then place it directly on the pipeline."
+              : "Select a route before adding components."}
         </p>
+        {pendingComponentKind && (
+          <div className="mt-2 flex items-center gap-2 rounded-lg bg-primary/10 p-2 text-[9px] font-semibold text-primary">
+            <Crosshair className="size-3.5" /> Placement active
+          </div>
+        )}
+        <div className="mt-3 space-y-2">
+          {pipeline.components
+            .filter((component) => component.routeId === activeRoute?.id)
+            .sort((a, b) => a.stationM - b.stationM)
+            .map((component) => (
+              <ComponentCard
+                key={component.id}
+                component={component}
+                onUpdate={onUpdateComponent}
+                onRemove={onRemoveComponent}
+              />
+            ))}
+        </div>
       </div>
+    </div>
+  );
+}
+
+function ComponentCard({
+  component,
+  onUpdate,
+  onRemove,
+}: {
+  component: PipelineComponent;
+  onUpdate: (componentId: string, change: Partial<PipelineComponent>) => void;
+  onRemove: (componentId: string) => void;
+}) {
+  const hasMinorLoss = component.kind === "block-valve" || component.kind === "flow-meter";
+  const hasPressureBoost =
+    component.kind === "centrifugal-pump" || component.kind === "booster-station";
+  return (
+    <div className="rounded-xl border border-border bg-background p-2">
+      <div className="flex items-start gap-2">
+        <div className="min-w-0 flex-1">
+          <input
+            value={component.name}
+            onChange={(event) => onUpdate(component.id, { name: event.target.value })}
+            className="w-full bg-transparent text-[10px] font-semibold outline-none"
+            aria-label="Component name"
+          />
+          <span className="num text-[9px] text-muted-foreground">
+            Station {formatStation(component.stationM)}
+          </span>
+        </div>
+        <button
+          type="button"
+          onClick={() => onRemove(component.id)}
+          className="rounded-md p-1 text-muted-foreground hover:bg-red-50 hover:text-red-700"
+          aria-label={`Remove ${component.name}`}
+          title={`Remove ${component.name}`}
+        >
+          <Trash2 className="size-3.5" />
+        </button>
+      </div>
+      {hasMinorLoss && (
+        <NumericField
+          label="Minor-loss coefficient"
+          unit="K"
+          value={Number(component.properties["minorLossK"] ?? 0)}
+          onChange={(minorLossK) =>
+            onUpdate(component.id, {
+              properties: { ...component.properties, minorLossK: Math.max(0, minorLossK) },
+            })
+          }
+        />
+      )}
+      {hasPressureBoost && (
+        <NumericField
+          label="Pressure boost"
+          unit="psi"
+          value={Number(component.properties["pressureBoostPa"] ?? 0) * pipelineUnits.paToPsi}
+          onChange={(pressureBoostPsi) =>
+            onUpdate(component.id, {
+              properties: {
+                ...component.properties,
+                pressureBoostPa: Math.max(0, pressureBoostPsi) * pipelineUnits.psiToPa,
+              },
+            })
+          }
+        />
+      )}
     </div>
   );
 }
@@ -702,7 +1018,10 @@ function PropertiesPanel({
   scenario,
   findingCount,
   takeoff,
+  terrainStatus,
   onScenarioChange,
+  onRefreshTerrain,
+  onShowTopography,
   onApplyElevation,
   onPreferenceChange,
 }: {
@@ -711,11 +1030,20 @@ function PropertiesPanel({
   scenario: PipelineScenario | undefined;
   findingCount: number;
   takeoff: PipelineEngineeringState["quantitySnapshots"][number] | undefined;
+  terrainStatus: TerrainStatus | null;
   onScenarioChange: (change: Partial<PipelineScenario>) => void;
+  onRefreshTerrain: () => void;
+  onShowTopography: () => void;
   onApplyElevation: (startElevationFt: number, endElevationFt: number) => void;
   onPreferenceChange: (change: Partial<PipelineEngineeringState["preferences"]>) => void;
 }) {
   const activeRun = pipeline.solverRuns.find((run) => run.scenarioId === scenario?.id);
+  const startPoint = activeRun?.profile[0];
+  const endPoint = activeRun?.profile.at(-1);
+  const routeElevationChangeM =
+    startPoint?.pipelineElevationM === undefined || endPoint?.pipelineElevationM === undefined
+      ? undefined
+      : endPoint.pipelineElevationM - startPoint.pipelineElevationM;
   const panel = pipeline.preferences.selectedRightPanel;
   return (
     <div className="p-3">
@@ -807,7 +1135,37 @@ function PropertiesPanel({
               })
             }
           />
+          <TerrainElevationControl
+            route={route}
+            status={terrainStatus}
+            onRefresh={onRefreshTerrain}
+            onShowTopography={onShowTopography}
+          />
           <ManualElevationControl route={route} onApply={onApplyElevation} />
+          {endPoint && routeElevationChangeM !== undefined && (
+            <div className="rounded-xl border border-primary/20 bg-primary/5 p-3 text-[10px]">
+              <strong className="block text-xs">Hydraulic pressure accounting</strong>
+              <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1">
+                <dt className="text-muted-foreground">Route elevation change</dt>
+                <dd>
+                  {routeElevationChangeM >= 0 ? "+" : ""}
+                  {(routeElevationChangeM * pipelineUnits.mToFt).toFixed(0)} ft
+                </dd>
+                <dt className="text-muted-foreground">Elevation pressure effect</dt>
+                <dd>{signedPsi(endPoint.cumulativeElevationPressureChangePa ?? 0)}</dd>
+                <dt className="text-muted-foreground">Friction loss</dt>
+                <dd>{signedPsi(-(endPoint.cumulativeFrictionLossPa ?? 0))}</dd>
+                <dt className="text-muted-foreground">Minor losses</dt>
+                <dd>{signedPsi(-(endPoint.cumulativeMinorLossPa ?? 0))}</dd>
+                <dt className="text-muted-foreground">Pump / booster gain</dt>
+                <dd>{signedPsi(endPoint.cumulativePressureBoostPa ?? 0)}</dd>
+              </dl>
+              <p className="mt-2 text-[9px] leading-relaxed text-muted-foreground">
+                Positive elevation effect means the route ends lower than it starts; negative means
+                static head is consumed climbing uphill.
+              </p>
+            </div>
+          )}
           <LabeledSelect
             label="Route color"
             value={pipeline.preferences.visualizationMode}
@@ -823,8 +1181,9 @@ function PropertiesPanel({
             ]}
           />
           <p className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-[10px] leading-relaxed text-amber-900">
-            Static head is omitted wherever elevation is missing. Add authoritative DEM/survey data
-            in the next terrain increment before relying on pressure results.
+            USGS 3DEP elevations are interpolated terrain data for screening. The solver now uses
+            the sampled grade for static head and high/low-point pressure, but final design still
+            requires surveyed pipeline elevations and a confirmed vertical datum.
           </p>
         </div>
       ) : panel === "materials" ? (
@@ -836,6 +1195,7 @@ function PropertiesPanel({
             options={pipeline.pipeSpecifications.map((pipe) => ({
               value: pipe.id,
               label: pipe.name,
+              group: pipe.material === "hdpe" ? "Polyethylene · HDPE PE4710" : "Steel and other",
             }))}
           />
           {pipeline.pipeSpecifications
@@ -853,6 +1213,18 @@ function PropertiesPanel({
                   <dd>{pipe.manufacturingSpecification}</dd>
                   <dt className="text-muted-foreground">Grade</dt>
                   <dd>{pipe.grade}</dd>
+                  {pipe.sizingSystem && (
+                    <>
+                      <dt className="text-muted-foreground">Sizing system</dt>
+                      <dd>{pipe.sizingSystem}</dd>
+                    </>
+                  )}
+                  {pipe.dimensionRatio !== undefined && (
+                    <>
+                      <dt className="text-muted-foreground">SDR / DR</dt>
+                      <dd>{pipe.dimensionRatio}</dd>
+                    </>
+                  )}
                   <dt className="text-muted-foreground">OD</dt>
                   <dd>{(pipe.outsideDiameterM / 0.0254).toFixed(3)} in</dd>
                   <dt className="text-muted-foreground">Wall</dt>
@@ -1038,6 +1410,20 @@ function StatusCallout({
 }
 
 function ResultLegend({ mode, stale }: { mode: PipelineVisualizationMode; stale: boolean }) {
+  const items =
+    mode === "elevation"
+      ? [
+          ["#0f766e", "lower"],
+          ["#0891b2", "low-mid"],
+          ["#2563eb", "high-mid"],
+          ["#7c3aed", "higher"],
+        ]
+      : [
+          ["#15803d", "comfortable"],
+          ["#d6a10d", "approaching"],
+          ["#ea580c", "near limit"],
+          ["#b91c1c", "exceeds"],
+        ];
   return (
     <div className="pointer-events-none absolute bottom-16 left-3 z-20 rounded-xl border border-border bg-card/95 p-2 text-[9px] shadow-panel lg:bottom-3">
       <div className="font-semibold">
@@ -1045,10 +1431,91 @@ function ResultLegend({ mode, stale }: { mode: PipelineVisualizationMode; stale:
         {stale ? " · stale" : ""}
       </div>
       <div className="mt-1 flex items-center gap-2">
-        <LegendDot color="#15803d" label="comfortable" />
-        <LegendDot color="#d6a10d" label="approaching" />
-        <LegendDot color="#ea580c" label="near limit" />
-        <LegendDot color="#b91c1c" label="exceeds" />
+        {items.map(([color, label]) => (
+          <LegendDot key={label} color={color!} label={label!} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function TerrainElevationControl({
+  route,
+  status,
+  onRefresh,
+  onShowTopography,
+}: {
+  route: PipelineRoute;
+  status: TerrainStatus | null;
+  onRefresh: () => void;
+  onShowTopography: () => void;
+}) {
+  const routeKey = `${route.id}:${route.geometryHash}`;
+  const currentStatus = status?.routeKey === routeKey ? status : null;
+  const elevations = route.stations
+    .map((station) => station.pipelineElevationM ?? station.groundElevationM)
+    .filter((value): value is number => value !== undefined);
+  const demSamples = route.elevationSamples.filter((sample) => sample.sourceKind === "dem");
+  const minimumM = elevations.length ? Math.min(...elevations) : undefined;
+  const maximumM = elevations.length ? Math.max(...elevations) : undefined;
+  const coverage = route.stations.length
+    ? Math.round((elevations.length / route.stations.length) * 100)
+    : 0;
+  return (
+    <div className="rounded-xl border border-border p-3">
+      <div className="flex items-start gap-2">
+        <Mountain className="mt-0.5 size-4 shrink-0 text-primary" />
+        <div className="min-w-0 flex-1">
+          <strong className="block text-[10px]">Terrain-following route profile</strong>
+          <span className="block text-[9px] text-muted-foreground">
+            {demSamples.length
+              ? `USGS 3DEP · ${demSamples.length} samples · ${coverage}% coverage`
+              : currentStatus?.state === "loading"
+                ? "Sampling USGS 3DEP terrain…"
+                : "Terrain has not been sampled"}
+          </span>
+        </div>
+        {currentStatus?.state === "loading" && (
+          <RefreshCw className="size-3.5 animate-spin text-primary" aria-label="Loading terrain" />
+        )}
+      </div>
+      {minimumM !== undefined && maximumM !== undefined && (
+        <dl className="mt-2 grid grid-cols-3 gap-1 rounded-lg bg-secondary p-2 text-center text-[9px]">
+          <div>
+            <dt className="text-muted-foreground">Low</dt>
+            <dd className="num font-semibold">{(minimumM * pipelineUnits.mToFt).toFixed(0)} ft</dd>
+          </div>
+          <div>
+            <dt className="text-muted-foreground">High</dt>
+            <dd className="num font-semibold">{(maximumM * pipelineUnits.mToFt).toFixed(0)} ft</dd>
+          </div>
+          <div>
+            <dt className="text-muted-foreground">Relief</dt>
+            <dd className="num font-semibold">
+              {((maximumM - minimumM) * pipelineUnits.mToFt).toFixed(0)} ft
+            </dd>
+          </div>
+        </dl>
+      )}
+      {currentStatus?.message && (
+        <p className="mt-2 text-[9px] text-amber-800">{currentStatus.message}</p>
+      )}
+      <div className="mt-2 grid grid-cols-2 gap-1">
+        <button
+          type="button"
+          onClick={onRefresh}
+          disabled={currentStatus?.state === "loading"}
+          className="flex items-center justify-center gap-1 rounded-lg bg-primary px-2 py-2 text-[9px] font-semibold text-primary-foreground disabled:opacity-50"
+        >
+          <RefreshCw className="size-3" /> {demSamples.length ? "Refresh terrain" : "Load terrain"}
+        </button>
+        <button
+          type="button"
+          onClick={onShowTopography}
+          className="flex items-center justify-center gap-1 rounded-lg bg-secondary px-2 py-2 text-[9px] font-semibold hover:bg-accent"
+        >
+          <Mountain className="size-3" /> Show topo map
+        </button>
       </div>
     </div>
   );
@@ -1091,6 +1558,10 @@ function PressureScrubTooltip({
         </dd>
         <dt className="text-muted-foreground">Pressure</dt>
         <dd>{(point.pressurePa * pipelineUnits.paToPsi).toFixed(1)} psi</dd>
+        <dt className="text-muted-foreground">Elevation effect</dt>
+        <dd>{signedPsi(point.cumulativeElevationPressureChangePa ?? 0)}</dd>
+        <dt className="text-muted-foreground">Friction loss</dt>
+        <dd>{signedPsi(-(point.cumulativeFrictionLossPa ?? 0))}</dd>
         <dt className="text-muted-foreground">MAOP</dt>
         <dd>{(maopPa * pipelineUnits.paToPsi).toFixed(0)} psi</dd>
         <dt className="text-muted-foreground">MAOP margin</dt>
@@ -1238,9 +1709,13 @@ function LabeledSelect({
 }: {
   label: string;
   value: string;
-  options: Array<{ value: string; label: string }>;
+  options: Array<{ value: string; label: string; group?: string }>;
   onChange: (value: string) => void;
 }) {
+  const groupNames = Array.from(
+    new Set(options.flatMap((option) => (option.group ? [option.group] : []))),
+  );
+  const ungrouped = options.filter((option) => !option.group);
   return (
     <label className="block">
       <span className="mb-1 block text-[10px] font-medium">{label}</span>
@@ -1249,10 +1724,21 @@ function LabeledSelect({
         onChange={(event) => onChange(event.target.value)}
         className="w-full rounded-xl border border-border bg-background px-3 py-2 text-xs"
       >
-        {options.map((option) => (
+        {ungrouped.map((option) => (
           <option key={option.value} value={option.value}>
             {option.label}
           </option>
+        ))}
+        {groupNames.map((group) => (
+          <optgroup key={group} label={group}>
+            {options
+              .filter((option) => option.group === group)
+              .map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+          </optgroup>
         ))}
       </select>
     </label>

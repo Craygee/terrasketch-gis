@@ -1,3 +1,4 @@
+import { siteAllowed } from '../_shared/site-access.ts';
 const RESEND_EMAILS_API = "https://api.resend.com/emails";
 const DEFAULT_SITE_URL = "https://landdraft.net/";
 const DEFAULT_FROM_EMAIL = "LandDraft <accounts@notify.landdraft.net>";
@@ -97,6 +98,7 @@ const authenticate = async (
     headers: { apikey: publicKey, authorization },
   });
   if (!response.ok) return null;
+  if (!await siteAllowed(supabaseUrl,publicKey,authorization)) return null;
   const user = (await response.json()) as AuthUser;
   return user.id ? user : null;
 };

@@ -73,9 +73,12 @@ export async function fetchWaterSource(
           resultRecordCount: "1000",
         }).toString();
       }
-      if (sourceId === "twdb-aquifers") {
+      if (sourceId === "twdb-aquifers" || sourceId === "twdb-minor-aquifers") {
         url.searchParams.set("f", "geojson");
-        url.searchParams.set("outFields", "OBJECTID,AQUIFER,AQ_NAME");
+        url.searchParams.set(
+          "outFields",
+          sourceId === "twdb-aquifers" ? "OBJECTID,AQUIFER,AQ_NAME" : "OBJECTID,AQUIFER,AQU_NAME",
+        );
         url.searchParams.set("orderByFields", "OBJECTID");
         url.searchParams.set("maxAllowableOffset", "0.001");
       }

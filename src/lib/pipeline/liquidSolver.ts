@@ -1,13 +1,15 @@
 import type {
   PipeSpecification,
+  PipelineComponent,
   PipelineFluid,
   PipelineProfilePoint,
   PipelineRoute,
   PipelineScenario,
   PipelineSolverRun,
   SolverFinding,
-} from "./types";
-import { pipelineInputHash } from "./model";
+} from "./types.ts";
+import { pipelineInputHash } from "./model.ts";
+import { numericComponentProperty } from "./components.ts";
 
 const GRAVITY_MS2 = 9.80665;
 
@@ -47,11 +49,12 @@ export function solveSteadyLiquid(input: {
   scenario: PipelineScenario;
   fluid: PipelineFluid;
   pipe: PipeSpecification;
+  components?: PipelineComponent[];
 }): PipelineSolverRun {
-  const { route, scenario, fluid, pipe } = input;
+  const { route, scenario, fluid, pipe, components = [] } = input;
   const startedAt = Date.now();
   const findings: SolverFinding[] = [];
-  const inputHash = pipelineInputHash(route, scenario, fluid, pipe);
+  const inputHash = pipelineInputHash(route, scenario, fluid, pipe, components);
 
   if (fluid.family !== "liquid") {
     return {
@@ -59,7 +62,7 @@ export function solveSteadyLiquid(input: {
       scenarioId: scenario.id,
       routeId: route.id,
       solverId: "liquid-steady-v1",
-      solverVersion: "0.1.0-preliminary",
+      solverVersion: "0.2.0-preliminary",
       readiness: "preliminary-unvalidated",
       status: "unsupported",
       inputHash,
@@ -123,7 +126,7 @@ export function solveSteadyLiquid(input: {
       scenarioId: scenario.id,
       routeId: route.id,
       solverId: "liquid-steady-v1",
-      solverVersion: "0.1.0-preliminary",
+      solverVersion: "0.2.0-preliminary",
       readiness: "preliminary-unvalidated",
       status: "failed",
       inputHash,
@@ -144,7 +147,8 @@ export function solveSteadyLiquid(input: {
   const frictionFactor =
     scenario.flowM3S === 0 ? 0 : darcyFrictionFactor(reynoldsNumber, pipe.roughnessM / diameterM);
   const dynamicPressurePa = (rho * velocityMS ** 2) / 2;
-  const hasCompleteElevation = route.stations.every(
+  const analysisStations = stationsWithComponents(route, components);
+  const hasCompleteElevation = analysisStations.every(
     (station) => station.pipelineElevationM !== undefined || station.groundElevationM !== undefined,
   );
 
@@ -169,12 +173,26 @@ export function solveSteadyLiquid(input: {
     );
 
   const profile: PipelineProfilePoint[] = [];
-  let pressurePa = scenario.inletPressurePa;
+  let cumulativeElevationPressureChangePa = 0;
+  let cumulativeFrictionLossPa = 0;
+  let cumulativeMinorLossPa = 0;
+  let cumulativePressureBoostPa = 0;
   let remainingMinorK = scenario.totalMinorLossK;
+  const originComponents = components.filter((component) => component.stationM <= 0.001);
+  cumulativePressureBoostPa = originComponents.reduce(
+    (sum, component) => sum + numericComponentProperty(component, "pressureBoostPa"),
+    0,
+  );
+  cumulativeMinorLossPa =
+    originComponents.reduce(
+      (sum, component) => sum + numericComponentProperty(component, "minorLossK"),
+      0,
+    ) * dynamicPressurePa;
+  let pressurePa = scenario.inletPressurePa + cumulativePressureBoostPa - cumulativeMinorLossPa;
 
-  route.stations.forEach((station, index) => {
+  analysisStations.forEach((station, index) => {
     if (index > 0) {
-      const previous = route.stations[index - 1]!;
+      const previous = analysisStations[index - 1]!;
       const lengthM = Math.max(0, station.stationM - previous.stationM);
       const previousElevation = previous.pipelineElevationM ?? previous.groundElevationM;
       const elevation = station.pipelineElevationM ?? station.groundElevationM;
@@ -184,10 +202,29 @@ export function solveSteadyLiquid(input: {
           : elevation - previousElevation;
       const frictionLossPa =
         scenario.flowM3S === 0 ? 0 : frictionFactor * (lengthM / diameterM) * dynamicPressurePa;
-      const segmentMinorK = index === route.stations.length - 1 ? remainingMinorK : 0;
-      remainingMinorK -= segmentMinorK;
+      const stationComponents = components.filter(
+        (component) =>
+          component.stationM > previous.stationM + 0.001 &&
+          component.stationM <= station.stationM + 0.001,
+      );
+      const componentMinorK = stationComponents.reduce(
+        (sum, component) => sum + numericComponentProperty(component, "minorLossK"),
+        0,
+      );
+      const pressureBoostPa = stationComponents.reduce(
+        (sum, component) => sum + numericComponentProperty(component, "pressureBoostPa"),
+        0,
+      );
+      const scenarioMinorK = index === analysisStations.length - 1 ? remainingMinorK : 0;
+      const segmentMinorK = componentMinorK + scenarioMinorK;
+      remainingMinorK -= scenarioMinorK;
       const minorLossPa = segmentMinorK * dynamicPressurePa;
-      pressurePa -= frictionLossPa + minorLossPa + rho * GRAVITY_MS2 * elevationDeltaM;
+      const elevationPressureChangePa = -rho * GRAVITY_MS2 * elevationDeltaM;
+      cumulativePressureBoostPa += pressureBoostPa;
+      cumulativeFrictionLossPa += frictionLossPa;
+      cumulativeMinorLossPa += minorLossPa;
+      cumulativeElevationPressureChangePa += elevationPressureChangePa;
+      pressurePa += pressureBoostPa - frictionLossPa - minorLossPa + elevationPressureChangePa;
     }
 
     const elevation = station.pipelineElevationM ?? station.groundElevationM;
@@ -206,6 +243,10 @@ export function solveSteadyLiquid(input: {
       ...(elevation === undefined
         ? {}
         : { hydraulicGradeM: elevation + pressurePa / (rho * GRAVITY_MS2) }),
+      cumulativeElevationPressureChangePa,
+      cumulativeFrictionLossPa,
+      cumulativeMinorLossPa,
+      cumulativePressureBoostPa,
       pressureMarginPa,
       minimumPressureMarginPa,
       flowM3S: scenario.flowM3S,
@@ -258,6 +299,21 @@ export function solveSteadyLiquid(input: {
         "Friction-factor uncertainty is higher in this range.",
       ),
     );
+  for (const component of components) {
+    if (
+      (component.kind === "centrifugal-pump" || component.kind === "booster-station") &&
+      numericComponentProperty(component, "pressureBoostPa") === 0
+    )
+      findings.push(
+        finding(
+          "warning",
+          `COMPONENT_INPUT_REQUIRED_${component.id}`,
+          `${component.name} has no pressure boost`,
+          "The component is shown on the route but contributes no pressure until a boost is entered.",
+          component.stationM,
+        ),
+      );
+  }
 
   const status = findings.some((item) => item.severity === "error")
     ? "warning"
@@ -269,7 +325,7 @@ export function solveSteadyLiquid(input: {
     scenarioId: scenario.id,
     routeId: route.id,
     solverId: "liquid-steady-v1",
-    solverVersion: "0.1.0-preliminary",
+    solverVersion: "0.2.0-preliminary",
     readiness: "preliminary-unvalidated",
     status,
     inputHash,
@@ -279,6 +335,31 @@ export function solveSteadyLiquid(input: {
     profile,
     findings,
   };
+}
+
+function stationsWithComponents(route: PipelineRoute, components: PipelineComponent[]) {
+  const stations = route.stations.map((station) => ({ ...station }));
+  for (const component of components) {
+    if (stations.some((station) => Math.abs(station.stationM - component.stationM) < 0.001))
+      continue;
+    const endIndex = stations.findIndex((station) => station.stationM > component.stationM);
+    if (endIndex <= 0) continue;
+    const start = stations[endIndex - 1]!;
+    const end = stations[endIndex]!;
+    const ratio =
+      (component.stationM - start.stationM) / Math.max(1e-9, end.stationM - start.stationM);
+    const interpolate = (a: number | undefined, b: number | undefined) =>
+      a === undefined || b === undefined ? undefined : a + (b - a) * ratio;
+    const groundElevationM = interpolate(start.groundElevationM, end.groundElevationM);
+    const pipelineElevationM = interpolate(start.pipelineElevationM, end.pipelineElevationM);
+    stations.splice(endIndex, 0, {
+      stationM: component.stationM,
+      coordinate: component.coordinate,
+      ...(groundElevationM === undefined ? {} : { groundElevationM }),
+      ...(pipelineElevationM === undefined ? {} : { pipelineElevationM }),
+    });
+  }
+  return stations;
 }
 
 export function interpolateProfile(
@@ -313,6 +394,16 @@ export function interpolateProfile(
     ...(optional(start.hydraulicGradeM, end.hydraulicGradeM) === undefined
       ? {}
       : { hydraulicGradeM: optional(start.hydraulicGradeM, end.hydraulicGradeM)! }),
+    cumulativeElevationPressureChangePa: number(
+      start.cumulativeElevationPressureChangePa,
+      end.cumulativeElevationPressureChangePa,
+    ),
+    cumulativeFrictionLossPa: number(start.cumulativeFrictionLossPa, end.cumulativeFrictionLossPa),
+    cumulativeMinorLossPa: number(start.cumulativeMinorLossPa, end.cumulativeMinorLossPa),
+    cumulativePressureBoostPa: number(
+      start.cumulativePressureBoostPa,
+      end.cumulativePressureBoostPa,
+    ),
     pressureMarginPa: number(start.pressureMarginPa, end.pressureMarginPa),
     minimumPressureMarginPa: number(start.minimumPressureMarginPa, end.minimumPressureMarginPa),
     flowM3S: number(start.flowM3S, end.flowM3S),

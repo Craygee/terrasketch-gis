@@ -3,6 +3,7 @@ import type { GeoJSONSource, MapLayerMouseEvent, MapTouchEvent, Map as MlMap } f
 import type { FeatureCollection, LineString, Point } from "geojson";
 import { useMapRef } from "@/lib/gis/mapRef";
 import type {
+  PipelineComponent,
   PipelineProfilePoint,
   PipelineRoute,
   PipelineScenario,
@@ -11,9 +12,12 @@ import type {
 
 const SOURCE_ID = "landdraft-pipeline-result";
 const SCRUB_SOURCE_ID = "landdraft-pipeline-scrub";
+const COMPONENT_SOURCE_ID = "landdraft-pipeline-components";
 const LINE_ID = "landdraft-pipeline-result-line";
 const HIT_ID = "landdraft-pipeline-result-hit";
 const SCRUB_ID = "landdraft-pipeline-scrub-point";
+const COMPONENT_CIRCLE_ID = "landdraft-pipeline-component-circles";
+const COMPONENT_LABEL_ID = "landdraft-pipeline-component-labels";
 
 function resultColor(
   point: PipelineProfilePoint,
@@ -96,8 +100,98 @@ function buildSegments(
   };
 }
 
+function buildVisibleRoute(
+  route: PipelineRoute | undefined,
+  profile: PipelineProfilePoint[],
+  scenario: PipelineScenario | undefined,
+  mode: PipelineVisualizationMode,
+): FeatureCollection<LineString> {
+  if (scenario && profile.length >= 2) return buildSegments(profile, scenario, mode);
+  if (!route || route.coordinates.length < 2) return { type: "FeatureCollection", features: [] };
+  const elevations = route.stations
+    .map((station) => station.pipelineElevationM ?? station.groundElevationM)
+    .filter((value): value is number => value !== undefined);
+  const range: [number, number] = elevations.length
+    ? [Math.min(...elevations), Math.max(...elevations)]
+    : [0, 1];
+  const fallbackScenario = scenario ?? {
+    limits: {
+      maximumVelocityMS: 1,
+      minimumPressureMarginPa: 1,
+      maopPa: 1,
+      minimumPressurePa: 0,
+    },
+  };
+  return {
+    type: "FeatureCollection",
+    features: route.stations.slice(1).map((station, index) => {
+      const start = route.stations[index]!;
+      const elevation = station.pipelineElevationM ?? station.groundElevationM;
+      const color =
+        mode === "elevation" && elevation !== undefined
+          ? resultColor(
+              {
+                stationM: station.stationM,
+                coordinate: station.coordinate,
+                groundElevationM: elevation,
+                pipelineElevationM: elevation,
+                pressurePa: 0,
+                cumulativeElevationPressureChangePa: 0,
+                cumulativeFrictionLossPa: 0,
+                cumulativeMinorLossPa: 0,
+                cumulativePressureBoostPa: 0,
+                pressureMarginPa: 0,
+                minimumPressureMarginPa: 0,
+                flowM3S: 0,
+                velocityMS: 0,
+                temperatureK: 0,
+                reynoldsNumber: 0,
+                frictionFactor: 0,
+                pressureLossPaPerM: 0,
+                provenance: "provider",
+              },
+              fallbackScenario as PipelineScenario,
+              mode,
+              range,
+            )
+          : "#177542";
+      return {
+        type: "Feature",
+        properties: { color, startStationM: start.stationM, endStationM: station.stationM },
+        geometry: { type: "LineString", coordinates: [start.coordinate, station.coordinate] },
+      };
+    }),
+  };
+}
+
 function emptyPoint(): FeatureCollection<Point> {
   return { type: "FeatureCollection", features: [] };
+}
+
+function componentColor(kind: PipelineComponent["kind"]): string {
+  if (kind === "source") return "#15803d";
+  if (kind === "destination") return "#b91c1c";
+  if (kind === "centrifugal-pump" || kind === "booster-station") return "#2563eb";
+  if (kind === "block-valve") return "#d97706";
+  if (kind === "flow-meter") return "#7c3aed";
+  return "#475569";
+}
+
+function componentFeatures(components: PipelineComponent[]): FeatureCollection<Point> {
+  return {
+    type: "FeatureCollection",
+    features: components.map((component) => ({
+      type: "Feature",
+      id: component.id,
+      properties: {
+        id: component.id,
+        label: component.name,
+        color: componentColor(component.kind),
+        stationM: component.stationM,
+      },
+      geometry: { type: "Point", coordinates: component.coordinate },
+    })),
+  };
 }
 
 function ensureLayers(map: MlMap) {
@@ -139,6 +233,38 @@ function ensureLayers(map: MlMap) {
         "circle-stroke-width": 3,
       },
     });
+  if (!map.getSource(COMPONENT_SOURCE_ID))
+    map.addSource(COMPONENT_SOURCE_ID, { type: "geojson", data: emptyPoint() });
+  if (!map.getLayer(COMPONENT_CIRCLE_ID))
+    map.addLayer({
+      id: COMPONENT_CIRCLE_ID,
+      type: "circle",
+      source: COMPONENT_SOURCE_ID,
+      paint: {
+        "circle-radius": 7,
+        "circle-color": ["coalesce", ["get", "color"], "#475569"],
+        "circle-stroke-color": "#ffffff",
+        "circle-stroke-width": 2,
+      },
+    });
+  if (!map.getLayer(COMPONENT_LABEL_ID))
+    map.addLayer({
+      id: COMPONENT_LABEL_ID,
+      type: "symbol",
+      source: COMPONENT_SOURCE_ID,
+      layout: {
+        "text-field": ["coalesce", ["get", "label"], "Component"],
+        "text-size": 10,
+        "text-offset": [0, 1.4],
+        "text-anchor": "top",
+        "text-allow-overlap": false,
+      },
+      paint: {
+        "text-color": "#17221a",
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 1.5,
+      },
+    });
 }
 
 function nearestStationFromPoint(
@@ -175,16 +301,22 @@ export function PipelineMapOverlay({
   route,
   profile,
   scenario,
+  components,
   mode,
   scrubPoint,
   onScrub,
+  placementActive,
+  onPlaceComponent,
 }: {
   route: PipelineRoute | undefined;
   profile: PipelineProfilePoint[];
   scenario: PipelineScenario | undefined;
+  components: PipelineComponent[];
   mode: PipelineVisualizationMode;
   scrubPoint: PipelineProfilePoint | undefined;
   onScrub: (stationM: number | null) => void;
+  placementActive: boolean;
+  onPlaceComponent: (stationM: number) => void;
 }) {
   const { map } = useMapRef();
 
@@ -193,20 +325,23 @@ export function PipelineMapOverlay({
     const update = () => {
       if (!map.isStyleLoaded()) return;
       ensureLayers(map);
-      const data = scenario
-        ? buildSegments(profile, scenario, mode)
-        : { type: "FeatureCollection", features: [] };
+      const data = buildVisibleRoute(route, profile, scenario, mode);
       (map.getSource(SOURCE_ID) as GeoJSONSource | undefined)?.setData(data as FeatureCollection);
+      (map.getSource(COMPONENT_SOURCE_ID) as GeoJSONSource | undefined)?.setData(
+        componentFeatures(components),
+      );
       if (map.getLayer(LINE_ID)) map.moveLayer(LINE_ID);
       if (map.getLayer(HIT_ID)) map.moveLayer(HIT_ID);
       if (map.getLayer(SCRUB_ID)) map.moveLayer(SCRUB_ID);
+      if (map.getLayer(COMPONENT_CIRCLE_ID)) map.moveLayer(COMPONENT_CIRCLE_ID);
+      if (map.getLayer(COMPONENT_LABEL_ID)) map.moveLayer(COMPONENT_LABEL_ID);
     };
     update();
     map.on("style.load", update);
     return () => {
       map.off("style.load", update);
     };
-  }, [map, mode, profile, scenario]);
+  }, [components, map, mode, profile, route, scenario]);
 
   useEffect(() => {
     if (!map || !map.isStyleLoaded() || !map.getSource(SCRUB_SOURCE_ID)) return;
@@ -232,6 +367,11 @@ export function PipelineMapOverlay({
       if (nearest.distancePx <= 20) onScrub(nearest.stationM);
     };
     const handleLeave = () => onScrub(null);
+    const handleClick = (event: MapLayerMouseEvent) => {
+      if (!placementActive) return;
+      const nearest = nearestStationFromPoint(map, event.point, route);
+      if (nearest.distancePx <= 28) onPlaceComponent(nearest.stationM);
+    };
     const handleTouch = (event: MapTouchEvent) => {
       const point = event.points[0];
       if (!point) return;
@@ -244,6 +384,7 @@ export function PipelineMapOverlay({
       attached = true;
       map.on("mousemove", HIT_ID, handleMouse);
       map.on("mouseleave", HIT_ID, handleLeave);
+      map.on("click", HIT_ID, handleClick);
       map.on("touchmove", handleTouch);
     };
     attach();
@@ -253,10 +394,21 @@ export function PipelineMapOverlay({
       if (attached) {
         map.off("mousemove", HIT_ID, handleMouse);
         map.off("mouseleave", HIT_ID, handleLeave);
+        map.off("click", HIT_ID, handleClick);
         map.off("touchmove", handleTouch);
       }
     };
-  }, [map, onScrub, route]);
+  }, [map, onPlaceComponent, onScrub, placementActive, route]);
+
+  useEffect(() => {
+    if (!map) return;
+    const canvas = map.getCanvas();
+    const previous = canvas.style.cursor;
+    if (placementActive) canvas.style.cursor = "crosshair";
+    return () => {
+      canvas.style.cursor = previous;
+    };
+  }, [map, placementActive]);
 
   return null;
 }

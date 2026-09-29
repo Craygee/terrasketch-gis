@@ -2,7 +2,8 @@ import type { Feature, MultiPolygon, Point, Polygon } from "geojson";
 
 export type WaterClassification = "OBSERVED" | "DERIVED" | "INTERPOLATED" | "MODELED" | "INFERRED";
 export type WaterArea = Feature<Polygon | MultiPolygon>;
-export type WaterSourceId = "usgs-sites" | "twdb-wells" | "usgs-measurements" | "twdb-aquifers";
+export type WaterSourceId =
+  "usgs-sites" | "twdb-wells" | "usgs-measurements" | "twdb-aquifers" | "twdb-minor-aquifers";
 export interface WaterSource {
   id: WaterSourceId;
   agency: string;
@@ -61,10 +62,51 @@ export interface WaterSourceResult {
 }
 export interface WaterAnalysis {
   id: string;
-  version: "water-evidence-1";
+  version: "water-evidence-1" | "water-analysis-2";
   area: WaterArea;
   createdAt: string;
   results: WaterSourceResult[];
+  studies?: HydrogeologyStudies;
+}
+
+export type WellColorMode = "depth" | "aquifer" | "type";
+
+export interface AquiferStudySummary {
+  name: string;
+  extentType: "major" | "minor" | "well-assignment-only";
+  mappedAreaAcres: number | null;
+  wellCount: number;
+  depthSampleCount: number;
+  minimumDepthFt: number | null;
+  medianDepthFt: number | null;
+  maximumDepthFt: number | null;
+  storageVolumeStatus: "UNAVAILABLE";
+  storageVolumeReason: string;
+}
+
+export interface InterpolationStudySummary {
+  id: "depth-to-water" | "groundwater-elevation";
+  label: string;
+  status: "AVAILABLE" | "INSUFFICIENT_DATA";
+  sampleCount: number;
+  unit: string | null;
+  verticalDatum: string | null;
+  minimum: number | null;
+  median: number | null;
+  maximum: number | null;
+  method: string;
+  limitation: string;
+}
+
+export interface HydrogeologyStudies {
+  version: "hydro-screening-1";
+  generatedAt: string;
+  wellCount: number;
+  depthSampleCount: number;
+  depthBands: Record<string, number>;
+  aquifers: AquiferStudySummary[];
+  interpolation: InterpolationStudySummary[];
+  limitations: string[];
 }
 export interface WaterWorkspaceState {
   version: 1;

@@ -41,3 +41,4 @@ supabase/.temp/
 
 # Local public weather validation images
 .weather-validation/
+/.data/

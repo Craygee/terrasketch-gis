@@ -6,14 +6,20 @@ const WIDTH = 1_000;
 const HEIGHT = 190;
 const PADDING = { left: 54, right: 42, top: 20, bottom: 32 };
 
-function pathFor(values: Array<number | undefined>, min: number, max: number) {
+function pathFor(
+  values: Array<number | undefined>,
+  stations: number[],
+  endStationM: number,
+  min: number,
+  max: number,
+) {
   const drawableWidth = WIDTH - PADDING.left - PADDING.right;
   const drawableHeight = HEIGHT - PADDING.top - PADDING.bottom;
   let started = false;
   return values
     .map((value, index) => {
       if (value === undefined) return "";
-      const x = PADDING.left + (index / Math.max(1, values.length - 1)) * drawableWidth;
+      const x = PADDING.left + (stations[index]! / Math.max(1e-9, endStationM)) * drawableWidth;
       const y = PADDING.top + (1 - (value - min) / Math.max(1e-9, max - min)) * drawableHeight;
       const command = started ? "L" : "M";
       started = true;
@@ -35,6 +41,8 @@ export function PipelineProfile({
   const frame = useRef<SVGSVGElement>(null);
   const gradientId = useId();
   const metrics = useMemo(() => {
+    const stations = profile.map((point) => point.stationM);
+    const endStationM = stations.at(-1) ?? 0;
     const pressure = profile.map((point) => point.pressurePa * pipelineUnits.paToPsi);
     const elevation = profile
       .map((point) => point.pipelineElevationM ?? point.groundElevationM)
@@ -51,8 +59,8 @@ export function PipelineProfile({
       maxPressure,
       minElevation,
       maxElevation,
-      pressurePath: pathFor(pressure, minPressure, maxPressure),
-      elevationPath: pathFor(elevation, minElevation, maxElevation),
+      pressurePath: pathFor(pressure, stations, endStationM, minPressure, maxPressure),
+      elevationPath: pathFor(elevation, stations, endStationM, minElevation, maxElevation),
     };
   }, [profile]);
   const endStationM = profile.at(-1)?.stationM ?? 0;

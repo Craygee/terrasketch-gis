@@ -7,7 +7,13 @@ export const analyzeWaterSource = createServerFn({ method: "POST" })
     const v = input as { sourceId?: string; area?: unknown; accessToken?: string };
     if (
       !v ||
-      !["usgs-sites", "twdb-wells", "usgs-measurements", "twdb-aquifers"].includes(v.sourceId ?? "")
+      ![
+        "usgs-sites",
+        "twdb-wells",
+        "usgs-measurements",
+        "twdb-aquifers",
+        "twdb-minor-aquifers",
+      ].includes(v.sourceId ?? "")
     )
       throw new Error("Unknown water source");
     if (typeof v.accessToken !== "string" || v.accessToken.length > 8192)

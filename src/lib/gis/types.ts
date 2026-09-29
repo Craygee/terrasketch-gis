@@ -79,7 +79,13 @@ export interface AreaUnitsPref {
 export type LayerSource =
   | { kind: "import"; fileName: string }
   | { kind: "draw"; purpose?: "map-notes" }
-  | { kind: "derived"; sourceLayerId: string; query?: string }
+  | {
+      kind: "derived";
+      sourceLayerId: string;
+      query?: string;
+      cachedAt?: string;
+      cacheProvenance?: Record<string, unknown>;
+    }
   | {
       kind: "remote";
       url: string;
@@ -340,6 +346,8 @@ export interface ProjectState {
 }
 
 export interface MapViewState {
+  /** Fixed WGS84 coverage for project-area downloads; older camera-only areas omit this. */
+  bounds?: [number, number, number, number];
   center: [number, number];
   zoom: number;
   bearing: number;
