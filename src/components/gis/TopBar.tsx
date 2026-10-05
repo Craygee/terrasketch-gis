@@ -202,33 +202,21 @@ export function TopBar({
           onClick={() => setTableOpen(!tableOpen)}
           tourId="top-table"
         />
-        {wb.canEditProject && (
-          <BarBtn
-            icon={<Save className="size-4" />}
-            label="Save"
-            help="Save this project and add a restore point"
-            onClick={() => void save()}
-          />
-        )}
-        <BarBtn
-          icon={<Printer className="size-4" />}
-          label="Print map"
-          help="Open the printable map composer"
-          onClick={() => setPrintOpen(true)}
-          tourId="top-print"
-        />
-        <BarBtn
-          icon={<Share2 className="size-4" />}
-          label="Share"
-          help="Create secure map links and manage access"
+        <MenuBarButton
+          icon={<FolderOpen className="size-4" />}
+          label="File"
+          help="Save, print, share, and export"
+          open={showFileMenu}
+          tourId="compact-file-menu"
           onClick={() => {
-            setShowShare((value) => !value);
+            setShowFileMenu((value) => !value);
+            setShowModulesMenu(false);
+            setShowDataMenu(false);
             setShowProjects(false);
             setShowExport(false);
+            setShowShare(false);
             setShowAbout(false);
-            closeCompactMenus();
           }}
-          tourId="top-share"
         />
         {wb.canEditProject && (
           <BarBtn
@@ -252,21 +240,6 @@ export function TopBar({
             help="Project notes, documents, activity, email, and packets"
             onClick={() => setRecordsOpen(!recordsOpen)}
             tourId="top-records"
-          />
-        )}
-        {wb.canEditProject && (
-          <BarBtn
-            icon={<FileDown className="size-4" />}
-            label="Export"
-            help="Export map data to GIS file formats"
-            onClick={() => {
-              setShowExport((value) => !value);
-              setShowProjects(false);
-              setShowShare(false);
-              setShowAbout(false);
-              closeCompactMenus();
-            }}
-            tourId="top-export"
           />
         )}
       </div>
@@ -452,7 +425,7 @@ export function TopBar({
       {showFileMenu && (
         <div
           role="menu"
-          className="float-surface absolute right-2 top-14 max-h-[calc(100dvh-4rem)] w-64 overflow-y-auto rounded-2xl p-2 min-[1480px]:hidden"
+          className="float-surface absolute right-2 top-14 max-h-[calc(100dvh-4rem)] w-64 overflow-y-auto rounded-2xl p-2"
         >
           <div className="px-2 pb-1 pt-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
             Project & file
