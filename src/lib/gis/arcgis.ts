@@ -112,9 +112,22 @@ export async function fetchArcgisFields(
 ): Promise<ArcgisField[]> {
   if (isTexasParcelSource(layerUrl)) return [];
   if (classifyUrl(layerUrl) !== "arcgis") return [];
-  const response = await fetch(`${normalizeArcgisLayerUrl(layerUrl)}?f=json`, {
+  const base = normalizeArcgisLayerUrl(layerUrl);
+  let response = await fetch(`${base}?f=json`, {
     signal: signal ?? null,
   });
+  // Some public ArcGIS publishers disable the Services Directory while leaving queries public.
+  // A zero-geometry query still returns the authoritative field schema in that configuration.
+  if (!response.ok) {
+    const params = new URLSearchParams({
+      where: "1=1",
+      outFields: "*",
+      returnGeometry: "false",
+      resultRecordCount: "1",
+      f: "json",
+    });
+    response = await fetch(`${base}/query?${params.toString()}`, { signal: signal ?? null });
+  }
   if (!response.ok) throw new Error(`Layer details failed (${response.status})`);
   const json = (await response.json()) as {
     fields?: Array<{ name?: string; alias?: string; type?: string }>;
