@@ -17,6 +17,7 @@ export interface CatalogEntry {
   category: CatalogCategory;
   description: string;
   url?: string;
+  downloadUrl?: string;
   sourcePage?: string;
   geometry: "polygon" | "line" | "point";
   keywords: string[];
@@ -407,6 +408,23 @@ export const catalog: CatalogEntry[] = [
     keywords: ["wildlife", "habitat", "park", "ecology", "species", "conservation"],
     license: "Texas public data; dataset-specific terms",
   }),
+  {
+    id: "us-state-boundaries-shp",
+    name: "U.S. State Boundaries — 2025 Shapefile",
+    agency: "U.S. Census Bureau",
+    category: "Boundaries",
+    geometry: "polygon",
+    connection: "download",
+    updateCadence: "2025 cartographic boundary vintage",
+    states: "US",
+    description:
+      "Official national 1:500,000 cartographic state and equivalent boundaries. The zipped shapefile is downloaded and converted into an editable Public data layer.",
+    downloadUrl: "https://www2.census.gov/geo/tiger/GENZ2025/shp/cb_2025_us_state_500k.zip",
+    sourcePage:
+      "https://www.census.gov/geographies/mapping-files/2025/geo/carto-boundary-file.html",
+    keywords: ["state", "states", "boundary", "boundaries", "shapefile", "census", "tiger"],
+    license: "U.S. Census Bureau public data",
+  },
   {
     id: "census-tracts",
     name: "2020 Census Tracts",

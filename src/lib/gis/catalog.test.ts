@@ -14,3 +14,13 @@ test("offers detailed RRC pipeline data without removing the broader EIA layer",
   assert.equal(countyZips?.connection, "download");
   assert.match(countyZips?.sourcePage ?? "", /^https:\/\/mft\.rrc\.texas\.gov\//);
 });
+
+test("offers the official Census state-boundary shapefile as ready-to-add public data", () => {
+  const states = catalog.find((entry) => entry.id === "us-state-boundaries-shp");
+
+  assert.equal(states?.agency, "U.S. Census Bureau");
+  assert.equal(states?.category, "Boundaries");
+  assert.equal(states?.connection, "download");
+  assert.match(states?.downloadUrl ?? "", /cb_2025_us_state_500k\.zip$/);
+  assert.equal(states?.states, "US");
+});

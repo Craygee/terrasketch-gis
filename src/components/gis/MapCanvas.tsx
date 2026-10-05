@@ -8,6 +8,7 @@ import {
   setWorkerUrl,
   type MapMouseEvent,
   type GeoJSONSource,
+  type ImageSource,
 } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import mapLibreWorkerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
@@ -43,6 +44,7 @@ import {
   lineId,
   lineHitId,
   markerIconId,
+  imageId,
   pointId,
 } from "@/lib/gis/mapStyle";
 import { composeLabel } from "@/lib/gis/labels";
@@ -57,6 +59,7 @@ import {
 } from "@/lib/gis/measure";
 import { cn } from "@/lib/utils";
 import { installXweatherMapProtocol } from "@/lib/weather/xweatherProtocol";
+import { createSiteObjectFeature, siteObjectDefinition } from "@/lib/gis/siteDesigner";
 
 const TEXAS_CENTER: [number, number] = [-98.5, 31.3];
 
@@ -129,6 +132,8 @@ export function MapCanvas() {
     setLastPoint,
     setPendingFeatureSave,
     setPendingMapNoteLocation,
+    pendingSiteObject,
+    setPendingSiteObject,
     editEnabled,
     setEditEnabled,
   } = useMapRef();
@@ -162,6 +167,8 @@ export function MapCanvas() {
 
   const drawModeRef = useRef(wb.drawMode);
   drawModeRef.current = wb.drawMode;
+  const pendingSiteObjectRef = useRef(pendingSiteObject);
+  pendingSiteObjectRef.current = pendingSiteObject;
   const draftRef = useRef(draft);
   draftRef.current = draft;
 
@@ -391,9 +398,34 @@ export function MapCanvas() {
 
         for (const { layer, fc } of prepared) {
           const sid = sourceId(layer.id);
-          const existing = map.getSource(sid) as GeoJSONSource | undefined;
-          if (existing) {
-            if (sourcePayloadRef.current.get(sid) !== fc) existing.setData(fc);
+          const styleSignature = JSON.stringify([
+            layer.style,
+            layer.source.kind === "remote" ? layer.source.minZoom : null,
+            layer.source.kind === "image" ? [layer.source.dataUrl, layer.source.coordinates] : null,
+          ]);
+          let existing = map.getSource(sid);
+          if (
+            layer.source.kind === "image" &&
+            existing &&
+            styleSignatureRef.current.get(layer.id) !== styleSignature
+          ) {
+            for (const id of allLayerIds(layer.id)) if (map.getLayer(id)) map.removeLayer(id);
+            map.removeSource(sid);
+            existing = undefined;
+          }
+          if (layer.source.kind === "image") {
+            if (existing) {
+              (existing as ImageSource).setCoordinates(layer.source.coordinates);
+            } else {
+              map.addSource(sid, {
+                type: "image",
+                url: layer.source.dataUrl,
+                coordinates: layer.source.coordinates,
+              });
+            }
+            sourcePayloadRef.current.delete(sid);
+          } else if (existing) {
+            if (sourcePayloadRef.current.get(sid) !== fc) (existing as GeoJSONSource).setData(fc);
           } else {
             map.addSource(sid, {
               type: "geojson",
@@ -401,16 +433,13 @@ export function MapCanvas() {
               ...sourcePerformanceOptions(layer, fc.features.length),
             });
           }
-          sourcePayloadRef.current.set(sid, fc);
+          if (layer.source.kind !== "image") sourcePayloadRef.current.set(sid, fc);
 
-          const styleSignature = JSON.stringify([
-            layer.style,
-            layer.source.kind === "remote" ? layer.source.minZoom : null,
-          ]);
-          const fillLayerId = allLayerIds(layer.id).at(-1) as string;
+          const sentinelLayerId =
+            layer.source.kind === "image" ? imageId(layer.id) : fillId(layer.id);
           if (
             styleSignatureRef.current.get(layer.id) !== styleSignature ||
-            !map.getLayer(fillLayerId)
+            !map.getLayer(sentinelLayerId)
           ) {
             for (const id of allLayerIds(layer.id)) if (map.getLayer(id)) map.removeLayer(id);
             for (const spec of buildLayerSpecs(layer, map)) map.addLayer(spec);
@@ -516,7 +545,7 @@ export function MapCanvas() {
   const editableFeature = useMemo(() => {
     if (!editEnabled || !wb.selectedFeature) return null;
     const layer = wb.layers.find((item) => item.id === wb.selectedFeature?.layerId);
-    if (!layer || layer.source.kind === "remote") return null;
+    if (!layer || layer.source.kind === "remote" || layer.source.kind === "image") return null;
     const feature = layer.data.features[wb.selectedFeature.index];
     return feature && ["Point", "LineString", "Polygon"].includes(feature.geometry.type)
       ? feature
@@ -801,6 +830,41 @@ export function MapCanvas() {
 
     const onClick = (e: MapMouseEvent) => {
       setMenu(null);
+      const siteObjectRequest = pendingSiteObjectRef.current;
+      if (siteObjectRequest) {
+        const placement = createSiteObjectFeature(siteObjectRequest, [e.lngLat.lng, e.lngLat.lat]);
+        const existingLayer = wb.layers.find(
+          (layer) =>
+            layer.groupId === "design" &&
+            layer.source.kind === "draw" &&
+            layer.source.purpose === "site-design" &&
+            layer.source.siteObjectKind === placement.definition.id,
+        );
+        if (existingLayer) {
+          const featureIndex = existingLayer.data.features.length;
+          wb.appendFeature(existingLayer.id, placement.feature as never);
+          wb.setActiveLayer(existingLayer.id);
+          wb.setSelectedFeature({ layerId: existingLayer.id, index: featureIndex });
+        } else {
+          const nextLayer = wb.addLayer({
+            name: placement.layerName,
+            groupId: "design",
+            source: {
+              kind: "draw",
+              purpose: "site-design",
+              siteObjectKind: placement.definition.id,
+            },
+            style: placement.style,
+            data: { type: "FeatureCollection", features: [placement.feature as never] },
+          });
+          wb.setSelectedFeature({ layerId: nextLayer.id, index: 0 });
+        }
+        setPendingSiteObject(null);
+        toast.success(`${placement.definition.name} placed`, {
+          description: "Saved in Design overlays. Select it to edit attributes or geometry.",
+        });
+        return;
+      }
       const mode = drawModeRef.current;
       if (mode === "none" || mode === "select-multiple") {
         if (editEnabled && map.getLayer("feature-edit-vertex")) {
@@ -1025,6 +1089,7 @@ export function MapCanvas() {
     finishDraft,
     setPendingFeatureSave,
     setPendingMapNoteLocation,
+    setPendingSiteObject,
     editEnabled,
     editVertexMode,
     draftVertexMode,
@@ -1036,17 +1101,19 @@ export function MapCanvas() {
   useEffect(() => {
     const map = mapObj.current;
     if (!map) return;
-    map.getCanvas().style.cursor = editEnabled
-      ? editVertexMode === "move"
-        ? ""
-        : "crosshair"
-      : wb.drawMode === "none" || wb.drawMode === "select-multiple"
-        ? ""
-        : "crosshair";
+    map.getCanvas().style.cursor = pendingSiteObject
+      ? "crosshair"
+      : editEnabled
+        ? editVertexMode === "move"
+          ? ""
+          : "crosshair"
+        : wb.drawMode === "none" || wb.drawMode === "select-multiple"
+          ? ""
+          : "crosshair";
     if (wb.drawMode !== "select-box") boxDidSelectRef.current = false;
     if (wb.drawMode === "select-box" || panLocked) map.dragPan.disable();
     else map.dragPan.enable();
-  }, [editEnabled, editVertexMode, wb.drawMode, panLocked]);
+  }, [editEnabled, editVertexMode, wb.drawMode, panLocked, pendingSiteObject]);
 
   useEffect(() => {
     setDraftVertexMode("add");
@@ -1064,6 +1131,10 @@ export function MapCanvas() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
+        if (pendingSiteObjectRef.current) {
+          setPendingSiteObject(null);
+          return;
+        }
         if (editEnabled) {
           restoreEditableGeometry(true);
           return;
@@ -1079,7 +1150,15 @@ export function MapCanvas() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [clearDraftGeometry, editEnabled, finishDraft, restoreEditableGeometry, setEditEnabled, wb]);
+  }, [
+    clearDraftGeometry,
+    editEnabled,
+    finishDraft,
+    restoreEditableGeometry,
+    setEditEnabled,
+    setPendingSiteObject,
+    wb,
+  ]);
 
   /* ---------------- live readout ---------------- */
   const readout = useMemo(() => {
@@ -1155,6 +1234,30 @@ export function MapCanvas() {
   return (
     <div className="relative h-full w-full">
       <div ref={containerRef} className="h-full w-full" />
+
+      {pendingSiteObject && (
+        <div className="float-surface pointer-events-auto absolute left-1/2 top-4 z-30 flex -translate-x-1/2 items-center gap-3 rounded-2xl px-4 py-3 shadow-xl">
+          <span className="text-xl" aria-hidden="true">
+            {siteObjectDefinition(pendingSiteObject.definitionId).icon}
+          </span>
+          <div>
+            <strong className="block text-xs">
+              Click the map to place {pendingSiteObject.name}
+            </strong>
+            <span className="text-[10px] text-muted-foreground">
+              It will be saved in Design overlays. Esc cancels.
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setPendingSiteObject(null)}
+            className="rounded-lg p-1.5 hover:bg-accent"
+            aria-label="Cancel site object placement"
+          >
+            <X className="size-4" />
+          </button>
+        </div>
+      )}
 
       <div className="landdraft-map-lock-controls pointer-events-auto absolute bottom-48 right-2 z-20 flex flex-col gap-1">
         <button

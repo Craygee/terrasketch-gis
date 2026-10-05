@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Wrench } from "lucide-react";
+import { Building2, Wrench } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -43,8 +43,15 @@ const modules = [
 export function LandDraftTools() {
   const [open, setOpen] = useState(false);
   const { canEditProject } = useWorkbench();
-  const { setAnalysisOpen, setAssistantOpen, setPrintOpen } = useMapRef();
+  const { setAnalysisOpen, setAssistantOpen, setPrintOpen, setSiteDesignerOpen } = useMapRef();
   const actions = [
+    {
+      name: "Site Designer",
+      description: "Place buildings, trees, ponds, utilities, and georeferenced design overlays.",
+      run: () => setSiteDesignerOpen(true),
+      edit: true,
+      icon: <Building2 className="size-4" />,
+    },
     {
       name: "LandDraft AI",
       description: "Research, map queries, and project assistance.",
@@ -104,7 +111,10 @@ export function LandDraftTools() {
                   tool.run();
                 }}
               >
-                <strong className="block text-sm">{tool.name}</strong>
+                <strong className="flex items-center gap-1.5 text-sm">
+                  {"icon" in tool ? tool.icon : null}
+                  {tool.name}
+                </strong>
                 <span className="text-xs text-muted-foreground">{tool.description}</span>
               </button>
             ))}

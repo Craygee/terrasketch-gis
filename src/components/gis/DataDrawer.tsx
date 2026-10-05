@@ -40,9 +40,21 @@ import {
 } from "@/lib/gis/connectionHealth";
 import { basemapProbeUrl, saveBasemapUrlOverride } from "@/lib/gis/basemaps";
 import { cn } from "@/lib/utils";
+import { importFile } from "@/lib/gis/import";
 
 const catalogLayerStyle = (entry: CatalogEntry) => {
   if (entry.id === "tx-parcels") return { fillOpacity: 0, strokeWidth: 1.5 };
+  if (entry.id === "us-state-boundaries-shp")
+    return {
+      fillOpacity: 0.08,
+      strokeWidth: 2,
+      strokeColor: "#3b6ea5",
+      fillColor: "#3b6ea5",
+      labelEnabled: true,
+      labelTemplate: "{NAME}",
+      labelFields: ["NAME"],
+      labelSize: 12,
+    };
   if (entry.geometry === "line") return { fillOpacity: 0, strokeWidth: 2.5 };
   return {};
 };
@@ -115,20 +127,18 @@ export function DataDrawer() {
 
   const load = async (entry: CatalogEntry) => {
     const cloudOverride = wb.connectionHints[`catalog:${entry.id}`];
-    const entryUrl = cloudOverride?.verified ? cloudOverride.url : resolveCatalogUrl(entry);
-    if (!entryUrl) {
-      if (entry.sourcePage) window.open(entry.sourcePage, "_blank", "noopener,noreferrer");
-      return;
-    }
+    const resolvedEntryUrl = cloudOverride?.verified ? cloudOverride.url : resolveCatalogUrl(entry);
     const existing = wb.layers.find(
-      (layer) => layer.source.kind === "remote" && layer.source.catalogId === entry.id,
+      (layer) =>
+        (layer.source.kind === "remote" || layer.source.kind === "import") &&
+        layer.source.catalogId === entry.id,
     );
     if (existing) {
       wb.updateLayer(existing.id, {
         visible: true,
         source:
-          existing.source.kind === "remote"
-            ? { ...existing.source, url: entryUrl }
+          existing.source.kind === "remote" && resolvedEntryUrl
+            ? { ...existing.source, url: resolvedEntryUrl }
             : existing.source,
       });
       wb.setActiveLayer(existing.id);
@@ -139,6 +149,54 @@ export function DataDrawer() {
             : "The existing layer was made visible.",
       });
       setDrawerOpen(false);
+      return;
+    }
+    if (entry.downloadUrl) {
+      setLoadingId(entry.id);
+      try {
+        const downloadRequestUrl =
+          entry.id === "us-state-boundaries-shp"
+            ? "/api/public-data/census-state-boundaries"
+            : entry.downloadUrl;
+        const response = await fetch(downloadRequestUrl);
+        if (!response.ok) throw new Error(`Publisher returned HTTP ${response.status}`);
+        const fileName = entry.downloadUrl.split("/").at(-1) || `${entry.id}.zip`;
+        const result = await importFile(
+          new File([await response.blob()], fileName, { type: "application/zip" }),
+        );
+        const layer = wb.addLayer({
+          name: entry.name,
+          data: result.data,
+          groupId: "public",
+          source: {
+            kind: "import",
+            fileName,
+            catalogId: entry.id,
+            attribution: entry.agency,
+            sourceUrl: entry.downloadUrl,
+          },
+          style: catalogLayerStyle(entry),
+        });
+        wb.setActiveLayer(layer.id);
+        toast.success(`${entry.name} added`, {
+          description: `${result.featureCount.toLocaleString()} official boundaries loaded into Public data.`,
+        });
+        setDrawerOpen(false);
+      } catch (error) {
+        toast.error(`${entry.name} could not be imported`, {
+          description:
+            error instanceof Error
+              ? `${error.message}. The publisher download remains available under Source details.`
+              : "The publisher download could not be read.",
+        });
+      } finally {
+        setLoadingId(null);
+      }
+      return;
+    }
+    const entryUrl = resolvedEntryUrl;
+    if (!entryUrl) {
+      if (entry.sourcePage) window.open(entry.sourcePage, "_blank", "noopener,noreferrer");
       return;
     }
     const where =
@@ -625,9 +683,9 @@ export function DataDrawer() {
                         <span className="rounded-full bg-secondary px-2 py-0.5">
                           {entry.geometry}
                         </span>
-                        {entry.url && (
+                        {(entry.url || entry.downloadUrl) && (
                           <span className="rounded-full bg-secondary px-2 py-0.5">
-                            loads current view
+                            {entry.downloadUrl ? "official shapefile" : "loads current view"}
                           </span>
                         )}
                         <span
@@ -694,15 +752,15 @@ export function DataDrawer() {
                     >
                       {loadingId === entry.id ? (
                         <Loader2 className="size-3.5 animate-spin" />
-                      ) : entry.url ? (
+                      ) : entry.url || entry.downloadUrl ? (
                         <Plus className="size-3.5" />
                       ) : (
                         <ExternalLink className="size-3.5" />
                       )}
-                      {entry.url ? "Add" : "Source"}
+                      {entry.url || entry.downloadUrl ? "Add" : "Source"}
                     </button>
                   </div>
-                  {entry.sourcePage && entry.url && (
+                  {entry.sourcePage && (entry.url || entry.downloadUrl) && (
                     <a
                       href={entry.sourcePage}
                       target="_blank"
@@ -710,6 +768,16 @@ export function DataDrawer() {
                       className="mt-2 inline-flex items-center gap-1 text-[10px] text-primary hover:underline"
                     >
                       <ExternalLink className="size-3" /> Source details
+                    </a>
+                  )}
+                  {entry.downloadUrl && (
+                    <a
+                      href={entry.downloadUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="ml-3 mt-2 inline-flex items-center gap-1 text-[10px] text-primary hover:underline"
+                    >
+                      <ExternalLink className="size-3" /> Download original ZIP
                     </a>
                   )}
                 </div>

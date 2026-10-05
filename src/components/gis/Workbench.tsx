@@ -33,6 +33,9 @@ const SpatialAnalysisPanel = lazy(() =>
 const ProjectRecordsPanel = lazy(() =>
   import("./ProjectRecordsPanel").then((module) => ({ default: module.ProjectRecordsPanel })),
 );
+const SiteDesignerPanel = lazy(() =>
+  import("./SiteDesignerPanel").then((module) => ({ default: module.SiteDesignerPanel })),
+);
 
 export default function Workbench() {
   return (
@@ -56,7 +59,7 @@ export default function Workbench() {
 function WorkbenchShell() {
   const [panelOpen, setPanelOpen] = useState(true);
   const wb = useWorkbench();
-  const { assistantOpen, printOpen, analysisOpen, recordsOpen } = useMapRef();
+  const { assistantOpen, printOpen, analysisOpen, recordsOpen, siteDesignerOpen } = useMapRef();
 
   useEffect(() => {
     if (window.innerWidth < 768) setPanelOpen(false);
@@ -136,6 +139,11 @@ function WorkbenchShell() {
       {recordsOpen && wb.canEditProject && (
         <Suspense fallback={null}>
           <ProjectRecordsPanel />
+        </Suspense>
+      )}
+      {siteDesignerOpen && wb.canEditProject && (
+        <Suspense fallback={null}>
+          <SiteDesignerPanel />
         </Suspense>
       )}
     </div>

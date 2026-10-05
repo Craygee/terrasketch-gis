@@ -82,6 +82,11 @@ export default {
           const response = await handlePipelineElevationRequest(request);
           if (response) return applyEnvironmentHeaders(response);
         }
+        if (new URL(request.url).pathname === "/api/public-data/census-state-boundaries") {
+          const { handlePublicDataDownload } = await import("./lib/gis/publicData.server");
+          const response = await handlePublicDataDownload(request);
+          if (response) return applyEnvironmentHeaders(response);
+        }
         const nativeRadar = await handleNativeRadarProxy(request, env);
         if (nativeRadar) return applyEnvironmentHeaders(nativeRadar);
         if (new URL(request.url).pathname.startsWith("/api/weather/xweather/"))
