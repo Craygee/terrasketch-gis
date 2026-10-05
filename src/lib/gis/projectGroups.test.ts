@@ -11,7 +11,7 @@ test("restores the imported-files group in older projects", () => {
 
   assert.deepEqual(
     result.map((group) => group.id),
-    ["working", "sketch", "imports", "public"],
+    ["working", "sketch", "design", "imports", "public"],
   );
   assert.equal(result.find((group) => group.id === "imports")?.name, "Imported files");
   assert.equal(result.find((group) => group.id === "working")?.collapsed, true);

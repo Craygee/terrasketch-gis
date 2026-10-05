@@ -3,6 +3,7 @@ import type { LayerGroup } from "./types.ts";
 export const CORE_LAYER_GROUPS: readonly LayerGroup[] = [
   { id: "working", name: "Working layers", collapsed: false },
   { id: "sketch", name: "My sketches", collapsed: false },
+  { id: "design", name: "Design overlays", collapsed: false },
   { id: "imports", name: "Imported files", collapsed: false },
   { id: "public", name: "Public data", collapsed: false },
 ];

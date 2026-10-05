@@ -2,6 +2,7 @@ import { createContext, useContext, useMemo, useRef, useState, type ReactNode } 
 import type { Map as MlMap } from "maplibre-gl";
 import type { Feature } from "geojson";
 import type { LayerSource, LayerStyle } from "./types";
+import type { SiteObjectPlacementRequest } from "./siteDesigner";
 
 export interface PendingFeatureSave {
   features: Feature[];
@@ -32,6 +33,10 @@ interface MapRefApi {
   setRecordsOpen: (open: boolean) => void;
   recordsTargetNoteId: string | null;
   setRecordsTargetNoteId: (id: string | null) => void;
+  siteDesignerOpen: boolean;
+  setSiteDesignerOpen: (open: boolean) => void;
+  pendingSiteObject: SiteObjectPlacementRequest | null;
+  setPendingSiteObject: (request: SiteObjectPlacementRequest | null) => void;
   pendingCatalogQuery: string;
   setPendingCatalogQuery: (q: string) => void;
   lastPoint: { lng: number; lat: number } | null;
@@ -57,6 +62,10 @@ export function MapRefProvider({ children }: { children: ReactNode }) {
   const [connectionsOpen, setConnectionsOpen] = useState(false);
   const [recordsOpen, setRecordsOpen] = useState(false);
   const [recordsTargetNoteId, setRecordsTargetNoteId] = useState<string | null>(null);
+  const [siteDesignerOpen, setSiteDesignerOpen] = useState(false);
+  const [pendingSiteObject, setPendingSiteObject] = useState<SiteObjectPlacementRequest | null>(
+    null,
+  );
   const [pendingCatalogQuery, setPendingCatalogQuery] = useState("");
   const [lastPoint, setLastPoint] = useState<{ lng: number; lat: number } | null>(null);
   const [pendingFeatureSave, setPendingFeatureSave] = useState<PendingFeatureSave | null>(null);
@@ -89,6 +98,10 @@ export function MapRefProvider({ children }: { children: ReactNode }) {
       setRecordsOpen,
       recordsTargetNoteId,
       setRecordsTargetNoteId,
+      siteDesignerOpen,
+      setSiteDesignerOpen,
+      pendingSiteObject,
+      setPendingSiteObject,
       pendingCatalogQuery,
       setPendingCatalogQuery,
       lastPoint,
@@ -110,6 +123,8 @@ export function MapRefProvider({ children }: { children: ReactNode }) {
       connectionsOpen,
       recordsOpen,
       recordsTargetNoteId,
+      siteDesignerOpen,
+      pendingSiteObject,
       pendingCatalogQuery,
       lastPoint,
       pendingFeatureSave,

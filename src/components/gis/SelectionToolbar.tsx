@@ -241,17 +241,19 @@ export function SelectionToolbar({ mobile = false }: { mobile?: boolean }) {
           label={selected.length > 1 ? "New layer from selection" : "New layer"}
           onClick={createCombinedLayer}
         />
-        {selected.length === 1 && first.layer.source.kind !== "remote" && (
-          <Action
-            icon={<Pencil />}
-            label={editEnabled ? "Finish editing" : "Edit vertices"}
-            onClick={() => {
-              wb.setDrawMode("none");
-              setEditEnabled(!editEnabled);
-            }}
-            active={editEnabled}
-          />
-        )}
+        {selected.length === 1 &&
+          first.layer.source.kind !== "remote" &&
+          first.layer.source.kind !== "image" && (
+            <Action
+              icon={<Pencil />}
+              label={editEnabled ? "Finish editing" : "Edit vertices"}
+              onClick={() => {
+                wb.setDrawMode("none");
+                setEditEnabled(!editEnabled);
+              }}
+              active={editEnabled}
+            />
+          )}
         {selected.length > 1 && (
           <Action icon={<GitBranchPlus />} label="Split layers" onClick={createSeparateLayers} />
         )}

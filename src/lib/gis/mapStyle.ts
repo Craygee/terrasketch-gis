@@ -7,6 +7,8 @@ export const lineId = (layerId: string) => `line-${layerId}`;
 export const lineHitId = (layerId: string) => `line-hit-${layerId}`;
 export const pointId = (layerId: string) => `point-${layerId}`;
 export const markerIconId = (layerId: string) => `marker-${layerId}`;
+export const imageId = (layerId: string) => `image-${layerId}`;
+export const extrusionId = (layerId: string) => `extrusion-${layerId}`;
 export const labelId = (layerId: string) => `label-${layerId}`;
 export const highlightId = (layerId: string) => `hl-${layerId}`;
 export const highlightPointId = (layerId: string) => `hl-point-${layerId}`;
@@ -104,6 +106,15 @@ export function ensurePatternImage(map: MlMap, pattern: FillPattern, color: stri
 export function buildLayerSpecs(layer: GisLayer, map: MlMap): LayerSpecification[] {
   const src = sourceId(layer.id);
   const s = layer.style;
+  if (layer.source.kind === "image")
+    return [
+      {
+        id: imageId(layer.id),
+        type: "raster",
+        source: src,
+        paint: { "raster-opacity": Math.max(0, Math.min(1, s.fillOpacity)) },
+      },
+    ];
   const labelMinZoom = Math.max(0, Math.min(23, s.labelMinZoom ?? 4));
   const labelMaxZoom = Math.max(labelMinZoom + 0.5, Math.min(24, s.labelMaxZoom ?? 24));
   const categorized = s.categorized?.enabled && s.categorized.field ? s.categorized : undefined;
@@ -172,6 +183,31 @@ export function buildLayerSpecs(layer: GisLayer, map: MlMap): LayerSpecification
       source: src,
       filter: geometryFilter(["==", ["geometry-type"], "Polygon"]) as never,
       paint: fillPaint as never,
+      ...zoomRange,
+    },
+    {
+      id: extrusionId(layer.id),
+      type: "fill-extrusion",
+      source: src,
+      filter: geometryFilter([
+        "all",
+        ["==", ["geometry-type"], "Polygon"],
+        [">", ["to-number", ["coalesce", ["get", "HEIGHT_FT"], 0]], 0],
+      ]) as never,
+      paint: {
+        "fill-extrusion-color": categoryMatch(categorized?.fallbackColor ?? s.fillColor) as never,
+        "fill-extrusion-height": [
+          "*",
+          ["to-number", ["coalesce", ["get", "HEIGHT_FT"], 0]],
+          0.3048,
+        ] as never,
+        "fill-extrusion-base": [
+          "*",
+          ["to-number", ["coalesce", ["get", "BASE_HEIGHT_FT"], 0]],
+          0.3048,
+        ] as never,
+        "fill-extrusion-opacity": Math.max(0.35, Math.min(0.92, s.fillOpacity + 0.28)),
+      },
       ...zoomRange,
     },
     {
@@ -391,7 +427,9 @@ export const allLayerIds = (layerId: string) => [
   highlightId(layerId),
   markerIconId(layerId),
   pointId(layerId),
+  extrusionId(layerId),
   lineHitId(layerId),
   lineId(layerId),
+  imageId(layerId),
   fillId(layerId),
 ];

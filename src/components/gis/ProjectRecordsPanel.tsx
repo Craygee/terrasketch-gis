@@ -27,6 +27,7 @@ import { toast } from "sonner";
 
 import { useAuth } from "@/lib/auth";
 import { useMapRef } from "@/lib/gis/mapRef";
+import { groupLayersForMap, mapBoundsForLayers } from "@/lib/gis/recordNavigation";
 import {
   deleteProjectAsset,
   downloadProjectAsset,
@@ -207,6 +208,42 @@ export function ProjectRecordsPanel() {
   ].sort((left, right) => right.createdAt - left.createdAt);
   const attachmentsForProjectNote = (noteId: string) =>
     records.documents.filter((document) => document.projectNoteId === noteId);
+
+  const zoomToRecordLayers = (layers: typeof wb.displayLayers, label: string) => {
+    if (!map) {
+      toast.error("Map is not ready yet");
+      return false;
+    }
+    const bounds = mapBoundsForLayers(layers);
+    if (!bounds) {
+      toast.error(`${label} has no loaded map features to zoom to`);
+      return false;
+    }
+    const [west, south, east, north] = bounds;
+    if (west === east && south === north) {
+      map.easeTo({ center: [west, south], zoom: Math.max(map.getZoom(), 16) });
+    } else {
+      map.fitBounds(bounds, { padding: 80, maxZoom: 16 });
+    }
+    setRecordsOpen(false);
+    return true;
+  };
+
+  const zoomToLayerRecord = (layerId: string) => {
+    const layer = wb.displayLayers.find((item) => item.id === layerId);
+    if (!layer || !zoomToRecordLayers([layer], layer?.name ?? "Layer")) return;
+    if (!layer.visible) wb.toggleVisible(layer.id);
+    wb.setActiveLayer(layer.id);
+  };
+
+  const zoomToGroupRecord = (groupId: string) => {
+    const group = wb.groups.find((item) => item.id === groupId);
+    const layers = groupLayersForMap(groupId, wb.groups, wb.displayLayers);
+    if (!zoomToRecordLayers(layers, group?.name ?? "Group")) return;
+    wb.setGroupVisible(groupId, true);
+    if (group?.collapsed) wb.toggleGroup(groupId);
+    wb.setSelectedGroups([groupId]);
+  };
 
   const updateMapNoteMarker = (noteId: string, properties: Record<string, unknown>) => {
     const markerLayer = wb.layers.find(
@@ -1511,14 +1548,8 @@ export function ProjectRecordsPanel() {
                   {filteredLayerNoteRows.length === 1 ? "" : "s"}
                 </p>
                 {filteredLayerNoteRows.map(({ note, layer, group, order }) => (
-                  <button
+                  <div
                     key={note.id}
-                    type="button"
-                    onClick={() => {
-                      setLayerNoteEditor({ ...note });
-                      setLayerNoteEditorTagText(layerNoteTagDraft(note.tags));
-                      setLayerNoteTimestampOpen(false);
-                    }}
                     className={cn(
                       "flex w-full items-start gap-2 rounded-xl px-2.5 py-2 text-left hover:bg-accent",
                       layerNoteEditor?.id === note.id
@@ -1526,34 +1557,68 @@ export function ProjectRecordsPanel() {
                         : "bg-secondary",
                     )}
                   >
-                    <span className="num flex size-6 shrink-0 items-center justify-center rounded-lg bg-card text-[9px] font-semibold">
-                      {Number.isFinite(order) ? order : "—"}
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[11px] font-semibold">
-                        {note.pinned && <Pin className="mr-1 inline size-2.5 text-primary" />}
-                        {note.subject}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setLayerNoteEditor({ ...note });
+                        setLayerNoteEditorTagText(layerNoteTagDraft(note.tags));
+                        setLayerNoteTimestampOpen(false);
+                      }}
+                      className="flex min-w-0 flex-1 items-start gap-2 text-left"
+                    >
+                      <span className="num flex size-6 shrink-0 items-center justify-center rounded-lg bg-card text-[9px] font-semibold">
+                        {Number.isFinite(order) ? order : "—"}
                       </span>
-                      <span className="block truncate text-[9px] text-muted-foreground">
-                        {layer?.name ?? "Detached layer"} ·{" "}
-                        {group?.name ?? "Original layer unavailable"} ·{" "}
-                        {new Date(note.createdAt).toLocaleString()}
-                      </span>
-                      {note.tags.length > 0 && (
-                        <span className="mt-1 flex flex-wrap gap-1">
-                          {note.tags.map((tag) => (
-                            <span
-                              key={tag}
-                              className="rounded-full bg-card px-1.5 py-0.5 text-[8px]"
-                            >
-                              #{tag}
-                            </span>
-                          ))}
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[11px] font-semibold">
+                          {note.pinned && <Pin className="mr-1 inline size-2.5 text-primary" />}
+                          {note.subject}
                         </span>
-                      )}
-                    </span>
-                    <ChevronRight className="mt-1 size-3.5 shrink-0 text-muted-foreground" />
-                  </button>
+                        <span className="block truncate text-[9px] text-muted-foreground">
+                          {layer?.name ?? "Detached layer"} ·{" "}
+                          {group?.name ?? "Original layer unavailable"} ·{" "}
+                          {new Date(note.createdAt).toLocaleString()}
+                        </span>
+                        {note.tags.length > 0 && (
+                          <span className="mt-1 flex flex-wrap gap-1">
+                            {note.tags.map((tag) => (
+                              <span
+                                key={tag}
+                                className="rounded-full bg-card px-1.5 py-0.5 text-[8px]"
+                              >
+                                #{tag}
+                              </span>
+                            ))}
+                          </span>
+                        )}
+                      </span>
+                      <ChevronRight className="mt-1 size-3.5 shrink-0 text-muted-foreground" />
+                    </button>
+                    {layer && (
+                      <div className="flex shrink-0 items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => zoomToLayerRecord(layer.id)}
+                          className="rounded-lg bg-card p-1.5 text-primary hover:bg-primary/10"
+                          aria-label={`Zoom to layer ${layer.name}`}
+                          title={`Zoom to layer: ${layer.name}`}
+                        >
+                          <MapPin className="size-3.5" />
+                        </button>
+                        {group && (
+                          <button
+                            type="button"
+                            onClick={() => zoomToGroupRecord(group.id)}
+                            className="rounded-lg bg-card p-1.5 text-primary hover:bg-primary/10"
+                            aria-label={`Zoom to group ${group.name}`}
+                            title={`Zoom to group: ${group.name}`}
+                          >
+                            <Folder className="size-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 ))}
                 {!filteredLayerNoteRows.length && (
                   <Empty
@@ -1595,6 +1660,26 @@ export function ProjectRecordsPanel() {
                           <X className="size-3.5" />
                         </button>
                       </div>
+                      {layer && (
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => zoomToLayerRecord(layer.id)}
+                            className="flex items-center gap-1.5 rounded-xl bg-secondary px-3 py-2 text-[10px] font-semibold hover:bg-accent"
+                          >
+                            <MapPin className="size-3.5 text-primary" /> Zoom to layer
+                          </button>
+                          {group && (
+                            <button
+                              type="button"
+                              onClick={() => zoomToGroupRecord(group.id)}
+                              className="flex items-center gap-1.5 rounded-xl bg-secondary px-3 py-2 text-[10px] font-semibold hover:bg-accent"
+                            >
+                              <Folder className="size-3.5 text-primary" /> Zoom to group
+                            </button>
+                          )}
+                        </div>
+                      )}
                       <div className="mt-2 grid grid-cols-[1fr_auto] gap-2">
                         <label className="text-[10px] font-semibold">
                           Subject

@@ -18,7 +18,13 @@ import {
   ZoomOut,
 } from "lucide-react";
 import { toast } from "sonner";
-import { Map as MlMap, Marker, NavigationControl, type GeoJSONSource } from "maplibre-gl";
+import {
+  Map as MlMap,
+  Marker,
+  NavigationControl,
+  type GeoJSONSource,
+  type ImageSource,
+} from "maplibre-gl";
 import type { Feature, FeatureCollection } from "geojson";
 
 import { useWorkbench } from "@/lib/gis/store";
@@ -337,10 +343,18 @@ export function PrintComposer() {
           },
         })) as Feature[],
       };
-      const source = map.getSource(sid) as GeoJSONSource | undefined;
-      if (source) source.setData(data);
-      else {
-        map.addSource(sid, { type: "geojson", data, generateId: true });
+      const source = map.getSource(sid);
+      if (layer.source.kind === "image") {
+        if (source) (source as ImageSource).setCoordinates(layer.source.coordinates);
+        else
+          map.addSource(sid, {
+            type: "image",
+            url: layer.source.dataUrl,
+            coordinates: layer.source.coordinates,
+          });
+      } else if (source) (source as GeoJSONSource).setData(data);
+      else map.addSource(sid, { type: "geojson", data, generateId: true });
+      if (!allLayerIds(printLayer.id).some((id) => map.getLayer(id))) {
         for (const spec of buildLayerSpecs(printLayer, map)) map.addLayer(spec);
       }
       for (const id of allLayerIds(printLayer.id))

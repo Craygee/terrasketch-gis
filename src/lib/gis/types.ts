@@ -77,8 +77,26 @@ export interface AreaUnitsPref {
 }
 
 export type LayerSource =
-  | { kind: "import"; fileName: string }
-  | { kind: "draw"; purpose?: "map-notes" }
+  | {
+      kind: "import";
+      fileName: string;
+      catalogId?: string;
+      attribution?: string;
+      sourceUrl?: string;
+      designSource?: "canva" | "sketchup" | "gis";
+    }
+  | {
+      kind: "draw";
+      purpose?: "map-notes" | "site-design";
+      siteObjectKind?: string;
+    }
+  | {
+      kind: "image";
+      fileName: string;
+      dataUrl: string;
+      coordinates: [[number, number], [number, number], [number, number], [number, number]];
+      designSource?: "canva" | "image";
+    }
   | {
       kind: "derived";
       sourceLayerId: string;
