@@ -42,6 +42,7 @@ import { useAuth } from "@/lib/auth";
 import { LANDDRAFT_APP_VERSION, projectVersionLabel } from "@/lib/appVersion";
 import { downloadSharedState, shareStore, type MapShare, type ShareRole } from "./sharing";
 import { DEFAULT_BASEMAP_ID } from "./basemaps";
+import { createCoreLayerGroups, ensureCoreLayerGroups } from "./projectGroups";
 
 export type DrawMode =
   | "none"
@@ -111,12 +112,7 @@ const initialState = (): WorkbenchState => ({
   saveHistory: [],
   autosave: true,
   lastSavedAt: null,
-  groups: [
-    { id: "working", name: "Working layers", collapsed: false },
-    { id: "sketch", name: "My sketches", collapsed: false },
-    { id: "imports", name: "Imported files", collapsed: false },
-    { id: "public", name: "Public data", collapsed: false },
-  ],
+  groups: createCoreLayerGroups(),
   layers: [],
   basemapId: DEFAULT_BASEMAP_ID,
   mapView: { center: [-98.5, 31.3], zoom: 6, bearing: 0, pitch: 0 },
@@ -150,12 +146,7 @@ const blankProjectState = (name: string): ProjectState => ({
   version: 1,
   landDraftVersion: LANDDRAFT_APP_VERSION,
   name,
-  groups: [
-    { id: "working", name: "Working layers", collapsed: false },
-    { id: "sketch", name: "My sketches", collapsed: false },
-    { id: "imports", name: "Imported files", collapsed: false },
-    { id: "public", name: "Public data", collapsed: false },
-  ],
+  groups: createCoreLayerGroups(),
   layers: [],
   basemapId: DEFAULT_BASEMAP_ID,
   mapView: { center: [-98.5, 31.3], zoom: 6, bearing: 0, pitch: 0 },
@@ -214,9 +205,7 @@ const normalizedProject = (
   activeShare: MapShare | null = null,
 ) => {
   const stored = project.state;
-  const groups = stored.groups.some((group) => group.id === "working")
-    ? stored.groups
-    : [{ id: "working", name: "Working layers", collapsed: false }, ...stored.groups];
+  const groups = ensureCoreLayerGroups(stored.groups);
   const normalizedLayers = stored.layers.map((layer, index) => {
     const normalized = normalizedLayer(layer, index);
     const durable = activeShare && accessRole !== "admin" ? normalized : durableLayer(normalized);
@@ -688,8 +677,12 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
           projectName: s.projectName,
           relatedId: layer.id,
         };
+        const groups = ensureCoreLayerGroups(s.groups).map((group) =>
+          group.id === input.groupId ? { ...group, collapsed: false } : group,
+        );
         return {
           ...s,
+          groups,
           layers: [layer, ...s.layers],
           activeLayerId: layer.id,
           selectedLayerIds: [layer.id],

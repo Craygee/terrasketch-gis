@@ -847,7 +847,7 @@ export function LayerPanel() {
       }
       if (results.length > 0) {
         toast.success(`Imported ${results.length} file${results.length > 1 ? "s" : ""}`, {
-          description: `${results.reduce((a, r) => a + r.featureCount, 0)} features added`,
+          description: `${results.reduce((a, r) => a + r.featureCount, 0)} editable features added to Imported files`,
         });
         const first = results[0];
         if (first) zoomTo(first.data as never);
@@ -3098,4 +3098,3 @@ function IconBtn({
     </button>
   );
 }
-
