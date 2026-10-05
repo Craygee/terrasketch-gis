@@ -56,6 +56,7 @@ import { StyleEditor } from "./StyleEditor";
 import { cn } from "@/lib/utils";
 import type { LayerSource } from "@/lib/gis/types";
 import { labelFieldsFromTemplate } from "@/lib/gis/labels";
+import { featureGeometryType } from "@/lib/gis/layerNormalization";
 
 const exportFormats: Array<{ id: ExportFormat; label: string }> = [
   { id: "geojson", label: "GeoJSON" },
@@ -2962,10 +2963,12 @@ function LayerStyleSwatch({ layer }: { layer: GisLayer }) {
   const strokePattern = (layer.style.strokePattern ?? "solid") as StrokePattern;
   const fill = layer.style.fillColor;
   const hasFill = layer.style.fillOpacity > 0;
-  const pointFeatures = layer.data.features.filter((feature) =>
-    /Point$/i.test(feature.geometry.type),
+  const features = Array.isArray(layer.data?.features) ? layer.data.features : [];
+  const usableFeatures = features.filter((feature) => featureGeometryType(feature) !== null);
+  const pointFeatures = usableFeatures.filter((feature) =>
+    /Point$/i.test(featureGeometryType(feature) ?? ""),
   );
-  const pointOnly = pointFeatures.length > 0 && pointFeatures.length === layer.data.features.length;
+  const pointOnly = pointFeatures.length > 0 && pointFeatures.length === usableFeatures.length;
   const categorizedIcon =
     layer.style.categorizedIcons?.enabled && layer.style.categorizedIcons.field
       ? layer.style.categorizedIcons.fallbackIcon

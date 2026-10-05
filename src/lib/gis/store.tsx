@@ -43,6 +43,7 @@ import { LANDDRAFT_APP_VERSION, projectVersionLabel } from "@/lib/appVersion";
 import { downloadSharedState, shareStore, type MapShare, type ShareRole } from "./sharing";
 import { DEFAULT_BASEMAP_ID } from "./basemaps";
 import { createCoreLayerGroups, ensureCoreLayerGroups } from "./projectGroups";
+import { normalizeLayerData, normalizeLayerStyle } from "./layerNormalization";
 
 export type DrawMode =
   | "none"
@@ -163,15 +164,12 @@ const normalizedLayer = (layer: GisLayer, index: number): GisLayer => {
     layer.source.kind === "remote" && layer.source.catalogId && !layer.source.requiresViewport
       ? { ...layer.source, requiresViewport: true }
       : layer.source;
-  const style = { ...defaultStyle(index), ...layer.style };
+  const style = normalizeLayerStyle(layer.style, index);
   return {
     ...layer,
+    data: normalizeLayerData(layer.data),
     source,
-    style: {
-      ...style,
-      labelFields: Array.isArray(style.labelFields) ? style.labelFields : [],
-      labelSeparator: style.labelSeparator || " · ",
-    },
+    style,
   };
 };
 
