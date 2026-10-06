@@ -843,7 +843,13 @@ export function LayerPanel() {
           name: r.name,
           data: r.data,
           groupId: "imports",
-          source: { kind: "import", fileName: r.name },
+          source: {
+            kind: "import",
+            fileName: r.name,
+            fileSizeBytes: r.fileSizeBytes,
+            featureCount: r.featureCount,
+            coordinateCount: r.coordinateCount,
+          },
         });
       }
       if (results.length > 0) {

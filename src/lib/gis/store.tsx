@@ -1791,7 +1791,17 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       return;
     }
     if (autosaveTimer.current) clearTimeout(autosaveTimer.current);
-    autosaveTimer.current = setTimeout(() => void saveProject("autosave"), 1_500);
+    const hasLargeEditableImport = state.layers.some(
+      (layer) =>
+        layer.source.kind === "import" &&
+        ((layer.source.fileSizeBytes ?? 0) >= 8 * 1024 * 1024 ||
+          (layer.source.coordinateCount ?? 0) >= 200_000 ||
+          layer.data.features.length >= 10_000),
+    );
+    autosaveTimer.current = setTimeout(
+      () => void saveProject("autosave"),
+      hasLargeEditableImport ? 10_000 : 1_500,
+    );
     return () => {
       if (autosaveTimer.current) clearTimeout(autosaveTimer.current);
     };

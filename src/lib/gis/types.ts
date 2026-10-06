@@ -80,6 +80,9 @@ export type LayerSource =
   | {
       kind: "import";
       fileName: string;
+      fileSizeBytes?: number;
+      featureCount?: number;
+      coordinateCount?: number;
       catalogId?: string;
       attribution?: string;
       sourceUrl?: string;
