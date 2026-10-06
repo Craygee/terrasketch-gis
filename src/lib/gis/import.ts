@@ -1,14 +1,24 @@
 import type { FeatureCollection } from "geojson";
+import {
+  analyzeImportComplexity,
+  assertImportFileBudget,
+  assertZipExpansionBudget,
+  type ImportComplexity,
+} from "./importBudget";
 
 export interface ImportResult {
   name: string;
   data: FeatureCollection;
   featureCount: number;
+  coordinateCount: number;
+  fileSizeBytes: number;
 }
 
 type WorkerImportKind = "geojson" | "shapefile" | "csv";
 
-type WorkerImportResponse = { ok: true; data: FeatureCollection } | { ok: false; error: string };
+type WorkerImportResponse =
+  | { ok: true; data: FeatureCollection; complexity: ImportComplexity }
+  | { ok: false; error: string };
 
 export const SUPPORTED_EXTENSIONS = [".geojson", ".json", ".kml", ".kmz", ".zip", ".gpx", ".csv"];
 
@@ -57,7 +67,9 @@ async function parseShapefileZip(file: File): Promise<FeatureCollection> {
   const shp = (await import("shpjs")).default as unknown as (
     buf: ArrayBuffer,
   ) => Promise<FeatureCollection | FeatureCollection[]>;
-  const parsed = await shp(await file.arrayBuffer());
+  const buffer = await file.arrayBuffer();
+  assertZipExpansionBudget(file.name, buffer);
+  const parsed = await shp(buffer);
   const list = Array.isArray(parsed) ? parsed : [parsed];
   const features = list.flatMap((fc) => fc.features ?? []);
   if (features.length === 0) throw new Error("Shapefile contained no features");
@@ -116,36 +128,41 @@ async function parseWithWorker(file: File, kind: WorkerImportKind) {
   } catch {
     return null;
   }
-  return new Promise<FeatureCollection>((resolve, reject) => {
-    const timeout = window.setTimeout(() => {
-      worker.terminate();
-      reject(new Error("Import processing timed out"));
-    }, 180_000);
-    const finish = () => {
-      window.clearTimeout(timeout);
-      worker.terminate();
-    };
-    worker.onmessage = (event: MessageEvent<WorkerImportResponse>) => {
-      finish();
-      if (event.data.ok) resolve(event.data.data);
-      else reject(new Error(event.data.error));
-    };
-    worker.onerror = () => {
-      finish();
-      reject(new Error("The background import processor failed"));
-    };
-    worker.postMessage({ file, kind });
-  });
+  return new Promise<{ data: FeatureCollection; complexity: ImportComplexity }>(
+    (resolve, reject) => {
+      const timeout = window.setTimeout(() => {
+        worker.terminate();
+        reject(new Error("Import processing timed out"));
+      }, 180_000);
+      const finish = () => {
+        window.clearTimeout(timeout);
+        worker.terminate();
+      };
+      worker.onmessage = (event: MessageEvent<WorkerImportResponse>) => {
+        finish();
+        if (event.data.ok) resolve({ data: event.data.data, complexity: event.data.complexity });
+        else reject(new Error(event.data.error));
+      };
+      worker.onerror = () => {
+        finish();
+        reject(new Error("The background import processor failed"));
+      };
+      worker.postMessage({ file, kind });
+    },
+  );
 }
 
 export async function importFile(file: File): Promise<ImportResult> {
+  assertImportFileBudget(file.name, file.size);
   const lower = file.name.toLowerCase();
   let data: FeatureCollection;
+  let complexity: ImportComplexity | undefined;
   const backgroundKind = workerImportKind(lower);
   const backgroundData = backgroundKind ? await parseWithWorker(file, backgroundKind) : null;
 
   if (backgroundData) {
-    data = backgroundData;
+    data = backgroundData.data;
+    complexity = backgroundData.complexity;
   } else if (lower.endsWith(".geojson") || lower.endsWith(".json")) {
     data = toCollection(JSON.parse(await file.text()));
   } else if (lower.endsWith(".kml")) {
@@ -163,7 +180,14 @@ export async function importFile(file: File): Promise<ImportResult> {
   }
 
   if (data.features.length === 0) throw new Error(`${file.name} had no features`);
-  return { name: stripExt(file.name), data, featureCount: data.features.length };
+  complexity ??= analyzeImportComplexity(file.name, data);
+  return {
+    name: stripExt(file.name),
+    data,
+    featureCount: complexity.featureCount,
+    coordinateCount: complexity.coordinateCount,
+    fileSizeBytes: file.size,
+  };
 }
 
 export async function importFiles(files: File[]): Promise<{

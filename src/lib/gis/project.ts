@@ -67,18 +67,18 @@ const bytesToHex = (bytes: Uint8Array) =>
     .join("");
 
 const compactState = (state: ProjectState): ProjectState => {
-  const compact = clone(state);
-  compact.layers = compact.layers.map((layer) => {
+  const layers = state.layers.map((layer) => {
     if (layer.source.kind !== "remote" || !layer.source.requiresViewport) return layer;
-    delete layer.source.lastRefreshedAt;
-    delete layer.source.loading;
-    delete layer.source.loadStatus;
-    delete layer.source.loadedFeatures;
-    delete layer.source.expectedFeatures;
-    delete layer.source.loadError;
-    return { ...layer, data: { type: "FeatureCollection", features: [] } };
+    const source = { ...layer.source };
+    delete source.lastRefreshedAt;
+    delete source.loading;
+    delete source.loadStatus;
+    delete source.loadedFeatures;
+    delete source.expectedFeatures;
+    delete source.loadError;
+    return { ...layer, source, data: { type: "FeatureCollection" as const, features: [] } };
   });
-  return compact;
+  return { ...state, layers };
 };
 
 const compactProject = (project: StoredProject): StoredProject => ({
@@ -143,23 +143,25 @@ interface CloudVersionRow {
 
 const projectStateBlob = async (state: ProjectState) => {
   const json = JSON.stringify(state);
-  const digest = await window.crypto.subtle.digest("SHA-256", new TextEncoder().encode(json));
-  const hash = bytesToHex(new Uint8Array(digest));
   if ("CompressionStream" in window) {
     const compressed = new Blob([json], { type: "application/json" })
       .stream()
       .pipeThrough(new CompressionStream("gzip"));
+    const blob = await new Response(compressed).blob();
+    const digest = await window.crypto.subtle.digest("SHA-256", await blob.arrayBuffer());
     return {
-      blob: await new Response(compressed).blob(),
+      blob,
       extension: "json.gz",
-      hash,
+      hash: bytesToHex(new Uint8Array(digest)),
     };
   }
+  const digest = await globalThis.crypto.subtle.digest("SHA-256", new TextEncoder().encode(json));
+  const hash = bytesToHex(new Uint8Array(digest));
   return { blob: new Blob([json], { type: "application/json" }), extension: "json", hash };
 };
 
 const uploadProjectState = async (userId: string, projectId: string, state: ProjectState) => {
-  const encoded = await projectStateBlob(compactState(state));
+  const encoded = await projectStateBlob(state);
   const path = `${userId}/${projectId}/states/${encoded.hash}.${encoded.extension}`;
   await uploadPrivateProjectFile(path, encoded.blob);
   return path;

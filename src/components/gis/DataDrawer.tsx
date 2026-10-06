@@ -55,6 +55,14 @@ const catalogLayerStyle = (entry: CatalogEntry) => {
       labelFields: ["NAME"],
       labelSize: 12,
     };
+  if (entry.id === "us-opportunity-zones")
+    return {
+      fillOpacity: 0.22,
+      strokeWidth: 1.5,
+      strokeColor: "#6b3fa0",
+      fillColor: "#8a5bb8",
+      labelEnabled: false,
+    };
   if (entry.geometry === "line") return { fillOpacity: 0, strokeWidth: 2.5 };
   return {};
 };

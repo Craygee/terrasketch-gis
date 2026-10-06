@@ -24,3 +24,15 @@ test("offers the official Census state-boundary shapefile as ready-to-add public
   assert.match(states?.downloadUrl ?? "", /cb_2025_us_state_500k\.zip$/);
   assert.equal(states?.states, "US");
 });
+
+test("offers federal Opportunity Zones as a bounded viewport service", () => {
+  const zones = catalog.find((entry) => entry.id === "us-opportunity-zones");
+
+  assert.match(zones?.agency ?? "", /Housing and Urban Development/);
+  assert.equal(zones?.category, "Demographics");
+  assert.equal(zones?.connection, "live");
+  assert.equal(zones?.requiresViewport, true);
+  assert.equal(zones?.minZoom, 7);
+  assert.match(zones?.url ?? "", /Opportunity_Zones\/FeatureServer\/13$/);
+  assert.equal(zones?.states, "US");
+});

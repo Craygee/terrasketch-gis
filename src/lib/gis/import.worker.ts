@@ -1,6 +1,11 @@
 import type { FeatureCollection } from "geojson";
 import Papa from "papaparse";
 import shp from "shpjs";
+import {
+  analyzeImportComplexity,
+  assertImportFileBudget,
+  assertZipExpansionBudget,
+} from "./importBudget";
 
 type ImportTask = { file: File; kind: "geojson" | "shapefile" | "csv" };
 
@@ -24,7 +29,9 @@ function collection(input: unknown): FeatureCollection {
 }
 
 async function parseShapefile(file: File): Promise<FeatureCollection> {
-  const parsed = await shp(await file.arrayBuffer());
+  const buffer = await file.arrayBuffer();
+  assertZipExpansionBudget(file.name, buffer);
+  const parsed = await shp(buffer);
   const lists = Array.isArray(parsed) ? parsed : [parsed];
   const features = lists.flatMap((item) => item.features ?? []);
   if (!features.length) throw new Error("Shapefile contained no features");
@@ -68,6 +75,7 @@ const scope = globalThis as unknown as {
 
 scope.onmessage = async ({ data: task }) => {
   try {
+    assertImportFileBudget(task.file.name, task.file.size);
     const data =
       task.kind === "geojson"
         ? collection(JSON.parse(await task.file.text()))
@@ -75,7 +83,8 @@ scope.onmessage = async ({ data: task }) => {
           ? await parseShapefile(task.file)
           : await parseCsv(task.file);
     if (!data.features.length) throw new Error(`${task.file.name} had no features`);
-    scope.postMessage({ ok: true, data });
+    const complexity = analyzeImportComplexity(task.file.name, data);
+    scope.postMessage({ ok: true, data, complexity });
   } catch (error) {
     scope.postMessage({
       ok: false,
