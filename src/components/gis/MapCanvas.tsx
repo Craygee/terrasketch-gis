@@ -102,9 +102,18 @@ interface EditGeometrySnapshot {
 const sourcePerformanceOptions = (layer: GisLayer, featureCount: number) => {
   if (layer.source.kind === "remote" && layer.source.requiresViewport)
     return { tolerance: 0.8, maxzoom: 17, buffer: 64, generateId: true };
-  if (featureCount >= 10_000) return { tolerance: 1.2, maxzoom: 16, buffer: 64, generateId: true };
-  if (featureCount >= 2_000) return { tolerance: 0.75, maxzoom: 17, buffer: 96, generateId: true };
+  if (featureCount >= 10_000) return { tolerance: 2.5, maxzoom: 15, buffer: 32, generateId: true };
+  if (featureCount >= 2_000) return { tolerance: 1.25, maxzoom: 16, buffer: 64, generateId: true };
   return { tolerance: 0.375, maxzoom: 18, buffer: 128, generateId: true };
+};
+
+const renderedFeatureIndex = (feature: {
+  id: string | number | undefined;
+  properties: unknown;
+}) => {
+  const generated = Number(feature.id);
+  if (Number.isInteger(generated) && generated >= 0) return generated;
+  return Number((feature.properties as Record<string, unknown> | undefined)?.["__idx"] ?? -1);
 };
 
 function renderedLayerId(styleLayerId: string): string {
@@ -353,14 +362,16 @@ export function MapCanvas() {
         nextCache.set(layer.id, cached);
         return { layer, fc: cached.fc };
       }
-      const features: Feature[] = layer.data.features.map((f, index) => ({
+      if (!labelKey.trim()) {
+        const cachedWithoutLabels = { data: layer.data, labelKey, fc: layer.data };
+        nextCache.set(layer.id, cachedWithoutLabels);
+        return { layer, fc: layer.data };
+      }
+      const features: Feature[] = layer.data.features.map((f) => ({
         ...f,
         properties: {
           ...(f.properties ?? {}),
-          __idx: index,
-          __label: layer.style.labelTemplate
-            ? composeLabel(f as never, layer.style.labelTemplate)
-            : "",
+          __label: composeLabel(f as never, layer.style.labelTemplate),
         },
       }));
       const fc = { type: "FeatureCollection", features } as FeatureCollection;
@@ -906,7 +917,7 @@ export function MapCanvas() {
         const uniqueHits = new Map<string, (typeof hits)[number]>();
         for (const candidate of hits) {
           const layerId = renderedLayerId(String(candidate.layer.id));
-          const index = Number((candidate.properties as Record<string, unknown>)?.["__idx"] ?? -1);
+          const index = renderedFeatureIndex(candidate);
           if (index >= 0 && !uniqueHits.has(`${layerId}:${index}`))
             uniqueHits.set(`${layerId}:${index}`, candidate);
         }
@@ -926,7 +937,7 @@ export function MapCanvas() {
           return;
         }
         const layerId = renderedLayerId(String(hit.layer.id));
-        const index = Number((hit.properties as Record<string, unknown>)?.["__idx"] ?? -1);
+        const index = renderedFeatureIndex(hit);
         if (index >= 0) {
           const selection = { layerId, index };
           if (additive) {
@@ -1055,7 +1066,7 @@ export function MapCanvas() {
       const unique = new Map<string, { layerId: string; index: number }>();
       for (const hit of hits) {
         const layerId = renderedLayerId(String(hit.layer.id));
-        const index = Number((hit.properties as Record<string, unknown>)?.["__idx"] ?? -1);
+        const index = renderedFeatureIndex(hit);
         if (index >= 0) unique.set(`${layerId}:${index}`, { layerId, index });
       }
       const selections = [...unique.values()];

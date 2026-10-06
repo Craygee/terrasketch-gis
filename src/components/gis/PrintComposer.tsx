@@ -330,19 +330,18 @@ export function PrintComposer() {
     for (const layer of [...includedLayers].reverse()) {
       const printLayer: GisLayer = { ...layer, id: `print-${layer.id}` };
       const sid = sourceId(printLayer.id);
-      const data: FeatureCollection = {
-        type: "FeatureCollection",
-        features: layer.data.features.map((feature, index) => ({
-          ...feature,
-          properties: {
-            ...(feature.properties ?? {}),
-            __idx: index,
-            __label: layer.style.labelTemplate
-              ? composeLabel(feature as never, layer.style.labelTemplate)
-              : "",
-          },
-        })) as Feature[],
-      };
+      const data: FeatureCollection = layer.style.labelTemplate.trim()
+        ? {
+            type: "FeatureCollection",
+            features: layer.data.features.map((feature) => ({
+              ...feature,
+              properties: {
+                ...(feature.properties ?? {}),
+                __label: composeLabel(feature as never, layer.style.labelTemplate),
+              },
+            })) as Feature[],
+          }
+        : layer.data;
       const source = map.getSource(sid);
       if (layer.source.kind === "image") {
         if (source) (source as ImageSource).setCoordinates(layer.source.coordinates);

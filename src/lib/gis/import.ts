@@ -6,6 +6,10 @@ export interface ImportResult {
   featureCount: number;
 }
 
+type WorkerImportKind = "geojson" | "shapefile" | "csv";
+
+type WorkerImportResponse = { ok: true; data: FeatureCollection } | { ok: false; error: string };
+
 export const SUPPORTED_EXTENSIONS = [".geojson", ".json", ".kml", ".kmz", ".zip", ".gpx", ".csv"];
 
 const stripExt = (name: string) => name.replace(/\.[^.]+$/, "");
@@ -96,11 +100,53 @@ async function parseCsv(file: File): Promise<FeatureCollection> {
   return { type: "FeatureCollection", features };
 }
 
+function workerImportKind(fileName: string): WorkerImportKind | null {
+  if (fileName.endsWith(".geojson") || fileName.endsWith(".json")) return "geojson";
+  if (fileName.endsWith(".zip")) return "shapefile";
+  if (fileName.endsWith(".csv")) return "csv";
+  return null;
+}
+
+/** Keep large JSON, CSV, and zipped-shapefile parsing off the UI thread. */
+async function parseWithWorker(file: File, kind: WorkerImportKind) {
+  if (typeof Worker === "undefined") return null;
+  let worker: Worker;
+  try {
+    worker = new Worker(new URL("./import.worker.ts", import.meta.url), { type: "module" });
+  } catch {
+    return null;
+  }
+  return new Promise<FeatureCollection>((resolve, reject) => {
+    const timeout = window.setTimeout(() => {
+      worker.terminate();
+      reject(new Error("Import processing timed out"));
+    }, 180_000);
+    const finish = () => {
+      window.clearTimeout(timeout);
+      worker.terminate();
+    };
+    worker.onmessage = (event: MessageEvent<WorkerImportResponse>) => {
+      finish();
+      if (event.data.ok) resolve(event.data.data);
+      else reject(new Error(event.data.error));
+    };
+    worker.onerror = () => {
+      finish();
+      reject(new Error("The background import processor failed"));
+    };
+    worker.postMessage({ file, kind });
+  });
+}
+
 export async function importFile(file: File): Promise<ImportResult> {
   const lower = file.name.toLowerCase();
   let data: FeatureCollection;
+  const backgroundKind = workerImportKind(lower);
+  const backgroundData = backgroundKind ? await parseWithWorker(file, backgroundKind) : null;
 
-  if (lower.endsWith(".geojson") || lower.endsWith(".json")) {
+  if (backgroundData) {
+    data = backgroundData;
+  } else if (lower.endsWith(".geojson") || lower.endsWith(".json")) {
     data = toCollection(JSON.parse(await file.text()));
   } else if (lower.endsWith(".kml")) {
     data = await parseXmlBased(await file.text(), "kml");
